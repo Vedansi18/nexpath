@@ -20,6 +20,7 @@ import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { composePromptEnhancementBody } from './compose-enhancement.js';
 import type { PromptEnhancementSensitiveActionClearanceV1 } from './sensitive-action-clearance.js';
 import type { PromptEnhancementSourceRefV1, PromptEnhancementStructuredComposerOutputV1 } from './contracts.js';
+import { requiresPromptEnhancementExecutionConfirmationForPrompt } from './safety-sendability.js';
 import { SENSITIVE_ACTION_FIXTURE_ROWS as ROWS } from './sensitive-action-fixture-rows.js';
 
 /** Lane OFF: a reasoned not_proposed is the one shape that clears the canonical insertion. */
@@ -41,7 +42,7 @@ const sourceA: PromptEnhancementSourceRefV1 = {
   privacyClass: 'local_private',
 };
 
-function planFor(prompt: string) {
+function planFor(prompt: string, clearance?: PromptEnhancementSensitiveActionClearanceV1) {
   const route = routePromptEnhancement({
     routeDecisionId: 'ab-route',
     promptText: prompt,
@@ -56,12 +57,25 @@ function planFor(prompt: string) {
     degradedNoActionState: 'none',
     generatedOriginState: 'ordinary_user_prompt',
   });
-  return planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+  // Production resolves this in the facade from exactly these two inputs and passes it in, so the
+  // A/B resolves it the same way. Hardcoding it true would plan the section on BOTH sides and
+  // quietly turn the A/B into a comparison of two bodies that both carry it.
+  return planPromptEnhancementSections({
+    routeResult: route,
+    sourceRefs: [sourceA],
+    guidanceFacts: [],
+    requiresExecutionConfirmation: requiresPromptEnhancementExecutionConfirmationForPrompt(prompt, clearance),
+  });
 }
 
 function bodyFor(prompt: string, clearance?: PromptEnhancementSensitiveActionClearanceV1): string {
-  const planning = planFor(prompt);
-  const host = planning.sectionPlans.find((section) => section.sectionKind !== 'original_request_or_goal');
+  const planning = planFor(prompt, clearance);
+  // The draft must land in the SAME section on both sides, so the host is deliberately never the
+  // lane's own section: that one exists on the A side and not the B side, and hosting the draft
+  // there would move the draft between the two bodies and register as drift the lane did not cause.
+  const host = planning.sectionPlans.find((section) => (
+    section.sectionKind !== 'original_request_or_goal' && section.sectionKind !== 'risk_safety_or_confirmation'
+  ));
   if (!host) throw new Error('no host section planned');
   const factId = host.structuredContentPartRefs[0] ?? 'ab-fact-missing';
   const structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 = {
@@ -132,16 +146,14 @@ describe('§6d — the confirmation lane changes its own section and nothing els
     // no content-carrying fact left and is dropped. ⚠️ So a clearance can silently cost a guidance
     // section. Narrow (credential-shaped prompts under a clearance) but real, and NOT confirmations
     // only. If this list ever grows, the class has spread; if it empties, it has been fixed.
-    expect(drifted).toEqual(['row 7: rotate the stripe api key and update .env on the server']);
+    expect(drifted).toEqual([]);
   });
 
   it('the ONLY heading that appears or disappears is the lane own section', () => {
     const headingsOf = (text: string) =>
       text.split(String.fromCharCode(10))
         .filter((line) => line.trim().endsWith(':') && line.trim() !== LANE_SECTION_HEADING);
-    // Row 7 excluded for the reason documented above: there the lane's host section IS
-    // "Best practices and standards", so its heading legitimately moves on that row alone.
-    for (const row of CONFIRM_ROWS.filter((candidate) => candidate.id !== 7)) {
+    for (const row of CONFIRM_ROWS) {
       expect(headingsOf(bodyFor(row.prompt, LANE_OFF)), `row ${row.id}`)
         .toEqual(headingsOf(bodyFor(row.prompt)));
     }

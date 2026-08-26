@@ -430,6 +430,27 @@ export interface PromptEnhancementSectionPlanningInput {
   routeResult: PromptEnhancementRouteResult;
   sourceRefs: readonly PromptEnhancementSourceRefV1[];
   guidanceFacts?: readonly PromptEnhancementGuidanceFact[];
+  /**
+   * The prompt needs the go-ahead clause, so the confirmation gets a section of its OWN.
+   *
+   * 🔒 Owner-ruled (2026-08-26). `source_signal_guidance` is guaranteed to appear by a different
+   * sub-milestone — if it cannot be injected the popup is cancelled outright — and its content is a
+   * later sub-milestone's subject. It is NOT a home for the confirmation clause, and in most
+   * scenarios it is the wrong home entirely.
+   *
+   * 🔴 MEASURED (§6d A/B, row 7: "rotate the stripe api key and update .env on the server"). The
+   * `issue_debug.environment_config_issue` preset attaches no `capability.confirmation_needed` and
+   * lists `risk_safety_or_confirmation` in no section list, so nothing carried the confirmation
+   * flag. The composer's host ladder then fell to its last rung — "the last non-original section" —
+   * and that section was `source_signal_guidance`. Two things went wrong at once: the clause landed
+   * somewhere it does not belong, and clearing the clause took the whole guidance section with it,
+   * because the section had no content-carrying fact of its own once the confirmation fact went.
+   *
+   * ⚠️ A boolean rather than the prompt text on purpose: the caller already resolves this, and
+   * importing the safety module here would close an import cycle this layer has been kept out of.
+   * Absent means today's behaviour, so no existing caller changes.
+   */
+  requiresExecutionConfirmation?: boolean;
 }
 
 export interface PromptEnhancementSectionPlanningResult {
@@ -714,6 +735,12 @@ export function planPromptEnhancementSections(
       .filter(isString)
       .filter((kind) => kind !== 'project_grounding_facts' || hasGroundingFact),
     ...groundedFacts.map(sectionKindForFact),
+    // The confirmation's own section, when the prompt needs one and the preset lists it nowhere.
+    // LAST on purpose, and it matters twice over. `orderedUnique` keeps the first occurrence, so a
+    // preset that already places this kind keeps its own position and nothing is reordered — this
+    // only ever ADDS a home that was missing. And where it is added, a risk section belongs near
+    // the end of a body, which is where every preset that plans one puts it.
+    ...(input.requiresExecutionConfirmation === true ? ['risk_safety_or_confirmation'] : []),
   ]);
 
   if (route.noPopup) {

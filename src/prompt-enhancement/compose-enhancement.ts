@@ -39,6 +39,7 @@ import {
   withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
+import { promptHistorySensitiveActionFactPresentV1 } from './prompt-history-signals.js';
 import {
   isPromptEnhancementTypedSensitiveActionVerdictV1,
   type PromptEnhancementSensitiveActionClearanceV1,
@@ -366,8 +367,16 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     input.originalPromptText,
     resolvePromptEnhancementSensitiveActionNamingV1(input.originalPromptText, input.typedSensitiveActionVerdict),
   );
+  // The THIRD way a body earns the clause, beside the current prompt's own words and a typed
+  // verdict: the recent-history lane fired. Hiren's 2026-08-20 ruling — a developer who said
+  // "deploy to production" in earlier prompts must still be asked, even when today's prompt is
+  // about something harmless. Reads the planned facts rather than taking new plumbing, because the
+  // fact is already here and a second channel could disagree with the first.
+  const historySensitiveActionFired =
+    promptHistorySensitiveActionFactPresentV1(input.sectionPlanningResult.renderedFacts);
   const canonicalConfirmationSectionId = (requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText, input.sensitiveActionClearance)
-    || isPromptEnhancementTypedSensitiveActionVerdictV1(input.typedSensitiveActionVerdict))
+    || isPromptEnhancementTypedSensitiveActionVerdictV1(input.typedSensitiveActionVerdict)
+    || historySensitiveActionFired)
     ? sectionPlans.find((sectionPlan) => (
       sectionPlan.sectionKind === 'risk_safety_or_confirmation' &&
       sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
@@ -376,8 +385,18 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.sectionKind !== 'original_request_or_goal' &&
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
+      // 🔒 Owner-ruled (2026-08-26): NEVER `source_signal_guidance`. Planning now gives the
+      // confirmation its own `risk_safety_or_confirmation` section, so rung 1 answers on the path
+      // that measured wrong (§6d A/B row 7). This last rung stays as the floor under that, and its
+      // one exclusion is the guidance section: it is guaranteed present by a different
+      // sub-milestone — if it cannot be injected the popup is cancelled — and its content belongs
+      // to a later one. Hosting the clause there put it somewhere it does not belong AND coupled
+      // the guidance section's survival to the confirmation, so clearing the clause deleted the
+      // guidance too. Being last, this rung had been picking whatever section happened to sort
+      // last, which on the config-issue preset was exactly that one.
       ?? [...sectionPlans].reverse().find((sectionPlan) => (
-        sectionPlan.sectionKind !== 'original_request_or_goal'
+        sectionPlan.sectionKind !== 'original_request_or_goal' &&
+        sectionPlan.sectionKind !== 'source_signal_guidance'
       ))?.sectionId
     : undefined;
   // Owner ruling 2026-08-14: when the composer RAN and a section's draft did not survive validation,

@@ -39,8 +39,11 @@ import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } f
 import { buildPromptEnhancementHandoffMetadataV1, validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import {
   validatePromptEnhancementSafety,
+  requiresPromptEnhancementExecutionConfirmationForPrompt,
   type PromptEnhancementSafetyValidationResult,
 } from './safety-sendability.js';
+import { isPromptEnhancementTypedSensitiveActionVerdictV1 } from './sensitive-action-clearance.js';
+import { promptHistorySensitiveActionFactPresentV1 } from './prompt-history-signals.js';
 import {
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
@@ -268,10 +271,24 @@ async function prepare(
     ? { actionLabel: 'credential exposure' }
     : undefined;
 
+  // 🔒 Owner-ruled (2026-08-26): the confirmation gets its OWN section rather than borrowing the
+  // last one planned. Resolved here because this is where both halves of the decision already sit,
+  // and the same two predicates the composer uses to pick a host decide it, so the two cannot
+  // disagree about whether a body needs the clause.
+  const requiresExecutionConfirmation =
+    requiresPromptEnhancementExecutionConfirmationForPrompt(
+      request.sourcePrompt.text,
+      request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance,
+    )
+    || isPromptEnhancementTypedSensitiveActionVerdictV1(typedSensitiveActionVerdict)
+    // The history lane needs a section to land in for the same reason the other two do.
+    || promptHistorySensitiveActionFactPresentV1(sourceMix.renderedFacts);
+
   const plannedSections = planPromptEnhancementSections({
     routeResult: route,
     sourceRefs: request.sourceSignals.sourceRefs,
     guidanceFacts: sourceMix.renderedFacts,
+    requiresExecutionConfirmation,
   });
 
   // E4: bounded LLM composer wording for a shown popup on the baseline compose (no

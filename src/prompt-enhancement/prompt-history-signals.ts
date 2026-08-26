@@ -138,3 +138,27 @@ export function promptHistorySafeguardSentenceV1(): string {
 export function promptHistorySensitiveActionObservationV1(): string {
   return 'something you raised in recent prompts';
 }
+
+/** The ref namespace this lane's facts are filed under; the one place it is spelled. */
+export const PROMPT_HISTORY_SENSITIVE_ACTION_REF_PREFIX_V1 = 'history_sensitive_action:';
+
+/**
+ * Did the recent-history lane fire? — the question the CONFIRMATION path has to ask.
+ *
+ * 🔒 Hiren's 2026-08-20 ruling is what this preserves: *"a developer could say 'deploy to
+ * production' three prompts running and the enhanced prompt would never ask the agent to check
+ * first."* The current prompt can be entirely benign and the clause must still appear, so the
+ * prompt-text predicate alone cannot decide it — history is the whole point of the lane.
+ *
+ * 🔴 Caught by `prompt-history-signals.integration.test.ts` when the safeguard sentence stopped
+ * being this lane's fact VALUE. That value was the only way the lane reached a body, so removing
+ * it from the value silently removed the capability with it. The instruction now travels the same
+ * code-inserted channel every other confirmation uses — where it is stated once, in full, and
+ * names its category — and this predicate is how that channel learns the lane fired.
+ */
+export function promptHistorySensitiveActionFactPresentV1(
+  facts: readonly { readonly sourceIds: readonly string[] }[],
+): boolean {
+  return facts.some((fact) =>
+    fact.sourceIds.some((sourceId) => sourceId.startsWith(PROMPT_HISTORY_SENSITIVE_ACTION_REF_PREFIX_V1)));
+}
