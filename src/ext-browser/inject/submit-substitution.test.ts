@@ -122,13 +122,12 @@ describe('rewriteBodyForAgent — the per-site seam', () => {
     withBodyRewrite(() => { expect(rewriteBodyForAgent('bolt', bolt, '')).toBeNull(); });
   });
 
-  it('only body_rewrite sites are rewritten — the shipped table gates nothing here', () => {
-    // Both sites moved to composer_intercept on live evidence, so the rewriter
-    // refuses them by default. The rewriter itself stays fully tested via the
-    // explicit flip below, because it is still the correct mechanism for any
-    // future site that neither renders optimistically nor times out.
+  it('BOLT is refused — it is on the composer mechanism (live evidence: optimistic bubble + 30s timeout)', () => {
     expect(rewriteBodyForAgent('bolt', bolt, NEW)).toBeNull();
-    expect(rewriteBodyForAgent('lovable', lovable, NEW)).toBeNull();
+  });
+
+  it('LOVABLE is rewritten — its recon showed no bubble at submit, so one request is cleaner', () => {
+    expect(extractLovableMessage(rewriteBodyForAgent('lovable', lovable, NEW)!)).toBe(NEW);
   });
 
   it('rewrites correctly for a site explicitly set to body_rewrite', () => {
@@ -141,16 +140,18 @@ describe('rewriteBodyForAgent — the per-site seam', () => {
     }
   });
 
-  it('the shipped strategy table is composer_intercept for both sites (live-evidence decision)', () => {
+  it('the shipped strategy table records each site\'s live-evidence decision', () => {
     expect(SITE_SUBSTITUTION_STRATEGY).toEqual({
-      bolt: 'composer_intercept', lovable: 'composer_intercept',
+      bolt: 'composer_intercept', lovable: 'body_rewrite',
     });
   });
 
-  it('fetchGateOwnsSite is false for every shipped site — the composer owns them', () => {
-    expect(fetchGateOwnsSite('bolt')).toBe(false);
-    expect(fetchGateOwnsSite('lovable')).toBe(false);
-    expect(fetchGateOwnsSite('replit')).toBe(false);
+  it('EXACTLY ONE gate owns each site — never both, never neither by accident', () => {
+    // fetchGateOwnsSite is the single source of truth: the page's fetch patch
+    // gates a site iff this is true, and the composer gate stands down iff it is.
+    expect(fetchGateOwnsSite('lovable')).toBe(true);   // fetch rewrites Lovable
+    expect(fetchGateOwnsSite('bolt')).toBe(false);     // composer gates Bolt
+    expect(fetchGateOwnsSite('replit')).toBe(false);   // composer gates Replit (no fetch transport)
     expect(fetchGateOwnsSite('unknown')).toBe(false);
   });
 });

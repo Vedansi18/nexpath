@@ -34,12 +34,24 @@ export type SubstitutionStrategy = 'body_rewrite' | 'composer_intercept';
 /**
  * Which mechanism delivers the replacement, per site.
  *
- * **Both sites are `composer_intercept` as of 2026-08-26, on live evidence.**
- * The body-rewrite path below is complete, tested, and kept — it is the correct
- * mechanism for any future site that neither renders optimistically nor imposes
- * a client-side chat timeout. Bolt does both, which is why it moved; Lovable
- * moved with it so all three sites share one proven mechanism rather than two,
- * and because Lovable's own success-path render was never actually verified.
+ * `body_rewrite` is the BETTER mechanism where a site supports it: one request,
+ * no DOM manipulation, no visible re-paste, and the agent's backend never sees
+ * the original at all. It is used wherever the evidence allows.
+ *
+ * **Bolt: `composer_intercept`** — forced by live evidence. Bolt paints the user's
+ * bubble optimistically at submit and abandons a chat after 30 s, so rewriting the
+ * body leaves the original on screen and the hold trips the timeout.
+ *
+ * **Lovable: `body_rewrite`** — its live recon showed the opposite behaviour:
+ * the request holds cleanly, the app shows its normal busy state, and NO user
+ * bubble is painted at submit, so a rewrite creates no mismatch. `message` is the
+ * single field to change.
+ *
+ * ONE LEG OF LOVABLE IS STILL UNPROVEN: which text it renders as the user bubble
+ * once the response ARRIVES (the recon's released request came back HTTP 402, so
+ * the server never answered). If a live block on Lovable shows the ORIGINAL text
+ * in the transcript, flip Lovable to 'composer_intercept' here — one line, and the
+ * gate follows automatically.
  *
  * A site listed as `body_rewrite` is gated in the page's fetch patch. A site
  * listed as `composer_intercept` is gated in the capture-phase composer listener
@@ -48,7 +60,7 @@ export type SubstitutionStrategy = 'body_rewrite' | 'composer_intercept';
  */
 export const SITE_SUBSTITUTION_STRATEGY: Record<string, SubstitutionStrategy> = {
   bolt: 'composer_intercept',
-  lovable: 'composer_intercept',
+  lovable: 'body_rewrite',
 };
 
 /** True when the page's fetch patch owns this site's gating. */

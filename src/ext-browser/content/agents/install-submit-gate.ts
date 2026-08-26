@@ -18,6 +18,7 @@ import { resolveSubmitFlow, submitFlowStorageKeys } from '../../adapters/submit-
 import { createComposerSubmitGate, type ComposerDecision } from '../composer-submit-gate.js';
 import { setComposerSubmitInterceptor } from './capture-kit.js';
 import { resolveProjectRootFromLocation } from './agent-hosts.js';
+import { fetchGateOwnsSite } from '../../inject/submit-substitution.js';
 
 export interface InstallSubmitGateOptions {
   agent: string;
@@ -69,7 +70,10 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
   setComposerSubmitInterceptor((ev, prompt, input, composer) => {
     gate ??= createComposerSubmitGate({
       agent: opts.agent,
-      isArmed: () => armed,
+      // Two conditions. The second is what keeps the two mechanisms from ever
+      // both owning a submission: where the page's fetch patch does the
+      // rewriting (Lovable), this gate stands down completely.
+      isArmed: () => armed && !fetchGateOwnsSite(opts.agent),
       emit: (event, data) => {
         sendToSw({ type: 'nexpath:submit-flow-event', site: opts.agent, event, data: data ?? {} });
       },

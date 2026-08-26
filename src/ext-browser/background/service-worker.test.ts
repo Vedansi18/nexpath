@@ -2002,6 +2002,64 @@ describe('service-worker.ts', () => {
       });
     });
 
+    describe('RC43 — the post-hold quiet window', () => {
+      it('drops a response-stop that arrives while this project\'s submit is being decided', async () => {
+        let resolvePopup: (v: unknown) => void = () => {};
+        vi.mocked(runBrowserPePopup).mockReturnValue(new Promise((r) => { resolvePopup = r; }) as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        // The site's completion observers fire while we still hold the submit —
+        // that stop is our own echo, not a turn ending.
+        messageListener(
+          { type: 'nexpath:response-stop', projectRoot: P, agent: 'bolt', tabId: 0 },
+          { tab: { id: 7 } }, vi.fn(),
+        );
+        await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith(
+          'response_stop_quiet_window', { projectRoot: P }));
+
+        resolvePopup({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+      });
+
+      it('a stop for a DIFFERENT project is unaffected', async () => {
+        let resolvePopup: (v: unknown) => void = () => {};
+        vi.mocked(runBrowserPePopup).mockReturnValue(new Promise((r) => { resolvePopup = r; }) as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        messageListener(
+          { type: 'nexpath:response-stop', projectRoot: 'https://bolt.new/~/other', agent: 'bolt', tabId: 0 },
+          { tab: { id: 7 } }, vi.fn(),
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        expect(logDebugMock).not.toHaveBeenCalledWith(
+          'response_stop_quiet_window', { projectRoot: 'https://bolt.new/~/other' });
+
+        resolvePopup({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+      });
+
+      it('the window only DELAYS a stop — the pending rows are never consumed by it', async () => {
+        let resolvePopup: (v: unknown) => void = () => {};
+        vi.mocked(runBrowserPePopup).mockReturnValue(new Promise((r) => { resolvePopup = r; }) as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+        const setCallsBefore = keyStoreSetKey.mock.calls.length;
+
+        messageListener(
+          { type: 'nexpath:response-stop', projectRoot: P, agent: 'bolt', tabId: 0 },
+          { tab: { id: 7 } }, vi.fn(),
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        // A suppressed stop writes nothing at all.
+        expect(keyStoreSetKey.mock.calls.length).toBe(setCallsBefore);
+
+        resolvePopup({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+      });
+    });
+
     describe('THIS PATH NEVER INJECTS (injecting as well as substituting = two prompts)', () => {
       it('a block does not send nexpath:pe-inject to the tab', async () => {
         vi.mocked(runBrowserPePopup).mockResolvedValue({

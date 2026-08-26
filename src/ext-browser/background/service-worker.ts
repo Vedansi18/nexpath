@@ -208,13 +208,18 @@ browser.runtime.onMessage.addListener(
       log.debug('submit_decision_requested', {
         site: msg.site, submitId: msg.submitId, projectRoot: msg.projectRoot,
       });
+      // RC43: from here until shortly after the verdict, this project's
+      // response-stop signal is our own echo, not a real turn ending.
+      beginHoldQuietWindow(msg.projectRoot);
       decideHeldSubmit(msg, sender.tab?.id)
         .then((decision) => {
           log.debug('submit_decision_answered', { submitId: msg.submitId, kind: decision.kind });
+          endHoldQuietWindow(msg.projectRoot);
           sendResponse({ decision });
         })
         .catch((err: unknown) => {
           log.warn('submit_decision_failed', { submitId: msg.submitId, error: String(err) });
+          endHoldQuietWindow(msg.projectRoot);
           sendResponse({ decision: { kind: 'allow' } });
         });
       return true; // keep the channel open for the async answer
@@ -551,6 +556,43 @@ type HeldSubmitDecision = { kind: 'allow' } | { kind: 'block'; replacement: stri
  * expired hold is recorded here, the popup is torn down, and any verdict that
  * arrives afterwards is discarded.
  */
+/**
+ * RC43 — the post-hold quiet window.
+ *
+ * A site's "response finished" signal echoes our own actions within seconds: we
+ * cancel a submit, or substitute one, and the DOM churns in ways the completion
+ * observers can read as a turn ending. If `handleResponseStop` runs during that
+ * churn it consumes rows that belong to a turn still being decided, and the
+ * popup for that turn silently never appears.
+ *
+ * So while a submit is being held — and briefly after it resolves — response-stop
+ * processing for that project is suppressed. This is narrow on purpose: it is
+ * keyed per project, it is short, and it can only ever DELAY a stop, never
+ * cancel a real one, because the pending rows survive until something consumes
+ * them.
+ */
+const RESPONSE_STOP_QUIET_MS = 4_000;
+const responseStopQuietUntil = new Map<string, number>();
+
+function beginHoldQuietWindow(projectRoot: string): void {
+  // Far enough ahead to cover the whole hold; refreshed as it resolves.
+  responseStopQuietUntil.set(projectRoot, clock.now() + MAX_HOLD_BUDGET_QUIET_MS);
+}
+
+function endHoldQuietWindow(projectRoot: string): void {
+  responseStopQuietUntil.set(projectRoot, clock.now() + RESPONSE_STOP_QUIET_MS);
+}
+
+function isResponseStopQuiet(projectRoot: string): boolean {
+  const until = responseStopQuietUntil.get(projectRoot);
+  if (until === undefined) return false;
+  if (clock.now() >= until) { responseStopQuietUntil.delete(projectRoot); return false; }
+  return true;
+}
+
+/** Ceiling for the quiet window while a hold is open — the hold's own maximum. */
+const MAX_HOLD_BUDGET_QUIET_MS = 95_000;
+
 const abandonedSubmits = new Set<string>();
 const ABANDONED_SUBMITS_CAP = 50;
 
@@ -1326,6 +1368,13 @@ const ADVISORY_LEGACY_SURFACE_KEY = 'nexpath_advisory_legacy_surface';
  * can never stack.
  */
 async function handleResponseStop(projectRoot: string, tabId: number | undefined): Promise<void> {
+  // RC43: a stop arriving while this project's submit is still being decided is
+  // our own echo. Dropping it here is safe — the pending rows are untouched, so
+  // the real stop that follows still finds them.
+  if (isResponseStopQuiet(projectRoot)) {
+    log.debug('response_stop_quiet_window', { projectRoot });
+    return;
+  }
   let legacySurface = false;
   try {
     legacySurface = (await keyStore.getKey(ADVISORY_LEGACY_SURFACE_KEY)) === 'enabled';
