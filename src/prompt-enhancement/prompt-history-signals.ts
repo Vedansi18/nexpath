@@ -101,7 +101,40 @@ const GENERIC_SENSITIVE_ACTION_NAMING_V1 = 'sensitive action';
  * surface keeps its own sentence byte-identical — rewording the shared builder would have
  * changed decision-session option desc-bases outside this lane's scope. The two sentences being
  * different strings is a checked property, not an accident.
+ *
+ * ⛔ NOT the fact VALUE — see `promptHistorySensitiveActionObservationV1` below. It was, and a
+ * measured body showed why that could not stand.
  */
 export function promptHistorySafeguardSentenceV1(): string {
   return `Still, before you do this ${GENERIC_SENSITIVE_ACTION_NAMING_V1} you must ask me for go-ahead confirmation, and before you ask, confirm the actual state at ground level by reading the real source. Do not assume, and do not rely on what you did earlier in this session.`;
+}
+
+/**
+ * What the `history_sensitive_action:` fact STATES — an observation, never an instruction.
+ *
+ * 🔴 Measured on a real body (sim-s12, P38): the safeguard SENTENCE was this fact's value, and the
+ * renderer's possibility clamp wrapped it into
+ *   "deployment appears to be Still, before you do this sensitive action you must ask me for
+ *    go-ahead confirmation … (from a recent project check) — confirm before relying on it."
+ * Two separate failures in one line. It is ungrammatical, because the value slot is a STATE
+ * ("22", "postgres") and an imperative sentence cannot stand where a state belongs. And it is
+ * semantically inverted: a mandatory "you must ask me" arrives wrapped in "confirm before relying
+ * on it", which demotes the one instruction this sub-milestone exists to deliver. The body also
+ * carried the correct code-inserted clause three lines below — NAMING the real category rather
+ * than the generic one — so the mangled copy was pure duplication of something already said
+ * better.
+ *
+ * The instruction has its own channel and keeps it. What belongs here is only what the detector
+ * actually knows, which this module already states plainly above: a category was MENTIONED in
+ * recent prompts, never that the developer does it as a practice. Under the possibility clamp that
+ * reads "<category> appears to be something you raised in recent prompts … — confirm before
+ * relying on it", where the clamp is now doing its real job: the detector is uncorroborated, so
+ * "do not rely on my having spotted this" is exactly the right hedge to attach.
+ *
+ * ⚠️ The fact keeps a value rather than dropping to none deliberately: its `safety_sensitive_source`
+ * hook is what makes `risk_safety_or_confirmation` floor material, and a stated observation keeps
+ * the section saying something of its own beside the standing instruction.
+ */
+export function promptHistorySensitiveActionObservationV1(): string {
+  return 'something you raised in recent prompts';
 }

@@ -89,7 +89,7 @@ import {
   PROMPT_HISTORY_EXPECTATION_WINDOW_V1,
 } from '../../prompt-enhancement/prompt-history-expectation-signals.js';
 import {
-  promptHistorySafeguardSentenceV1,
+  promptHistorySensitiveActionObservationV1,
   promptHistorySensitiveActionSignalsV1,
   PROMPT_HISTORY_SIGNAL_WINDOW_V1,
 } from '../../prompt-enhancement/prompt-history-signals.js';
@@ -385,7 +385,10 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       groundingPolarityByRef[ref] = 'present';
       groundingEvidenceByRef[ref] = {
         key: signal.category,
-        value: promptHistorySafeguardSentenceV1(),
+        // ⛔ The OBSERVATION, not the safeguard sentence. The instruction reaches the body on its
+        // own channel, naming the real category; putting it here too produced a clamped, inverted
+        // duplicate. See `promptHistorySensitiveActionObservationV1`.
+        value: promptHistorySensitiveActionObservationV1(),
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
       };
