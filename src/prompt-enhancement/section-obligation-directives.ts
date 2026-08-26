@@ -34,8 +34,24 @@ export const SLOT_OBLIGATION_DIRECTIVES_V1: Readonly<Record<PromptEnhancementSlo
   // risk section's own job, and a rule that silenced them would trade an irritation for a safety
   // gap. Sequencing and verifying the developer's OWN ask stay welcome for the same reason: they
   // are the craft the band was never meant to catch.
+  //
+  // 🔴 The work half is ON TRIAL (2026-08-26) — it is NOT yet settled wording.
+  //
+  // It first shipped as a prohibition LIST: *"no extra approvals, sign-offs, feedback rounds, user
+  // testing, documentation or logging steps"*. That bit hard — MID fell 0.875 → 0.50 per body — and
+  // then leaked itself into a shipped body: *"I'll ensure none of the work adds any unnecessary
+  // approvals, sign-offs, or documentation steps."* The model repeated the list back to the
+  // developer, who then reads a note about an engine rule instead of guidance about her own work.
+  // ⚠️ Roughly one run in three: s12 run 1 and s20 were clean, s12 run 2 on identical code was not.
+  //
+  // The first sentence has never leaked, and the difference is grammar rather than content: it
+  // states a positive rule and enumerates nothing, so there is no list to echo. The work half now
+  // matches that shape.
+  //
+  // ⛔ Do NOT repair a leak by adding *"and never mention this rule"*. That is one more instruction
+  // about the instruction, and it echoes the same way.
   no_invention_state:
-    'Hard rule: name only tools, libraries, services, files, APIs or project facts that appear in the original request or in an allowed source fact. If the evidence is missing, ask for it — never supply an example name. Same rule for WORK: never add tasks they did not ask for — no extra approvals, sign-offs, feedback rounds, user testing, documentation or logging steps. Sequencing, verifying, and naming rollback or recovery for risky work is welcome.',
+    'Hard rule: name only tools, libraries, services, files, APIs or project facts that appear in the original request or in an allowed source fact. If the evidence is missing, ask for it — never supply an example name. Same rule for WORK: every task in the body must be one they asked for, or a direct step toward it.',
   behavior_lock:
     'State exactly what must keep working unchanged after the change.',
   baseline_current_output_proof:

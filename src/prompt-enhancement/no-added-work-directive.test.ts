@@ -27,21 +27,27 @@ describe('no_invention_state covers work, not only names', () => {
     expect(directive).toContain('never supply an example name');
   });
 
-  it('names the added-work classes the measurement actually found', () => {
-    // Each of these was a real MID line's shape, not a hypothetical.
-    for (const banned of ['feedback rounds', 'user testing', 'documentation', 'logging', 'approvals', 'sign-offs']) {
-      expect(directive, `missing: ${banned}`).toContain(banned);
-    }
-    expect(directive).toContain('never add tasks they did not ask for');
+  it('states the work rule POSITIVELY, with nothing to echo', () => {
+    // 🔴 The shape is the fix. The first version enumerated the banned work — "no extra approvals,
+    // sign-offs, feedback rounds, user testing, documentation or logging steps" — and a model
+    // repeated that list into a shipped body. A positive rule gives it nothing to repeat.
+    expect(directive).toContain('every task in the body must be one they asked for');
+    expect(directive).toContain('or a direct step toward it');
   });
 
-  it('does NOT suppress rollback, recovery, sequencing or verification', () => {
-    // The carve-out is the point: three of Hiren's ruled-welcome classes must survive the rule.
-    // A regression here would be worse than the irritation it was written to remove.
-    expect(directive).toContain('rollback or recovery');
-    expect(directive).toContain('Sequencing, verifying');
-    for (const allowed of ['rollback', 'recovery', 'Sequencing', 'verifying']) {
-      expect(directive).not.toContain(`no extra ${allowed}`);
+  it('enumerates NO banned work — the list is what leaked', () => {
+    for (const listed of ['sign-offs', 'feedback rounds', 'user testing', 'documentation or logging']) {
+      expect(directive, 'still enumerates: ' + listed).not.toContain(listed);
+    }
+  });
+
+  it('and says nothing that forbids rollback, recovery or verification', () => {
+    // The carve-out no longer needs naming: a rule that only requires tasks to be REQUESTED cannot
+    // forbid rollback on a deploy, because a deploy prompt asks for the deploy and rollback is a
+    // direct step toward doing it safely. Hiren's split on the P38 line — backup stays, the
+    // documentation goes — falls out of the positive rule rather than being listed beside it.
+    for (const allowed of ['rollback', 'recovery', 'verifying', 'sequencing']) {
+      expect(directive.toLowerCase()).not.toContain('no ' + allowed);
     }
   });
 });
