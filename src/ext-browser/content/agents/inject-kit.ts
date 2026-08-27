@@ -326,6 +326,34 @@ function requestMainWorldInject(
 /** How long the synthetic Enter gets to clear the composer before the button
  * fallback fires. Agents clear their composer immediately on a real send. */
 const SUBMIT_SETTLE_MS = 800;
+/**
+ * How often the settle is re-read.
+ *
+ * The settle used to be a flat `await sleep(SUBMIT_SETTLE_MS)` — paid IN FULL on
+ * every delivery, including the overwhelmingly common case where the site
+ * cleared its composer within a frame or two of the Enter. With the insertion
+ * itself now measured in single-digit milliseconds, that one sleep was the
+ * largest remaining cost on the whole path.
+ *
+ * Polling changes only WHEN the answer is read, never what the answer is: the
+ * ceiling above is untouched, so a composer that still holds the text at
+ * `SUBMIT_SETTLE_MS` reaches the button fallback exactly as before.
+ */
+const SUBMIT_SETTLE_POLL_MS = 50;
+/**
+ * How many consecutive "the composer is clear" reads end the settle.
+ *
+ * Two, not one — and this is the reason polling is SAFER here than the single
+ * read it replaces, rather than merely faster. A rich editor can momentarily
+ * report empty mid-reconcile, and CodeMirror 6 renders only its viewport, so an
+ * isolated read can say "cleared" about a composer that still holds the prompt.
+ * Acting on that skips the button fallback and the prompt is never sent.
+ *
+ * The flat sleep sampled exactly ONCE, at the ceiling, and was equally exposed
+ * to a bad sample — with no second look. Requiring two in a row is strictly more
+ * evidence than the shipped behaviour asked for, at a cost of one poll interval.
+ */
+const SUBMIT_SETTLE_CLEAR_READS = 2;
 
 /**
  * Auto-submit the landed prompt. Synthetic Enter first (Chrome-proven on all
@@ -344,8 +372,18 @@ async function submitInjectedPrompt(
 ): Promise<void> {
   dispatchSubmit(input);
   if (!submitButtonSelector) return;
-  await new Promise((resolve) => setTimeout(resolve, SUBMIT_SETTLE_MS));
-  if (!hasLanded(input, text, useRendered)) return; // composer cleared — the Enter submit worked
+  // Wait for the composer to clear, up to — never simply FOR — the settle.
+  const deadline = Date.now() + SUBMIT_SETTLE_MS;
+  let clearReads = 0;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, SUBMIT_SETTLE_POLL_MS));
+    if (hasLanded(input, text, useRendered)) {
+      clearReads = 0;                                  // still there — start over
+    } else if (++clearReads >= SUBMIT_SETTLE_CLEAR_READS) {
+      return;                                          // gone, twice — the Enter submit worked
+    }
+    if (Date.now() >= deadline) break;
+  }
   const button = document.querySelector<HTMLButtonElement>(submitButtonSelector);
   if (button && !button.disabled) {
     logInjectOutcome('auto-submit via button click', 'synthetic Enter did not submit');
@@ -463,7 +501,7 @@ export async function injectViaSimulatedPaste(
   text: string,
   submitButtonSelector?: string,
   options: InjectOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   // Blank text can never be a legitimate injection, and letting it through was
   // actively destructive: the paste path select-alls first, so an empty insert
   // WIPES whatever the user had in the composer, and the old landing check
@@ -471,13 +509,13 @@ export async function injectViaSimulatedPaste(
   // click the site's send button. Refuse it at the door and say so.
   if (text.trim().length === 0) {
     logInjectOutcome('refused', 'empty inject text — composer left untouched');
-    return;
+    return false;
   }
   const input = resolveComposer(inputSelector);
   if (!input) {
     logInjectOutcome('clipboard fallback', `no composer matched ${JSON.stringify(inputSelector)}`);
     await clipboardFallback(text);
-    return;
+    return false;
   }
 
   // Resolved ONCE for this delivery and threaded through every landing read, so
@@ -506,7 +544,7 @@ export async function injectViaSimulatedPaste(
     if (await requestMainWorldInject(selector, text, useRendered, directInsertFirst, editorApiInsert, chunked)) {
       logInjectOutcome('landed via main-world bridge');
       await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
-      return;
+      return true;
     }
     if (document.querySelector(selector)) break; // selector matches; bridge tried and failed — don't retry others
   }
@@ -516,7 +554,7 @@ export async function injectViaSimulatedPaste(
   if (await waitForLanding(input, text, landingBudget, useRendered)) {
     logInjectOutcome('landed via simulated paste');
     await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
-    return;
+    return true;
   }
 
   // Firefox: the synthetic paste is inert (see insertViaExecCommand). Retry the
@@ -531,7 +569,7 @@ export async function injectViaSimulatedPaste(
   if (await waitForLanding(input, text, landingBudget, useRendered)) {
     logInjectOutcome('landed via execCommand');
     await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
-    return;
+    return true;
   }
 
   // LAST CHANCE before degrading. An earlier attempt may have been accepted
@@ -541,9 +579,10 @@ export async function injectViaSimulatedPaste(
   if (hasLanded(input, text, useRendered)) {
     logInjectOutcome('landed late — submitting rather than degrading');
     await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
-    return;
+    return true;
   }
 
   logInjectOutcome('clipboard fallback', `paste did not land in <${input.tagName.toLowerCase()} class="${(input.className || '').toString().slice(0, 60)}">`);
   await clipboardFallback(text);
+  return false;
 }

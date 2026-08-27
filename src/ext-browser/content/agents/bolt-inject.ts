@@ -20,8 +20,8 @@ const INPUT_SELECTOR = '.tiptap.ProseMirror';
 // (Firefox live 2026-08-25: text landed, synthetic Enter ignored).
 const SUBMIT_BUTTON_SELECTOR = 'button[aria-label="Send message"]';
 
-export async function injectPromptText(text: string): Promise<void> {
-  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
+export async function injectPromptText(text: string): Promise<boolean> {
+  return await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
     // Bolt's composer is TipTap/ProseMirror, which renders each line of a
     // multi-line prompt as its own <p>. `textContent` runs those together with
     // no separator, so the landing check could never recognise an enhanced

@@ -26,7 +26,7 @@ const INPUT_SELECTOR = '.cm-content[contenteditable="true"]';
 // Replit's real send control — the Enter-didn't-submit fallback clicks it.
 const SUBMIT_BUTTON_SELECTOR = '[data-cy="ai-prompt-submit"]';
 
-export async function injectPromptText(text: string): Promise<void> {
+export async function injectPromptText(text: string): Promise<boolean> {
   // Replit's composer has a PASTE SIZE LIMIT. Measured live on a real project
   // 2026-08-26: 1,500 characters landed in full; 2,200 and 4,000 landed NOTHING,
   // silently. Real enhanced prompts are 2.1-2.5k, so every one was discarded —
@@ -37,7 +37,7 @@ export async function injectPromptText(text: string): Promise<void> {
   // to accumulate exactly (800 → 1,600 → 2,400). `execCommand('insertText')` is
   // NOT an alternative here: it was measured returning false and inserting
   // nothing on this CodeMirror 6 composer, even with the document focused.
-  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
+  return await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
     pasteChunkChars: 800,
     // Replit's composer is CodeMirror 6, which renders each line of a multi-line
     // prompt as its own `.cm-line`. `textContent` runs those together with no
