@@ -171,6 +171,36 @@ describe('the chunked bridge skip', () => {
     expect(requests[0]).toMatchObject({ text: OVER_LIMIT, useEditorApiInsert: true });
   });
 
+  it('⭐ tells the bridge the body is OVER the limit — losing this re-opens the composer wipe', async () => {
+    // The bridge reads this to decide whether it may fall back to a whole-body
+    // paste. Read as false for an over-limit body it would attempt exactly the
+    // paste this composer drops, after a select-all — deleting the user's own
+    // prompt and putting nothing in its place.
+    makeComposer();
+    const requests = captureBridgeRequests();
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', OVER_LIMIT, undefined, {
+      pasteChunkChars: 800,
+      useRenderedLandingText: true,
+      useEditorApiInsert: true,
+    });
+
+    expect(requests[0]).toMatchObject({ bodyExceedsPasteLimit: true });
+  });
+
+  it('and tells it the opposite for a body within the limit', async () => {
+    makeComposer();
+    const requests = captureBridgeRequests();
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'short body', undefined, {
+      pasteChunkChars: 800,
+      useRenderedLandingText: true,
+      useEditorApiInsert: true,
+    });
+
+    expect(requests[0]).toMatchObject({ bodyExceedsPasteLimit: false });
+  });
+
   it('still applies without that route — the shipped skip is untouched', async () => {
     // Fake timers: with the bridge skipped this runs the whole isolated-world
     // chain, whose landing budgets are sized in seconds.

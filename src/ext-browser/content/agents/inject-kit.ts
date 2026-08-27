@@ -286,6 +286,7 @@ function requestMainWorldInject(
   useRendered: boolean,
   directInsertFirst: boolean,
   editorApiInsert: boolean,
+  bodyExceedsPasteLimit: boolean,
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const requestId = `nx-inject-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -315,6 +316,7 @@ function requestMainWorldInject(
         useRenderedLandingText: useRendered,
         useDirectInsertFirst: directInsertFirst,
         useEditorApiInsert: editorApiInsert,
+        bodyExceedsPasteLimit,
       },
       window.location.origin,
     );
@@ -501,7 +503,7 @@ export async function injectViaSimulatedPaste(
   const chunked = options.pasteChunkChars !== undefined && text.length > options.pasteChunkChars;
   const skipBridge = chunked && !editorApiInsert;
   for (const selector of skipBridge ? [] : selectorList) {
-    if (await requestMainWorldInject(selector, text, useRendered, directInsertFirst, editorApiInsert)) {
+    if (await requestMainWorldInject(selector, text, useRendered, directInsertFirst, editorApiInsert, chunked)) {
       logInjectOutcome('landed via main-world bridge');
       await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
       return;

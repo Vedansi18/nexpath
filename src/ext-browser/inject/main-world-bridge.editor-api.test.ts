@@ -172,14 +172,34 @@ describe('useEditorApiInsert — delivery through the editor\'s own API', () => 
   });
 });
 
-describe('useEditorApiInsert — when the route is unavailable, nothing is touched', () => {
-  it('⭐ no editor view: reports false and dispatches NO paste (the composer keeps the user\'s prompt)', async () => {
+describe('useEditorApiInsert — when the route is unavailable', () => {
+  it('⭐ WITHIN the paste limit: falls through to the shipped paste rather than degrading', async () => {
+    // A page that stops exposing an editor view must land where it landed BEFORE
+    // this route existed — on the bridge's own paste — not on the clipboard. The
+    // paste is exactly as safe here as it always was, because this body fits.
+    const { input, pastes, doc } = makeComposer();     // no cmView at all
+    input.addEventListener('paste', (ev) => {
+      const dt = (ev as ClipboardEvent).clipboardData as { getData(f: string): string } | null;
+      input.textContent = dt ? dt.getData('text/plain') : '';
+    });
+    stubExecCommand(() => true);
+
+    const single = 'Add a dark mode toggle';
+    const reply = nextResult();
+    request({ requestId: 'api-fall-1', selector: SELECTOR, text: single, useEditorApiInsert: true });
+
+    expect(await reply).toMatchObject({ landed: true });
+    expect(pastes).toEqual([single]);
+    expect(doc()).toBe('');   // and the editor API was never available to use
+  });
+
+  it('⭐ OVER the paste limit: reports false and dispatches NO paste (the composer keeps the user\'s prompt)', async () => {
     const { input, pastes } = makeComposer();          // no cmView at all
     input.textContent = 'the user’s own prompt';
     const exec = stubExecCommand(() => true);
 
     const reply = nextResult();
-    request({ requestId: 'api-4', selector: SELECTOR, text: BODY, useEditorApiInsert: true });
+    request({ requestId: 'api-4', selector: SELECTOR, text: BODY, useEditorApiInsert: true, bodyExceedsPasteLimit: true });
 
     expect(await reply).toMatchObject({ landed: false });
     expect(pastes).toEqual([]);
@@ -192,7 +212,7 @@ describe('useEditorApiInsert — when the route is unavailable, nothing is touch
     stubExecCommand(() => true);
 
     const reply = nextResult();
-    request({ requestId: 'api-5', selector: SELECTOR, text: BODY, useEditorApiInsert: true });
+    request({ requestId: 'api-5', selector: SELECTOR, text: BODY, useEditorApiInsert: true, bodyExceedsPasteLimit: true });
 
     expect(await reply).toMatchObject({ landed: false });
     expect(pastes).toEqual([]);
@@ -203,7 +223,7 @@ describe('useEditorApiInsert — when the route is unavailable, nothing is touch
     stubExecCommand(() => true);
 
     const reply = nextResult();
-    request({ requestId: 'api-6', selector: SELECTOR, text: BODY, useEditorApiInsert: true });
+    request({ requestId: 'api-6', selector: SELECTOR, text: BODY, useEditorApiInsert: true, bodyExceedsPasteLimit: true });
 
     expect(await reply).toMatchObject({ landed: false });
     expect(pastes).toEqual([]);
@@ -215,7 +235,7 @@ describe('useEditorApiInsert — when the route is unavailable, nothing is touch
     stubExecCommand(() => true);
 
     const reply = nextResult();
-    request({ requestId: 'api-7', selector: SELECTOR, text: BODY, useEditorApiInsert: true });
+    request({ requestId: 'api-7', selector: SELECTOR, text: BODY, useEditorApiInsert: true, bodyExceedsPasteLimit: true });
 
     expect(await reply).toMatchObject({ landed: false });
     expect(pastes).toEqual([]);

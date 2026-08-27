@@ -349,6 +349,12 @@ interface InjectRequestMsg {
   useDirectInsertFirst?: boolean;
   /** See `editorApiInsert` below. Absent ⇒ false ⇒ the bridge never looks for an editor view. */
   useEditorApiInsert?: boolean;
+  /**
+   * True when this body is longer than the composer's paste size limit, so a
+   * whole-body paste would be DROPPED. Absent ⇒ false ⇒ pasting is safe, which
+   * is the case for every composer that has no such limit.
+   */
+  bodyExceedsPasteLimit?: boolean;
 }
 
 /**
@@ -494,6 +500,7 @@ function performMainWorldInject(
   useRendered: boolean,
   directInsertFirst: boolean,
   editorApiInsert: boolean,
+  bodyExceedsPasteLimit: boolean,
 ): boolean {
   // Blank text is never a real injection and both paths select-all first, so
   // honouring it would wipe the user's composer (see landing-check.ts).
@@ -504,16 +511,19 @@ function performMainWorldInject(
 
   if (editorApiInsert) {
     if (insertViaEditorApi(input, text)) return true;
-    // No editor view, or the transaction did not take. Report failure and touch
-    // NOTHING ELSE — deliberately not falling through to the paste below.
+    // No editor view, or the transaction did not take.
     //
-    // The caller that asks for this route is the one whose composer has a paste
-    // SIZE LIMIT, so the whole-body paste below is precisely what that composer
-    // drops. Attempting it would select-all first, leaving the user's own prompt
-    // deleted and nothing put in its place. Returning false instead hands the
-    // delivery straight back to the caller's own chain — which splits the body
-    // into sub-limit pieces and is the path that is proven live on that site.
-    return false;
+    // Whether it is safe to carry on depends entirely on ONE thing: would the
+    // whole-body paste below survive this composer? The caller that asks for
+    // this route is the one with a paste SIZE LIMIT, and that paste select-alls
+    // first — so for an over-limit body, attempting it would leave the user's
+    // own prompt deleted and nothing put in its place. Refuse, and hand the
+    // delivery back to the caller's chunked chain, which is proven live there.
+    if (bodyExceedsPasteLimit) return false;
+    // Within the limit, the paste is exactly as safe as it was before this route
+    // existed — and before it existed, this is the path that delivered. Falling
+    // through keeps that, so a page that stops exposing an editor view degrades
+    // to the shipped behaviour rather than to the clipboard.
   }
 
   // Which read decides "landed". Resolved once so the two attempts below can
@@ -557,9 +567,13 @@ if (typeof window.addEventListener === 'function') {
     const useRendered = msg.useRenderedLandingText === true;
     const directInsertFirst = msg.useDirectInsertFirst === true;
     const editorApiInsert = msg.useEditorApiInsert === true;
+    const bodyExceedsPasteLimit = msg.bodyExceedsPasteLimit === true;
     let landed = false;
     try {
-      landed = performMainWorldInject(msg.selector, msg.text, useRendered, directInsertFirst, editorApiInsert);
+      landed = performMainWorldInject(
+        msg.selector, msg.text, useRendered, directInsertFirst, editorApiInsert,
+        bodyExceedsPasteLimit,
+      );
     } catch { /* landed stays false — the content script's fallback chain takes over */ }
     window.postMessage(
       { type: 'nexpath:inject-result', requestId: msg.requestId, landed },
