@@ -18,7 +18,7 @@
  * file — the toast/clipboard fallback below is reusable for it as-is.
  */
 
-import { hasTextLanded } from './landing-check.js';
+import { hasTextLanded, readLandingText } from './landing-check.js';
 
 export function showToast(message: string): void {
   const host = document.createElement('div');
@@ -186,11 +186,16 @@ function insertViaExecCommand(input: HTMLElement, text: string): void {
   }
 }
 
-function hasLanded(input: HTMLElement, text: string): boolean {
+function hasLanded(input: HTMLElement, text: string, useRendered: boolean): boolean {
   // Whole-text containment, not a 20-char prefix — see landing-check.ts for the
   // two false "successes" the prefix test produced (empty text, shared prefix),
   // both of which ended in auto-submitting the wrong thing.
-  return hasTextLanded(input.textContent ?? '', text);
+  //
+  // `useRendered` picks WHICH read of the composer that containment is asked
+  // about: the rendered text, or the raw `textContent` this kit has always used.
+  // See `InjectOptions.useRenderedLandingText` for why that is a per-agent
+  // choice rather than a straight replacement.
+  return hasTextLanded(useRendered ? readLandingText(input) : (input.textContent ?? ''), text);
 }
 
 /**
@@ -245,10 +250,15 @@ export function landingBudgetFor(text: string): number {
  * page for a multi-KB body. Polling keeps fast editors fast and only slow ones
  * wait.
  */
-async function waitForLanding(input: HTMLElement, text: string, budgetMs: number): Promise<boolean> {
+async function waitForLanding(
+  input: HTMLElement,
+  text: string,
+  budgetMs: number,
+  useRendered: boolean,
+): Promise<boolean> {
   const deadline = Date.now() + budgetMs;
   for (;;) {
-    if (hasLanded(input, text)) return true;
+    if (hasLanded(input, text, useRendered)) return true;
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 75));
   }
@@ -306,12 +316,13 @@ const SUBMIT_SETTLE_MS = 800;
 async function submitInjectedPrompt(
   input: HTMLElement,
   text: string,
-  submitButtonSelector?: string,
+  submitButtonSelector: string | undefined,
+  useRendered: boolean,
 ): Promise<void> {
   dispatchSubmit(input);
   if (!submitButtonSelector) return;
   await new Promise((resolve) => setTimeout(resolve, SUBMIT_SETTLE_MS));
-  if (!hasLanded(input, text)) return; // composer cleared — the Enter submit worked
+  if (!hasLanded(input, text, useRendered)) return; // composer cleared — the Enter submit worked
   const button = document.querySelector<HTMLButtonElement>(submitButtonSelector);
   if (button && !button.disabled) {
     logInjectOutcome('auto-submit via button click', 'synthetic Enter did not submit');
@@ -337,6 +348,32 @@ export interface InjectOptions {
    * single-paste path is untouched.
    */
   pasteChunkChars?: number;
+
+  /**
+   * Check whether an insertion landed against the composer's RENDERED text
+   * (`readLandingText` → `innerText`) instead of its raw `textContent`.
+   *
+   * ── WHAT THIS FIXES ────────────────────────────────────────────────────────
+   * `textContent` runs a multi-line prompt's block elements together with no
+   * separator, so the landing check could never pass for one — at ANY prompt
+   * length (measured live on Bolt at 300 … 50,000 characters, 2026-08-27). The
+   * full reasoning, and the live numbers, are in landing-check.ts.
+   *
+   * The cost of that miss was not cosmetic: the check failing burned the whole
+   * landing budget, then burned it again on the execCommand retry, degraded to
+   * the clipboard fallback, and the gate then spent its own send-verification
+   * window looking for text it had been told was never delivered — ending with
+   * the user's ORIGINAL prompt being sent and the enhanced one discarded.
+   *
+   * ── WHY IT IS OPT-IN AND NOT SIMPLY THE NEW BEHAVIOUR ──────────────────────
+   * It is a correctness fix and it applies equally to all three agents. It is
+   * gated only because Lovable's delivery must not change in this milestone
+   * (owner instruction, 2026-08-27) and Lovable reaches this kit through the
+   * response-stop inject path. Bolt and Replit opt in here; Lovable is left
+   * BYTE-IDENTICAL and can be migrated as its own change once the other two are
+   * proven live. Absent ⇒ exactly today's behaviour, for every caller.
+   */
+  useRenderedLandingText?: boolean;
 }
 
 export async function injectViaSimulatedPaste(
@@ -361,6 +398,11 @@ export async function injectViaSimulatedPaste(
     return;
   }
 
+  // Resolved ONCE for this delivery and threaded through every landing read, so
+  // one insertion can never be judged by two different rules. Absent ⇒ false ⇒
+  // the raw-`textContent` read this kit has always used (see InjectOptions).
+  const useRendered = options.useRenderedLandingText === true;
+
   // Preferred path: the page-world bridge (first-class events for rich editors).
   // SKIPPED for a size-limited composer: the bridge pastes in one piece, which is
   // exactly what that composer drops.
@@ -369,7 +411,7 @@ export async function injectViaSimulatedPaste(
   for (const selector of chunked ? [] : selectorList) {
     if (await requestMainWorldInject(selector, text)) {
       logInjectOutcome('landed via main-world bridge');
-      await submitInjectedPrompt(input, text, submitButtonSelector);
+      await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
       return;
     }
     if (document.querySelector(selector)) break; // selector matches; bridge tried and failed — don't retry others
@@ -377,9 +419,9 @@ export async function injectViaSimulatedPaste(
 
   const landingBudget = landingBudgetFor(text);
   dispatchSimulatedPaste(input, text, options.pasteChunkChars);
-  if (await waitForLanding(input, text, landingBudget)) {
+  if (await waitForLanding(input, text, landingBudget, useRendered)) {
     logInjectOutcome('landed via simulated paste');
-    await submitInjectedPrompt(input, text, submitButtonSelector);
+    await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
     return;
   }
 
@@ -392,9 +434,9 @@ export async function injectViaSimulatedPaste(
   // work (it is the Firefox path for plain textareas), but it is not a fallback
   // a size-limited composer can rely on.
   insertViaExecCommand(input, text);
-  if (await waitForLanding(input, text, landingBudget)) {
+  if (await waitForLanding(input, text, landingBudget, useRendered)) {
     logInjectOutcome('landed via execCommand');
-    await submitInjectedPrompt(input, text, submitButtonSelector);
+    await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
     return;
   }
 
@@ -402,9 +444,9 @@ export async function injectViaSimulatedPaste(
   // after its own budget elapsed — live, that is exactly what happened, and
   // telling the user to paste text that is already in the box is worse than
   // saying nothing. Re-read once more before giving up.
-  if (hasLanded(input, text)) {
+  if (hasLanded(input, text, useRendered)) {
     logInjectOutcome('landed late — submitting rather than degrading');
-    await submitInjectedPrompt(input, text, submitButtonSelector);
+    await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
     return;
   }
 

@@ -39,5 +39,12 @@ export async function injectPromptText(text: string): Promise<void> {
   // nothing on this CodeMirror 6 composer, even with the document focused.
   await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
     pasteChunkChars: 800,
+    // Replit's composer is CodeMirror 6, which renders each line of a multi-line
+    // prompt as its own `.cm-line`. `textContent` runs those together with no
+    // separator, so the landing check could never recognise an enhanced prompt
+    // that HAD arrived. Same defect, same fix, as Bolt's ProseMirror — and it is
+    // the same one replit.ts's own `readComposerText` already works around on
+    // the capture side. See landing-check.ts.
+    useRenderedLandingText: true,
   });
 }

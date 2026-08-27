@@ -21,5 +21,12 @@ const INPUT_SELECTOR = '.tiptap.ProseMirror';
 const SUBMIT_BUTTON_SELECTOR = 'button[aria-label="Send message"]';
 
 export async function injectPromptText(text: string): Promise<void> {
-  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR);
+  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
+    // Bolt's composer is TipTap/ProseMirror, which renders each line of a
+    // multi-line prompt as its own <p>. `textContent` runs those together with
+    // no separator, so the landing check could never recognise an enhanced
+    // prompt that HAD arrived — measured live on Bolt at 300 … 50,000
+    // characters (2026-08-27). See landing-check.ts for the full reasoning.
+    useRenderedLandingText: true,
+  });
 }
