@@ -285,6 +285,7 @@ function requestMainWorldInject(
   text: string,
   useRendered: boolean,
   directInsertFirst: boolean,
+  editorApiInsert: boolean,
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const requestId = `nx-inject-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -313,6 +314,7 @@ function requestMainWorldInject(
         // generation presents during an update.
         useRenderedLandingText: useRendered,
         useDirectInsertFirst: directInsertFirst,
+        useEditorApiInsert: editorApiInsert,
       },
       window.location.origin,
     );
@@ -424,6 +426,34 @@ export interface InjectOptions {
    * must not change in this milestone. Absent ⇒ the shipped paste-first order.
    */
   useDirectInsertFirst?: boolean;
+
+  /**
+   * In the PAGE-WORLD bridge, deliver through the composer's OWN editor instance
+   * (a CodeMirror 6 `EditorView` transaction) instead of an event.
+   *
+   * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+   * Neither other route serves Replit. Its CodeMirror 6 composer refuses
+   * `execCommand('insertText')` — measured live on a real Repl (2026-08-27:
+   * returns false, inserts nothing), which is why `useDirectInsertFirst` is not
+   * set there. And its paste path has a size limit, which is what forced
+   * `pasteChunkChars` — a character-count rule the delivery should not need.
+   *
+   * A transaction has neither problem. Measured on that same live composer:
+   * 55 / 2,500 / 8,000 characters all landed with the document matching exactly,
+   * in 2-6 ms, with no paste event, no clipboard, and no size rule.
+   *
+   * ── WHAT IT CHANGES ON THIS SIDE ───────────────────────────────────────────
+   * The bridge is normally skipped for a size-limited composer, because the
+   * bridge pastes in one piece. This route does not paste at all, so that skip
+   * no longer applies to it — see the bridge loop below. Everything else is
+   * unchanged: if the page has no editor view, or the transaction does not take,
+   * the bridge answers false and the existing chunked chain runs exactly as it
+   * does today.
+   *
+   * Opt-in per agent, like the flags above. Absent ⇒ the bridge never looks for
+   * an editor view, and a size-limited composer keeps skipping the bridge.
+   */
+  useEditorApiInsert?: boolean;
 }
 
 export async function injectViaSimulatedPaste(
@@ -453,14 +483,25 @@ export async function injectViaSimulatedPaste(
   // the raw-`textContent` read this kit has always used (see InjectOptions).
   const useRendered = options.useRenderedLandingText === true;
   const directInsertFirst = options.useDirectInsertFirst === true;
+  const editorApiInsert = options.useEditorApiInsert === true;
 
   // Preferred path: the page-world bridge (first-class events for rich editors).
-  // SKIPPED for a size-limited composer: the bridge pastes in one piece, which is
-  // exactly what that composer drops.
+  // SKIPPED for a size-limited composer, because the bridge PASTES in one piece,
+  // which is exactly what that composer drops.
+  //
+  // That reasoning is about the paste, so it stops applying when the caller has
+  // asked for the editor-API route, which does not paste at all: it replaces the
+  // document in one transaction, at any length (see useEditorApiInsert). Without
+  // this, the one site that needs that route would never reach it — a real
+  // enhanced prompt is always over the chunk limit, so the skip fired every time.
+  //
+  // Nothing is risked by trying: a page with no editor view answers false and the
+  // chunked chain below runs exactly as it does today.
   const selectorList = Array.isArray(inputSelector) ? inputSelector : [inputSelector];
   const chunked = options.pasteChunkChars !== undefined && text.length > options.pasteChunkChars;
-  for (const selector of chunked ? [] : selectorList) {
-    if (await requestMainWorldInject(selector, text, useRendered, directInsertFirst)) {
+  const skipBridge = chunked && !editorApiInsert;
+  for (const selector of skipBridge ? [] : selectorList) {
+    if (await requestMainWorldInject(selector, text, useRendered, directInsertFirst, editorApiInsert)) {
       logInjectOutcome('landed via main-world bridge');
       await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
       return;

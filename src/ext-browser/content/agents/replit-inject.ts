@@ -46,6 +46,21 @@ export async function injectPromptText(text: string): Promise<void> {
     // the same one replit.ts's own `readComposerText` already works around on
     // the capture side. See landing-check.ts.
     useRenderedLandingText: true,
+    // Deliver through CodeMirror 6's own `EditorView` transaction in the page
+    // world. Measured live on a real Repl (2026-08-27) — 55 / 2,500 / 8,000
+    // characters each landed with the document matching exactly, in 2-6 ms, with
+    // no paste event, no clipboard, and no size rule.
+    //
+    // This is what lets a full enhanced prompt reach the bridge at all: the
+    // bridge is normally skipped for a size-limited composer, and a real
+    // enhanced prompt is always over `pasteChunkChars`, so the skip fired every
+    // single time. The transaction has no size limit, so the skip no longer
+    // applies to it.
+    //
+    // `pasteChunkChars` above stays exactly as it is — it is now the FALLBACK,
+    // for a page with no editor view or a transaction that did not take, and
+    // that fallback is the path already proven live on this composer.
+    useEditorApiInsert: true,
     // ⛔ `useDirectInsertFirst` is deliberately NOT set here, unlike Bolt.
     //
     // It would make CodeMirror 6 receive a select-all + `execCommand('insertText')`

@@ -347,6 +347,81 @@ interface InjectRequestMsg {
   useRenderedLandingText?: boolean;
   /** See `directInsertFirst` below. Absent ⇒ false ⇒ the shipped paste-first order. */
   useDirectInsertFirst?: boolean;
+  /** See `editorApiInsert` below. Absent ⇒ false ⇒ the bridge never looks for an editor view. */
+  useEditorApiInsert?: boolean;
+}
+
+/**
+ * The slice of CodeMirror 6's `EditorView` this file uses. Deliberately tiny —
+ * the shape is structurally checked at runtime before anything is called, so a
+ * future CM version that no longer matches simply fails the guard and the
+ * caller's own delivery chain takes over.
+ */
+interface EditorViewLike {
+  state: { doc: { length: number; toString(): string } };
+  dispatch(spec: { changes: { from: number; to: number; insert: string } }): void;
+}
+
+/**
+ * Find the composer's own editor instance, if it exposes one.
+ *
+ * CodeMirror 6 hangs its view off the content DOM node as a `cmView` expando.
+ * That is a PAGE-WORLD property: a content script can reach the element but not
+ * this field, which is exactly why this route has to live in this file.
+ *
+ * Every step is guarded. `cmView` may be the view itself or a wrapper carrying
+ * `.view`, depending on the build, and either may be absent entirely — an
+ * unrecognised shape returns null rather than throwing.
+ */
+function resolveEditorView(input: HTMLElement): EditorViewLike | null {
+  const holder = (input as unknown as { cmView?: unknown }).cmView;
+  if (!holder || typeof holder !== 'object') return null;
+  const candidate = (holder as { view?: unknown }).view ?? holder;
+  if (!candidate || typeof candidate !== 'object') return null;
+  const view = candidate as Partial<EditorViewLike>;
+  if (typeof view.dispatch !== 'function') return null;
+  if (!view.state || typeof view.state.doc?.length !== 'number') return null;
+  return view as EditorViewLike;
+}
+
+/**
+ * Replace the composer's whole document through the editor's own API.
+ *
+ * ── WHY THIS ROUTE EXISTS ────────────────────────────────────────────────────
+ * Neither of the other two routes serves Replit. Its CodeMirror 6 composer
+ * REFUSES `execCommand('insertText')` — measured live on a real Repl
+ * (2026-08-27): returns false and inserts nothing, confirming the same result
+ * recorded months earlier. And its paste path carries a size limit that forces
+ * the delivery to be split into sub-limit pieces, which is a character-count
+ * rule the delivery is not supposed to need.
+ *
+ * A transaction has neither problem. Measured on that same live composer:
+ *
+ *     55 chars    2 ms     doc matched exactly
+ *     2,500 chars 6 ms     doc matched exactly
+ *     8,000 chars 3 ms     doc matched exactly
+ *
+ * No paste event, no clipboard, no execCommand, and no size rule — the same
+ * single call regardless of how long the user's prompt is.
+ *
+ * ── WHY IT VERIFIES AGAINST THE DOCUMENT, NOT THE DOM ────────────────────────
+ * CodeMirror 6 VIRTUALISES: it renders only the lines in view. On that live
+ * composer an 8,000-character body rendered 27 of roughly 337 lines, so any
+ * DOM-based landing check — `innerText` included — reports a body that size as
+ * missing when it is perfectly present. The editor's own document has no
+ * viewport, so asking it is both cheaper and correct at any length.
+ */
+function insertViaEditorApi(input: HTMLElement, text: string): boolean {
+  const view = resolveEditorView(input);
+  if (!view) return false;
+  try {
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  } catch {
+    return false;
+  }
+  // `state` is re-read here on purpose: CodeMirror's state is immutable, so this
+  // is the NEW document produced by the transaction, not the one dispatched to.
+  return hasTextLanded(view.state.doc.toString(), text);
 }
 
 /** Put the caret across the whole composer, so an insertion REPLACES it. */
@@ -418,6 +493,7 @@ function performMainWorldInject(
   text: string,
   useRendered: boolean,
   directInsertFirst: boolean,
+  editorApiInsert: boolean,
 ): boolean {
   // Blank text is never a real injection and both paths select-all first, so
   // honouring it would wipe the user's composer (see landing-check.ts).
@@ -425,6 +501,20 @@ function performMainWorldInject(
   const candidates = [...document.querySelectorAll<HTMLElement>(selector)];
   const input = candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0];
   if (!input) return false;
+
+  if (editorApiInsert) {
+    if (insertViaEditorApi(input, text)) return true;
+    // No editor view, or the transaction did not take. Report failure and touch
+    // NOTHING ELSE — deliberately not falling through to the paste below.
+    //
+    // The caller that asks for this route is the one whose composer has a paste
+    // SIZE LIMIT, so the whole-body paste below is precisely what that composer
+    // drops. Attempting it would select-all first, leaving the user's own prompt
+    // deleted and nothing put in its place. Returning false instead hands the
+    // delivery straight back to the caller's own chain — which splits the body
+    // into sub-limit pieces and is the path that is proven live on that site.
+    return false;
+  }
 
   // Which read decides "landed". Resolved once so the two attempts below can
   // never be judged by different rules. See landing-check.ts for why the raw
@@ -466,9 +556,10 @@ if (typeof window.addEventListener === 'function') {
     // previous generation's script — is answered exactly as it always was.
     const useRendered = msg.useRenderedLandingText === true;
     const directInsertFirst = msg.useDirectInsertFirst === true;
+    const editorApiInsert = msg.useEditorApiInsert === true;
     let landed = false;
     try {
-      landed = performMainWorldInject(msg.selector, msg.text, useRendered, directInsertFirst);
+      landed = performMainWorldInject(msg.selector, msg.text, useRendered, directInsertFirst, editorApiInsert);
     } catch { /* landed stays false — the content script's fallback chain takes over */ }
     window.postMessage(
       { type: 'nexpath:inject-result', requestId: msg.requestId, landed },

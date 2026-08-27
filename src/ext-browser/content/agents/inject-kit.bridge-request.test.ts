@@ -23,6 +23,24 @@ beforeEach(() => {
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
     configurable: true,
   });
+  // Needed by the tests where the bridge is SKIPPED and the isolated-world paste
+  // chain runs instead; jsdom implements neither of these.
+  if (typeof globalThis.DataTransfer === 'undefined') {
+    vi.stubGlobal('DataTransfer', class {
+      private data = new Map<string, string>();
+      setData(format: string, data: string): void { this.data.set(format, data); }
+      getData(format: string): string { return this.data.get(format) ?? ''; }
+    });
+  }
+  if (typeof globalThis.ClipboardEvent === 'undefined') {
+    vi.stubGlobal('ClipboardEvent', class extends Event {
+      clipboardData: unknown;
+      constructor(type: string, init: { clipboardData?: unknown } & EventInit = {}) {
+        super(type, init);
+        this.clipboardData = init.clipboardData;
+      }
+    });
+  }
 });
 
 afterEach(() => {
@@ -104,6 +122,85 @@ describe('inject-kit → page-world bridge: what actually goes over the wire', (
     expect(requests[0]).toMatchObject({
       useRenderedLandingText: false,
       useDirectInsertFirst: false,
+      useEditorApiInsert: false,
     });
+  });
+
+  it('carries the editor-API flag when the caller sets it (Replit)', async () => {
+    makeComposer();
+    const requests = captureBridgeRequests();
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'ENHANCED BODY', undefined, {
+      useRenderedLandingText: true,
+      useEditorApiInsert: true,
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      useRenderedLandingText: true,
+      useEditorApiInsert: true,
+      useDirectInsertFirst: false,
+    });
+  });
+});
+
+/**
+ * Whether the bridge is asked AT ALL for a size-limited composer.
+ *
+ * The bridge is skipped when the body has to be chunked, because the bridge
+ * PASTES in one piece and that is exactly what such a composer drops. The
+ * editor-API route does not paste, so the skip must not apply to it — and this
+ * is load-bearing rather than cosmetic: a real enhanced prompt (2.1-2.5k) is
+ * always over the chunk limit, so before this the one site that needs that route
+ * never reached it on a single real delivery.
+ */
+describe('the chunked bridge skip', () => {
+  const OVER_LIMIT = 'x'.repeat(2_500);
+
+  it('⭐ no longer applies when the editor-API route is requested', async () => {
+    makeComposer();
+    const requests = captureBridgeRequests();
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', OVER_LIMIT, undefined, {
+      pasteChunkChars: 800,
+      useRenderedLandingText: true,
+      useEditorApiInsert: true,
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ text: OVER_LIMIT, useEditorApiInsert: true });
+  });
+
+  it('still applies without that route — the shipped skip is untouched', async () => {
+    // Fake timers: with the bridge skipped this runs the whole isolated-world
+    // chain, whose landing budgets are sized in seconds.
+    vi.useFakeTimers();
+    try {
+      makeComposer();
+      const requests = captureBridgeRequests();
+
+      const done = injectViaSimulatedPaste('.tiptap.ProseMirror', OVER_LIMIT, undefined, {
+        pasteChunkChars: 800,
+        useRenderedLandingText: true,
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await done;
+
+      expect(requests).toEqual([]);   // the bridge was never asked
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a body UNDER the limit reaches the bridge either way', async () => {
+    makeComposer();
+    const requests = captureBridgeRequests();
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'short body', undefined, {
+      pasteChunkChars: 800,
+      useRenderedLandingText: true,
+    });
+
+    expect(requests).toHaveLength(1);
   });
 });
