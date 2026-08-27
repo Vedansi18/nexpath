@@ -280,7 +280,12 @@ function logInjectOutcome(outcome: string, detail = ''): void {
  * reply; a missing bridge (stale page generation) times out to false and the
  * caller's own fallback chain takes over — this path can only improve delivery.
  */
-function requestMainWorldInject(selector: string, text: string): Promise<boolean> {
+function requestMainWorldInject(
+  selector: string,
+  text: string,
+  useRendered: boolean,
+  directInsertFirst: boolean,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const requestId = `nx-inject-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const timer = setTimeout(() => {
@@ -296,7 +301,21 @@ function requestMainWorldInject(selector: string, text: string): Promise<boolean
       resolve(msg.landed === true);
     };
     window.addEventListener('message', onReply);
-    window.postMessage({ type: 'nexpath:inject-request', requestId, selector, text }, window.location.origin);
+    window.postMessage(
+      {
+        type: 'nexpath:inject-request',
+        requestId,
+        selector,
+        text,
+        // Both are read as `=== true` on the page side, so an older bridge that
+        // does not know these fields simply ignores them and behaves as it
+        // always has — the shape a page still running the previous extension
+        // generation presents during an update.
+        useRenderedLandingText: useRendered,
+        useDirectInsertFirst: directInsertFirst,
+      },
+      window.location.origin,
+    );
   });
 }
 
@@ -374,6 +393,37 @@ export interface InjectOptions {
    * proven live. Absent ⇒ exactly today's behaviour, for every caller.
    */
   useRenderedLandingText?: boolean;
+
+  /**
+   * In the PAGE-WORLD bridge, try `execCommand('insertText')` BEFORE the paste
+   * event rather than after it.
+   *
+   * ── WHAT THIS FIXES ────────────────────────────────────────────────────────
+   * Both routes deliver the same text; only one of them dispatches a `paste`
+   * event at the site. On Chrome a site whose paste handler cannot read the
+   * event's clipboardData falls back to `navigator.clipboard.read()`, and Chrome
+   * asks the user "<site> wants to — See text and images copied to the
+   * clipboard". That bubble takes focus off the page, which is why delivery
+   * appeared to resume only once the user answered it. Firefox never shows the
+   * prompt because a script-constructed ClipboardEvent's clipboardData is
+   * dropped there, so the site's paste handler never runs and the insertion
+   * happens through execCommand — the route this flag selects on purpose.
+   *
+   * Measured on Bolt's real composer in Chrome (2026-08-27): the page-world
+   * insertText landed a 2,400-character multi-line prompt exactly, in 2 ms, with
+   * zero clipboard calls and no paste handler fired. Both routes are still
+   * attempted, so an editor that ignores the command (measured: Replit's
+   * CodeMirror 6) simply falls through to the paste, exactly as today.
+   *
+   * ── WHY IT IS SEPARATE FROM `useRenderedLandingText` ───────────────────────
+   * They are independent concerns — that flag picks the READ, this one picks the
+   * INSERTION ORDER — and keeping them apart keeps the rollback granular: this
+   * can be turned off without giving up the landing-check fix.
+   *
+   * Opt-in per agent for the same reason as the flag above: Lovable's delivery
+   * must not change in this milestone. Absent ⇒ the shipped paste-first order.
+   */
+  useDirectInsertFirst?: boolean;
 }
 
 export async function injectViaSimulatedPaste(
@@ -402,6 +452,7 @@ export async function injectViaSimulatedPaste(
   // one insertion can never be judged by two different rules. Absent ⇒ false ⇒
   // the raw-`textContent` read this kit has always used (see InjectOptions).
   const useRendered = options.useRenderedLandingText === true;
+  const directInsertFirst = options.useDirectInsertFirst === true;
 
   // Preferred path: the page-world bridge (first-class events for rich editors).
   // SKIPPED for a size-limited composer: the bridge pastes in one piece, which is
@@ -409,7 +460,7 @@ export async function injectViaSimulatedPaste(
   const selectorList = Array.isArray(inputSelector) ? inputSelector : [inputSelector];
   const chunked = options.pasteChunkChars !== undefined && text.length > options.pasteChunkChars;
   for (const selector of chunked ? [] : selectorList) {
-    if (await requestMainWorldInject(selector, text)) {
+    if (await requestMainWorldInject(selector, text, useRendered, directInsertFirst)) {
       logInjectOutcome('landed via main-world bridge');
       await submitInjectedPrompt(input, text, submitButtonSelector, useRendered);
       return;

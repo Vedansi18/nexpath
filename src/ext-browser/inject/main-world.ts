@@ -11,7 +11,7 @@
  */
 
 import { resolveAgentFromHostname } from '../content/agents/agent-hosts.js';
-import { hasTextLanded } from '../content/agents/landing-check.js';
+import { hasTextLanded, readLandingText } from '../content/agents/landing-check.js';
 import { setupSubmitFlowPage, SUBMIT_FLOW_EVENT_TYPE } from './submit-flow-page.js';
 import { createSubmitGate } from './submit-gate.js';
 import { createDecisionChannel } from './submit-decision-channel.js';
@@ -343,23 +343,31 @@ interface InjectRequestMsg {
   requestId: string;
   selector: string;
   text: string;
+  /** See `useRendered` below. Absent ⇒ false ⇒ the shipped raw read. */
+  useRenderedLandingText?: boolean;
+  /** See `directInsertFirst` below. Absent ⇒ false ⇒ the shipped paste-first order. */
+  useDirectInsertFirst?: boolean;
 }
 
-function performMainWorldInject(selector: string, text: string): boolean {
-  // Blank text is never a real injection and the paste path select-alls first,
-  // so honouring it would wipe the user's composer (see landing-check.ts).
-  if (text.trim().length === 0) return false;
-  const candidates = [...document.querySelectorAll<HTMLElement>(selector)];
-  const input = candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0];
-  if (!input) return false;
-
+/** Put the caret across the whole composer, so an insertion REPLACES it. */
+function selectAllIn(input: HTMLElement): void {
   input.focus();
   const selection = window.getSelection();
   const range = document.createRange();
   range.selectNodeContents(input);
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
 
+/** The trusted-editing command path: synchronous, and never touches a clipboard. */
+function insertTextIn(input: HTMLElement, text: string): void {
+  selectAllIn(input);
+  try { document.execCommand('insertText', false, text); } catch { /* the caller re-checks */ }
+}
+
+/** The first-class paste path: what a rich editor's own paste handler consumes. */
+function firePasteIn(input: HTMLElement, text: string): void {
+  selectAllIn(input);
   const dataTransfer = new DataTransfer();
   dataTransfer.setData('text/plain', text);
   input.dispatchEvent(new ClipboardEvent('paste', {
@@ -367,21 +375,82 @@ function performMainWorldInject(selector: string, text: string): boolean {
     bubbles: true,
     cancelable: true,
   }));
-  if (hasTextLanded(input.textContent ?? '', text)) return true;
+}
 
-  // The editor ignored the synthetic paste — the trusted-editing command path.
-  // Re-select before the retry: without it the insert lands at the caret and the
+/**
+ * Insert `text` into the page's own composer, from the page's own world.
+ *
+ * ── `directInsertFirst`: WHY THE ORDER MATTERS ──────────────────────────────
+ * Both mechanisms below deliver the same text. They differ in one respect that
+ * is invisible from here and very visible to the user: the paste path dispatches
+ * a `paste` event AT THE SITE, and the insertText path does not.
+ *
+ * On Chrome that difference is what raises a permission prompt. A site whose
+ * paste handler receives an event it cannot read the clipboardData of falls back
+ * to `navigator.clipboard.read()` to find out what was pasted, and Chrome then
+ * asks the user "<site> wants to — See text and images copied to the clipboard".
+ * The bubble takes focus off the page, which is why injection appeared to resume
+ * only once the user answered it. Firefox never shows it, because a
+ * script-constructed ClipboardEvent's clipboardData is dropped there entirely,
+ * so the site's paste handler never runs and our code reaches execCommand
+ * instead — the same route this flag selects, deliberately, on Chrome.
+ *
+ * MEASURED on Bolt's real ProseMirror composer in Chrome (2026-08-27): a
+ * page-world `execCommand('insertText')` of a 2,400-character multi-line prompt
+ * returned true, landed the whole text exactly (10 paragraphs, blank lines
+ * preserved), took 2 ms, made ZERO clipboard calls, and never fired the site's
+ * paste handler.
+ *
+ * ── WHY THIS STAYS SYNCHRONOUS ───────────────────────────────────────────────
+ * Both mechanisms apply synchronously — the same measurement shows the composer
+ * already carrying the text on the very next statement. An earlier reading of
+ * these failures as "the editor has not finished reconciling" was wrong: what
+ * failed was the READ (`textContent` on a multi-line prompt — see
+ * landing-check.ts), not the timing. Nothing here needs to wait.
+ *
+ * ── FAIL-OPEN IS UNCHANGED ───────────────────────────────────────────────────
+ * Whichever order is taken, both mechanisms are attempted, and a false return
+ * hands the delivery back to the content script's own fallback chain exactly as
+ * before. This bridge can still only improve delivery, never block it.
+ */
+function performMainWorldInject(
+  selector: string,
+  text: string,
+  useRendered: boolean,
+  directInsertFirst: boolean,
+): boolean {
+  // Blank text is never a real injection and both paths select-all first, so
+  // honouring it would wipe the user's composer (see landing-check.ts).
+  if (text.trim().length === 0) return false;
+  const candidates = [...document.querySelectorAll<HTMLElement>(selector)];
+  const input = candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0];
+  if (!input) return false;
+
+  // Which read decides "landed". Resolved once so the two attempts below can
+  // never be judged by different rules. See landing-check.ts for why the raw
+  // `textContent` read cannot recognise a multi-line prompt, and
+  // InjectOptions.useRenderedLandingText for why the fix is opt-in per agent.
+  const landed = (): boolean =>
+    hasTextLanded(useRendered ? readLandingText(input) : (input.textContent ?? ''), text);
+
+  if (directInsertFirst) {
+    insertTextIn(input, text);
+    if (landed()) return true;
+    // The editor does not honour the command (measured: Replit's CodeMirror 6
+    // returns false and inserts nothing). Fall through to the paste it does
+    // honour — the select-all inside replaces anything partially inserted.
+    firePasteIn(input, text);
+    return landed();
+  }
+
+  // Shipped order, byte-identical: paste first, then the trusted-editing retry.
+  // Each attempt re-selects — without it the insert lands at the caret and the
   // composer ends up holding OLD TEXT + NEW TEXT, which the landing check would
-  // then pass and the caller would auto-submit (the isolated-world twin has
-  // always re-selected — `focusAndSelectAll` in inject-kit.ts).
-  input.focus();
-  const retrySelection = window.getSelection();
-  const retryRange = document.createRange();
-  retryRange.selectNodeContents(input);
-  retrySelection?.removeAllRanges();
-  retrySelection?.addRange(retryRange);
-  try { document.execCommand('insertText', false, text); } catch { /* checked below */ }
-  return hasTextLanded(input.textContent ?? '', text);
+  // then pass and the caller would auto-submit.
+  firePasteIn(input, text);
+  if (landed()) return true;
+  insertTextIn(input, text);
+  return landed();
 }
 
 // Guarded like the fetch patch above: the module must load under partial
@@ -392,9 +461,14 @@ if (typeof window.addEventListener === 'function') {
     const msg = ev.data as InjectRequestMsg | null;
     if (!msg || msg.type !== 'nexpath:inject-request') return;
     if (typeof msg.requestId !== 'string' || typeof msg.selector !== 'string' || typeof msg.text !== 'string') return;
+    // Both flags default OFF, so a request from an older content script — the
+    // real case during an extension update, when the page still holds the
+    // previous generation's script — is answered exactly as it always was.
+    const useRendered = msg.useRenderedLandingText === true;
+    const directInsertFirst = msg.useDirectInsertFirst === true;
     let landed = false;
     try {
-      landed = performMainWorldInject(msg.selector, msg.text);
+      landed = performMainWorldInject(msg.selector, msg.text, useRendered, directInsertFirst);
     } catch { /* landed stays false — the content script's fallback chain takes over */ }
     window.postMessage(
       { type: 'nexpath:inject-result', requestId: msg.requestId, landed },

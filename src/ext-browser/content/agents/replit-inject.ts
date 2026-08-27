@@ -46,5 +46,12 @@ export async function injectPromptText(text: string): Promise<void> {
     // the same one replit.ts's own `readComposerText` already works around on
     // the capture side. See landing-check.ts.
     useRenderedLandingText: true,
+    // Same reason as Bolt. Note this only reaches the bridge for a prompt SHORT
+    // enough to skip chunking — a chunked body still bypasses the bridge
+    // entirely, which is the next phase's problem, not this one's. And CodeMirror
+    // 6 was measured refusing `execCommand('insertText')` outright, so on Replit
+    // this may simply fall through to the paste it already uses today. Harmless
+    // either way: both routes are attempted, and neither is removed.
+    useDirectInsertFirst: true,
   });
 }

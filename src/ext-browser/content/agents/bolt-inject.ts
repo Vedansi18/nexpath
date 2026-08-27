@@ -28,5 +28,12 @@ export async function injectPromptText(text: string): Promise<void> {
     // prompt that HAD arrived — measured live on Bolt at 300 … 50,000
     // characters (2026-08-27). See landing-check.ts for the full reasoning.
     useRenderedLandingText: true,
+    // Deliver through the page world's `execCommand('insertText')` before the
+    // paste event. Bolt's own paste handler is what reaches for
+    // `navigator.clipboard.read()` and raises Chrome's "See text and images
+    // copied to the clipboard" prompt; not dispatching a paste at all is what
+    // removes it. Measured on Bolt's real composer: 2,400 chars, 2 ms, exact,
+    // zero clipboard calls (2026-08-27). The paste stays as the fallback.
+    useDirectInsertFirst: true,
   });
 }
