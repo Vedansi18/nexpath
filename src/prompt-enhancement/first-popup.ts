@@ -74,7 +74,7 @@ export interface PromptEnhancementMpsFirstPopupModelV1 {
   actions: {
     submitCurrentBody: 'typed_current_body_plus_details';
     cancelRemainingSequence: {
-      label: 'Cancel (remaining multi-prompt sequence)';
+      label: 'Use original prompt';
       state: PromptEnhancementMpsCancelInputV1['state'];
       disposition: PromptEnhancementDisposition;
     };
@@ -216,7 +216,7 @@ export function buildPromptEnhancementMpsFirstPopupV1(
       actions: {
         submitCurrentBody: 'typed_current_body_plus_details',
         cancelRemainingSequence: {
-          label: 'Cancel (remaining multi-prompt sequence)',
+          label: 'Use original prompt',
           state: input.cancel.state,
           disposition: input.cancel.disposition,
         },
