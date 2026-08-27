@@ -46,12 +46,20 @@ export async function injectPromptText(text: string): Promise<void> {
     // the same one replit.ts's own `readComposerText` already works around on
     // the capture side. See landing-check.ts.
     useRenderedLandingText: true,
-    // Same reason as Bolt. Note this only reaches the bridge for a prompt SHORT
-    // enough to skip chunking — a chunked body still bypasses the bridge
-    // entirely, which is the next phase's problem, not this one's. And CodeMirror
-    // 6 was measured refusing `execCommand('insertText')` outright, so on Replit
-    // this may simply fall through to the paste it already uses today. Harmless
-    // either way: both routes are attempted, and neither is removed.
-    useDirectInsertFirst: true,
+    // ⛔ `useDirectInsertFirst` is deliberately NOT set here, unlike Bolt.
+    //
+    // It would make CodeMirror 6 receive a select-all + `execCommand('insertText')`
+    // on a path where it has only ever received a paste — and the one measurement
+    // we have of CM6 refusing that command was taken from the isolated world, not
+    // from this page-world sequence, and was never verified live. "Returns false
+    // and inserts nothing" is almost certainly harmless, but "almost certainly" is
+    // not a basis for putting a new first touch on the user's composer.
+    //
+    // It also buys little here: the flag only reaches the bridge for a prompt
+    // SHORT enough to skip chunking, and a real enhanced prompt (2.1-2.5k) is
+    // always chunked, so it bypasses the bridge entirely. Replit's own route —
+    // including whether the bridge can carry a chunked body at all — is decided in
+    // its own phase, against a live composer. Until then Replit keeps today's
+    // shipped bridge order exactly, and still gets the landing-check fix above.
   });
 }
