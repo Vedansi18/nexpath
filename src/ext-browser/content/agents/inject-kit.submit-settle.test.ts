@@ -137,6 +137,27 @@ describe('the settle is a ceiling, not a sleep', () => {
     expect(clicked).toHaveBeenCalledTimes(1);
   });
 
+  it('⭐ a site that clears in the LAST poll window is not double-submitted', async () => {
+    // The two-read rule exists to end the settle EARLY. At the ceiling the
+    // shipped rule stands: the flat sleep took ONE reading here and returned if
+    // the composer was clear. A site that clears inside the final window yields
+    // a single clear read — refusing it would fire the button fallback on a
+    // prompt that has already been sent.
+    vi.useFakeTimers();
+    const clearAt = Date.now() + 780;             // between the 15th and 16th poll
+    makeComposer(() => (Date.now() >= clearAt ? '' : BODY));
+    const clicked = makeButton();
+    stubBridgeAsLanded();
+
+    const done = injectViaSimulatedPaste('.tiptap.ProseMirror', BODY, SEND, {
+      useRenderedLandingText: true,
+    });
+    await vi.advanceTimersByTimeAsync(1_500);
+    await done;
+
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
   it('⭐ a SINGLE transient clear does not end the settle — the button fallback still fires', async () => {
     vi.useFakeTimers();
     // Empty on exactly one read, as an editor mid-reconcile reports. Acting on

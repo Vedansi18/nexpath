@@ -382,7 +382,18 @@ async function submitInjectedPrompt(
     } else if (++clearReads >= SUBMIT_SETTLE_CLEAR_READS) {
       return;                                          // gone, twice — the Enter submit worked
     }
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline) {
+      // The ceiling, where the flat sleep took its ONE reading and returned if
+      // the composer was clear. Decide the same way on the reading just taken.
+      //
+      // Without this, a site that clears inside the last poll window produces a
+      // single clear read, which the two-read rule refuses — and the button
+      // fallback then fires on a prompt that has ALREADY been sent. The extra
+      // evidence is there to end the settle EARLY; at the ceiling the shipped
+      // rule stands.
+      if (clearReads > 0) return;
+      break;
+    }
   }
   const button = document.querySelector<HTMLButtonElement>(submitButtonSelector);
   if (button && !button.disabled) {
