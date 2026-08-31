@@ -1,4 +1,10 @@
 import browser from 'webextension-polyfill';
+import {
+  NEXPATH_TOKEN_KEY,
+  NEXPATH_BASE_URL_KEY,
+  DEFAULT_API_BASE_URL,
+  isValidNexpathTokenShape,
+} from '../adapters/llm-credentials.js';
 
 const KEY_NAME = 'openai_api_key';
 const MODELS_URL = 'https://api.openai.com/v1/models';
@@ -24,6 +30,19 @@ if (versionEl) {
     versionEl.textContent = '';   // manifest unavailable — say nothing rather than lie
   }
 }
+
+// ── Nexpath token (D-5 branch build — optional alternative to an OpenAI key) ──
+const tokenInput      = document.getElementById('nexpath-token')      as HTMLInputElement;
+const tokenSaveBtn    = document.getElementById('save-token')         as HTMLButtonElement;
+const tokenTestBtn    = document.getElementById('test-token')         as HTMLButtonElement;
+const tokenStatus     = document.getElementById('token-status')       as HTMLParagraphElement;
+// The Service URL FIELD was removed 2026-08-31 (owner: not useful to users —
+// the shipped default is always right for them). The STORAGE override
+// (NEXPATH_BASE_URL_KEY) stays honoured for developers/self-hosters, settable
+// from the console; when present it still drives Test and the disclosure.
+const baseUrlInput    = document.getElementById('nexpath-base-url')   as HTMLInputElement | null;
+let storedBaseUrl = '';
+const tokenDisclosure = document.getElementById('token-disclosure')   as HTMLParagraphElement;
 
 // ── Project role — same value set, labels and default as the CLI installer
 // (src/cli/commands/install.ts's ROLE_OPTIONS).
@@ -86,9 +105,111 @@ async function loadKey(): Promise<void> {
     input.value = saved;
     setKeyStatus('Key saved — click Test to validate', '');
   }
+  await loadToken();
   await loadRole();
   await renderSelfCheck();
 }
+
+// ── Nexpath token persistence ────────────────────────────────────────────────
+
+function setTokenStatus(msg: string, kind: 'ok' | 'err' | ''): void {
+  tokenStatus.textContent = msg;
+  tokenStatus.className = `status ${kind}`;
+}
+
+/** The configured service base URL — legacy field, stored override, or default. */
+function serviceBaseUrl(): string {
+  const value = baseUrlInput?.value.trim() || storedBaseUrl;
+  return (value.length > 0 ? value : DEFAULT_API_BASE_URL).replace(/\/+$/, '');
+}
+
+/**
+ * The Mode-B disclosure — mirrors the CLI's `modeBDisclosureLine()` wording
+ * (D-6): plainly says prompt context leaves the machine and names the real
+ * destination. ⛔ Never "nothing leaves your machine" — untrue in this mode.
+ */
+function renderTokenDisclosure(hasToken: boolean): void {
+  if (!hasToken) { tokenDisclosure.hidden = true; return; }
+  let host = serviceBaseUrl();
+  try { host = new URL(serviceBaseUrl()).host; } catch { /* keep the raw value */ }
+  tokenDisclosure.textContent =
+    `With no OpenAI API key configured, prompt context will be sent to ${host} ` +
+    'to be answered. This service stores no prompt text.';
+  tokenDisclosure.hidden = false;
+}
+
+async function loadToken(): Promise<void> {
+  const result = await browser.storage.local.get([NEXPATH_TOKEN_KEY, NEXPATH_BASE_URL_KEY]);
+  const savedToken = result[NEXPATH_TOKEN_KEY];
+  const savedBase = result[NEXPATH_BASE_URL_KEY];
+  if (typeof savedBase === 'string' && savedBase.length > 0) {
+    storedBaseUrl = savedBase;
+    if (baseUrlInput) baseUrlInput.value = savedBase;
+  }
+  const hasToken = typeof savedToken === 'string' && savedToken.length > 0;
+  if (hasToken) {
+    tokenInput.value = savedToken as string;
+    setTokenStatus('Token saved — click Test to validate', '');
+  }
+  renderTokenDisclosure(hasToken);
+}
+
+tokenSaveBtn.addEventListener('click', async () => {
+  const token = tokenInput.value.trim();
+  if (!token) { setTokenStatus('Please enter a token', 'err'); return; }
+  if (!isValidNexpathTokenShape(token)) {
+    setTokenStatus('Token must look like npk_…', 'err');
+    return;
+  }
+  try {
+    const payload: Record<string, string> = { [NEXPATH_TOKEN_KEY]: token };
+    if (baseUrlInput) payload[NEXPATH_BASE_URL_KEY] = baseUrlInput.value.trim();
+    await browser.storage.local.set(payload);
+    setTokenStatus('Saved — click Test to validate', '');
+    renderTokenDisclosure(true);
+    await renderSelfCheck();
+  } catch (err) {
+    setTokenStatus(`Save failed: ${String(err)}`, 'err');
+  }
+});
+
+// Validates against the service's own identity endpoint (`GET <base>/me`) —
+// a real bearer-authenticated call, the token-mode analogue of the OpenAI
+// key's GET /v1/models probe above.
+tokenTestBtn.addEventListener('click', async () => {
+  const token = tokenInput.value.trim();
+  if (!token) { setTokenStatus('Enter a token first', 'err'); return; }
+  if (!isValidNexpathTokenShape(token)) {
+    setTokenStatus('Token must look like npk_…', 'err');
+    return;
+  }
+
+  setTokenStatus('Validating…', '');
+  tokenTestBtn.disabled = true;
+
+  try {
+    const resp = await fetch(`${serviceBaseUrl()}/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (resp.ok) {
+      const payload: Record<string, string> = { [NEXPATH_TOKEN_KEY]: token };
+      if (baseUrlInput) payload[NEXPATH_BASE_URL_KEY] = baseUrlInput.value.trim();
+      await browser.storage.local.set(payload);
+      setTokenStatus('Token valid ✅', 'ok');
+      renderTokenDisclosure(true);
+    } else if (resp.status === 401) {
+      setTokenStatus('Invalid token ❌ — regenerate it on your account page', 'err');
+    } else {
+      setTokenStatus(`Service returned ${resp.status} — try again`, 'err');
+    }
+  } catch {
+    setTokenStatus('Network error — check your connection and try again', 'err');
+  } finally {
+    tokenTestBtn.disabled = false;
+    await renderSelfCheck();
+  }
+});
 
 // ── Project role persistence ──────────────────────────────────────────────────
 
@@ -161,16 +282,34 @@ function escHtml(str: string): string {
 }
 
 async function renderSelfCheck(): Promise<void> {
-  const result = await browser.storage.local.get([KEY_NAME, ROLE_KEY]);
+  const result = await browser.storage.local.get([KEY_NAME, ROLE_KEY, NEXPATH_TOKEN_KEY]);
   const hasKey = typeof result[KEY_NAME] === 'string' && (result[KEY_NAME] as string).length > 0;
+  const hasToken =
+    typeof result[NEXPATH_TOKEN_KEY] === 'string' && (result[NEXPATH_TOKEN_KEY] as string).length > 0;
 
   const roleValue = typeof result[ROLE_KEY] === 'string' ? result[ROLE_KEY] as string : DEFAULT_ROLE;
   const roleLabel = ROLE_OPTIONS.find((o) => o.value === roleValue)?.label ?? roleValue;
 
+  // The effective credential, mirroring llm-credentials.ts's resolution order:
+  // own OpenAI key wins, then the Nexpath token, else nothing runs.
+  const route = hasKey
+    ? 'OpenAI — your API key'
+    : hasToken
+      ? 'Nexpath service — token'
+      : 'Not configured ❌';
+
   checkEl.innerHTML = `
     <div class="check-row">
       <span class="check-label">API key</span>
-      <span class="check-val ${hasKey ? 'ok' : 'err'}">${hasKey ? 'Saved ✅' : 'Not set ❌'}</span>
+      <span class="check-val ${hasKey ? 'ok' : hasToken ? '' : 'err'}">${hasKey ? 'Saved ✅' : 'Not set'}</span>
+    </div>
+    <div class="check-row">
+      <span class="check-label">Nexpath token</span>
+      <span class="check-val ${hasToken ? 'ok' : ''}">${hasToken ? 'Saved ✅' : 'Not set'}</span>
+    </div>
+    <div class="check-row">
+      <span class="check-label">LLM route</span>
+      <span class="check-val ${hasKey || hasToken ? 'ok' : 'err'}">${route}</span>
     </div>
     <div class="check-row">
       <span class="check-label">Project role</span>

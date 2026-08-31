@@ -47,11 +47,10 @@ export type SubstitutionStrategy = 'body_rewrite' | 'composer_intercept';
  * bubble is painted at submit, so a rewrite creates no mismatch. `message` is the
  * single field to change.
  *
- * ONE LEG OF LOVABLE IS STILL UNPROVEN: which text it renders as the user bubble
- * once the response ARRIVES (the recon's released request came back HTTP 402, so
- * the server never answered). If a live block on Lovable shows the ORIGINAL text
- * in the transcript, flip Lovable to 'composer_intercept' here — one line, and the
- * gate follows automatically.
+ * The once-unproven Lovable leg is now PROVEN LIVE (2026-08-31, owner's real
+ * project): a blocked submit (23.5s hold, 1496-char replacement) rendered the
+ * ENHANCED text as the user bubble in the transcript — body_rewrite is correct
+ * for Lovable and no strategy flip is needed.
  *
  * A site listed as `body_rewrite` is gated in the page's fetch patch. A site
  * listed as `composer_intercept` is gated in the capture-phase composer listener

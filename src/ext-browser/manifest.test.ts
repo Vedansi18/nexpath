@@ -18,6 +18,13 @@ const EXPECTED_HOSTS = [
   'https://bolt.new/*',
   'https://*.stackblitz.com/*',
   'https://lovable.dev/*',
+  // Nexpath-token mode (llm-credentials.ts): the service worker fetches the
+  // configured Nexpath service directly, and unlike api.openai.com the service
+  // sends no CORS headers — host permission is what authorises the call.
+  // The production origin is the shipped default base URL; localhost stays
+  // permitted for developers pointing the Advanced field at a local instance.
+  'http://localhost:8000/*',
+  'https://parseos.tech/*',
 ];
 
 describe('ext-browser manifests — permission surface', () => {

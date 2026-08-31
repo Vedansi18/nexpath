@@ -28,6 +28,8 @@ import { profileToRegister } from '../../decision-session/register.js';
 import { IdbStorageAdapter } from '../adapters/storage-idb.js';
 import { makeMemoryStoragePort } from '../adapters/memory-storage.js';
 import { FetchLLMAdapter } from '../adapters/llm-fetch.js';
+import { applyLLMCredentialEnv, resolveLLMCredentials } from '../adapters/llm-credentials.js';
+import { normalizePromptForDedup } from '../adapters/prompt-dedup.js';
 import { ChromeStorageKeyAdapter } from '../adapters/storage-chrome.js';
 import { BrowserClockAdapter } from '../adapters/clock-browser.js';
 import { ConsoleLogAdapter } from '../adapters/log-console.js';
@@ -734,10 +736,14 @@ async function decideHeldSubmit(
   browser.tabs.sendMessage(tabId, { type: 'nexpath:pe-preparing', projectRoot })
     .catch(() => { /* tab gone — the notice is advisory only */ });
 
-  const [apiKey, sequenceEnabled] = await Promise.all([
-    keyStore.getKey('openai_api_key'),
+  const [llmCreds, sequenceEnabled] = await Promise.all([
+    resolveLLMCredentials(keyStore),
     resolvePeSequenceEnabled(projectRoot),
   ]);
+  // Publish key + base URL into the engine's polyfilled env (own key wins;
+  // Nexpath-token mode routes through the configured service — llm-credentials.ts).
+  applyLLMCredentialEnv(llmCreds);
+  const apiKey = llmCreds.apiKey;
 
   const popup = runBrowserPePopup({
     log,
@@ -847,10 +853,10 @@ async function runPromptSubmitPipeline(
   const now = clock.now();
 
   // ── Step 1: Load persisted session state + config ───────────────────────────
-  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw, projectRoleRaw, langOverrideRaw, forceAdvisoryRaw] = await Promise.all([
+  const [loadedState, lang, llmCreds, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw, projectRoleRaw, langOverrideRaw, forceAdvisoryRaw] = await Promise.all([
     idb.loadSessionState(projectRoot),
     idb.getProjectDetectedLanguage(projectRoot),
-    keyStore.getKey('openai_api_key'),
+    resolveLLMCredentials(keyStore),
     keyStore.getKey('advisory_frequency'),
     keyStore.getKey('role'),
     keyStore.getKey(lastPromptKeyFor(projectRoot)),
@@ -870,11 +876,25 @@ async function runPromptSubmitPipeline(
     keyStore.getKey(FORCE_ADVISORY_KEY),
   ]);
 
+  // Publish the resolved credential (own OpenAI key wins; a stored Nexpath
+  // token routes the adapters through the configured service via the env's
+  // OPENAI_BASE_URL — llm-credentials.ts). Every `apiKey` gate below behaves
+  // exactly as before: the variable is the effective bearer, null when neither
+  // credential exists.
+  applyLLMCredentialEnv(llmCreds);
+  const apiKey = llmCreds.apiKey;
+
   // ── Step 1.2: Cross-page duplicate guard (see CROSS_PAGE_PROMPT_DEDUP_MS) ───
+  // Whitespace-insensitive compare: the capture channels serialize the SAME
+  // submission differently (composer innerText vs request body vs the
+  // prompt-injected marker), and exact `===` let a "Use enhanced" echo through
+  // as two billed pipeline runs (F1, live 2026-08-29 — see prompt-dedup.ts).
   if (lastPromptRaw) {
     try {
       const last = JSON.parse(lastPromptRaw) as { text?: unknown; at?: unknown };
-      if (last.text === promptText && typeof last.at === 'number' && now - last.at < CROSS_PAGE_PROMPT_DEDUP_MS) {
+      if (typeof last.text === 'string'
+        && normalizePromptForDedup(last.text) === normalizePromptForDedup(promptText)
+        && typeof last.at === 'number' && now - last.at < CROSS_PAGE_PROMPT_DEDUP_MS) {
         log.debug('prompt_submit_deduped', { projectRoot, ageMs: now - last.at });
         return;
       }
@@ -1578,10 +1598,13 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
     return;
   }
 
-  const [apiKey, sequenceEnabled] = await Promise.all([
-    keyStore.getKey('openai_api_key'),
+  const [llmCreds, sequenceEnabled] = await Promise.all([
+    resolveLLMCredentials(keyStore),
     resolvePeSequenceEnabled(projectRoot),
   ]);
+  // Own key wins; token mode routes via the service (llm-credentials.ts).
+  applyLLMCredentialEnv(llmCreds);
+  const apiKey = llmCreds.apiKey;
   const stopOutcome = await runBrowserPePopup({
     log,
     projectRoot,
@@ -1652,11 +1675,14 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
 async function handleResponseStopLegacyAdvisory(projectRoot: string, tabId: number | undefined): Promise<void> {
   const key   = pendingAdvisoryKeyFor(projectRoot);
   const ogKey = pendingAdvisoryOgKeyFor(projectRoot);
-  let [raw, ogRaw, apiKey] = await Promise.all([
+  let [raw, ogRaw] = await Promise.all([
     keyStore.getKey(key),
     keyStore.getKey(ogKey),
-    keyStore.getKey('openai_api_key'),
   ]);
+  // Own key wins; token mode routes via the service (llm-credentials.ts).
+  const llmCreds = await resolveLLMCredentials(keyStore);
+  applyLLMCredentialEnv(llmCreds);
+  const apiKey = llmCreds.apiKey;
 
   if (!raw) {
     // Nothing queued YET — but the submit-path decision may still be running (see

@@ -680,6 +680,21 @@ describe('service-worker.ts', () => {
       expect(logDebugMock).toHaveBeenCalledWith('prompt_submit_deduped', expect.objectContaining({ projectRoot: 'https://bolt.new' }));
     });
 
+    it('dedups a whitespace-variant echo of the same prompt within the window (F1, live 2026-08-29)', async () => {
+      // The "Use enhanced" flow: the prompt-injected marker stores the panel's
+      // text, then the capture channels re-read the SAME submission with drifted
+      // whitespace (composer innerText vs fetch body). Exact `===` let it through
+      // and the turn was billed twice — 1312 vs 1320 input tokens, live on Bolt.
+      mockDedupRecord({ text: 'My original request:\nAdd a hero section\n\ncomponent', at: 900 });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener, 'My original request:\n\nAdd a hero section component\n');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(classifyPrompt).not.toHaveBeenCalled();
+      expect(mgrProcessPrompt).not.toHaveBeenCalled();
+      expect(logDebugMock).toHaveBeenCalledWith('prompt_submit_deduped', expect.objectContaining({ projectRoot: 'https://bolt.new' }));
+    });
+
     it('processes normally when the text differs and records the new prompt', async () => {
       mockDedupRecord({ text: 'Add a hero section component', at: 900 });
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
