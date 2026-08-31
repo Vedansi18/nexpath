@@ -173,9 +173,38 @@ describe('a failed post is swallowed', () => {
   });
 
   it('with no fetch available at all, it returns false rather than throwing', async () => {
+    // globalThis.fetch is REMOVED for this one case, not left in place with a
+    // short timeout: `opts.fetch ?? globalThis.fetch` would otherwise reach the
+    // real one and fire a live request at PostHog from the test suite.
     const { store } = memStore();
+    const saved = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = undefined;
+    try {
+      await expect(sendRating(store, 2, { now: T0 })).resolves.toBe(false);
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).fetch = saved;
+    }
+  });
 
-    await expect(sendRating(store, 2, { fetch: undefined, timeoutMs: 1 })).resolves.toBeTypeOf('boolean');
+  it('⭐ no test in this file can reach the network', async () => {
+    // The guard for the mistake above: every send here must go through an
+    // injected fetch. If one ever forgets, this fails instead of quietly
+    // posting a test event into production analytics.
+    const { store } = memStore();
+    const saved = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = () => { throw new Error('live network reached from a test'); };
+    try {
+      const { fetch, calls } = fakeFetch();
+      await sendRating(store, 1, { fetch, now: T0 });
+      await flushLifecycle(store, { fetch });
+      expect(calls.length).toBeGreaterThan(0);
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).fetch = saved;
+    }
   });
 });
 
