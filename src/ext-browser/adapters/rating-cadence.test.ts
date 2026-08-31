@@ -293,6 +293,20 @@ describe('contract with the shipped CLI copy (the two must not drift)', () => {
     expect(shipped).toContain('Math.min(now - state.lastActivityAt, IDLE_CAP_MS)');
   });
 
+  it('the CLI still FEEDS on submit only and READS on stop — the split this port mirrors', () => {
+    // Why this is pinned and not merely commented: the browser worker deliberately
+    // has no stop-side heartbeat (service-worker.ts, handleResponseStop), and the
+    // only justification for that absence is the CLI's own split. If the CLI ever
+    // starts feeding on stop, this fails and the browser should follow.
+    const auto = readFileSync(join(process.cwd(), 'src', 'cli', 'commands', 'auto.ts'), 'utf8');
+    const stop = readFileSync(join(process.cwd(), 'src', 'cli', 'commands', 'stop.ts'), 'utf8');
+
+    expect(auto).toContain('recordActivity(store);');     // the one producer
+    expect(stop).not.toMatch(/\brecordActivity\s*\(/);    // stop never feeds
+    expect(stop).toContain('isFeedbackEligible(store)');  // stop reads
+    expect(stop).toContain('markFeedbackShown(store);');  // ...and resets
+  });
+
   it('the shipped markFeedbackShown still resets all three values', () => {
     expect(shipped).toContain('writeNum(store, KEY_ACTIVE_MS, 0);');
     expect(shipped).toContain('writeNum(store, KEY_LAST_ACTIVITY_AT, now);');

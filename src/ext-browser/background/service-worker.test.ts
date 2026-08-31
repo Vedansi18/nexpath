@@ -2700,11 +2700,15 @@ describe('service-worker.ts', () => {
   /**
    * The rating-popup cadence heartbeats (Phase 1, item #18).
    *
-   * These exist because deleting BOTH calls from the worker left the whole suite
+   * These exist because deleting the call from the worker left the whole suite
    * green: the adapter is well covered on its own, and nothing observed whether
    * the worker ever calls it. A cadence that is never fed simply never reaches
    * its threshold, and the popup silently never appears — the quietest possible
    * failure. So these assert the WIRE, not the arithmetic.
+   *
+   * Two of the three are NEGATIVE. Where the heartbeat must NOT fire, an extra
+   * call is just as silent as a missing one: the numbers still move, they are
+   * simply wrong, and the popup comes due earlier than the CLI would ask.
    */
   describe('rating cadence heartbeats', () => {
     const cadenceWrites = (): string[] => keyStoreSetKey.mock.calls
@@ -2726,7 +2730,13 @@ describe('service-worker.ts', () => {
       expect(cadenceWrites()).toContain('feedback_last_activity_at');
     });
 
-    it('a response stop records activity too', async () => {
+    it('⭐ a response stop does NOT — stop is the READ side, exactly as in the CLI', async () => {
+      // The CLI has ONE production `recordActivity` call site, the submit hook
+      // (auto.ts:938); stop consumes instead (stop.ts:513,530 — isFeedbackEligible
+      // / markFeedbackShown). Feeding on stop as well counts one slow turn twice:
+      // a prompt→stop→prompt spanning 20 minutes in two 10-minute halves banks
+      // both halves, where the CLI sees a single 20-minute gap and discards it as
+      // an idle break past IDLE_CAP_MS.
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
 
@@ -2736,10 +2746,12 @@ describe('service-worker.ts', () => {
         sendResponse,
       );
 
-      // The stop handler is DETACHED (`void handleResponseStop(...)`) and the ack
-      // is sent before it starts, so waiting on sendResponse would race past the
-      // heartbeat. Wait for the write itself.
-      await vi.waitFor(() => expect(cadenceWrites()).toContain('feedback_last_activity_at'));
+      // The stop handler is DETACHED (`void handleResponseStop(...)`) and acks
+      // before it starts, so an immediate assertion would pass on a handler that
+      // has not run yet. Wait for a write this path DOES make, then check that no
+      // cadence write rode along with it.
+      await vi.waitFor(() => expect(keyStoreGetKey).toHaveBeenCalledWith('nexpath_advisory_legacy_surface'));
+      expect(cadenceWrites()).toEqual([]);
     });
 
     it('⭐ a DUPLICATE submit does not — the extension must not inflate the usage it measures', async () => {

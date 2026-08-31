@@ -1490,10 +1490,15 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     log.debug('response_stop_quiet_window', { projectRoot });
     return;
   }
-  // Second cadence heartbeat, below the echo guard for the same reason the
-  // submit one sits below the dedup guard: a stop this extension provoked must
-  // not count as the user working. See adapters/rating-cadence.ts.
-  await recordRatingActivity(keyStore, clock.now());
+  // NO cadence heartbeat here, deliberately. The CLI splits the two sides:
+  // `recordActivity` has exactly one production call site, the submit hook
+  // (auto.ts:938), and stop is the READ side (stop.ts:513,530 —
+  // isFeedbackEligible / markFeedbackShown). Feeding here too would count one
+  // slow turn twice: a prompt→stop→prompt spanning 20 minutes in two 10-minute
+  // halves banks both halves, where the CLI sees one 20-minute gap and discards
+  // it as an idle break past IDLE_CAP_MS. The popup would come due sooner in the
+  // browser than in the CLI on exactly the sessions agents are slowest.
+  // A test in service-worker.test.ts pins this absence.
   let legacySurface = false;
   try {
     legacySurface = (await keyStore.getKey(ADVISORY_LEGACY_SURFACE_KEY)) === 'enabled';
