@@ -11,8 +11,7 @@
     "https://*.replit.com/*",
     "https://bolt.new/*",
     "https://*.stackblitz.com/*",
-    "https://lovable.dev/*",
-    "https://us.i.posthog.com/*"
+    "https://lovable.dev/*"
   ],
   "background": {
     "scripts": ["service-worker.js"],

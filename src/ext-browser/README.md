@@ -84,8 +84,7 @@ workflow without slowing it down.
 - **The only thing that sends is the rating prompt, and only when you answer it.** Occasionally
   Nexpath asks how it is working out for you. Choosing a rating is what sends — and it sends only
   a random installation ID (not tied to you or your machine), your 1–4 rating, and the timestamps
-  above. Dismissing the prompt sends nothing and clears nothing. This is why the extension asks for
-  access to `us.i.posthog.com`, the analytics host that receives it.
+  above. Dismissing the prompt sends nothing and clears nothing.
 - **Your prompt text is never part of that.** The only place prompt text goes is OpenAI, with your
   own key, as described above.
 

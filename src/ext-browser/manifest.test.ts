@@ -13,7 +13,7 @@ const load = (target: 'chrome' | 'firefox') =>
   JSON.parse(readFileSync(new URL(`./manifest.${target}.json`, import.meta.url), 'utf8'));
 
 const EXPECTED_PERMISSIONS = ['storage', 'tabs'];
-/** The four agent sites the extension actually runs on. */
+/** The four agent sites the extension runs on — and the whole of `host_permissions`. */
 const EXPECTED_AGENT_HOSTS = [
   'https://*.replit.com/*',
   'https://bolt.new/*',
@@ -22,17 +22,22 @@ const EXPECTED_AGENT_HOSTS = [
 ];
 
 /**
- * The ONLY non-agent host, and the only one the extension talks to rather than
- * runs on: the PostHog capture endpoint the rating popup posts to
- * (`adapters/telemetry-send.ts`).
+ * The rating popup POSTs to this host (`adapters/telemetry-send.ts`), and it is
+ * deliberately NOT in `host_permissions`.
  *
- * It is listed separately because the distinction is the whole point of this
- * file — every entry here is a line in the install dialog. Adding this one took
- * that dialog from "4 domains" to "5", which is user-visible and store-reviewed.
+ * `host_permissions` exists to bypass CORS. Measured against the live endpoint
+ * (OPTIONS preflight, 2026-08-31): `us.i.posthog.com/capture/` reflects a
+ * `chrome-extension://` origin, allows `POST`, and allows the `content-type`
+ * header — so an ordinary CORS request from the worker succeeds without it.
+ *
+ * Declaring it anyway would request a permission the extension does not need and
+ * add a fifth line to the install dialog for nothing. Least privilege, and the
+ * store reviewers' preference. If a future endpoint stops sending CORS headers,
+ * THAT is when this has to be added — and the user-visible cost paid.
  */
-const EXPECTED_TELEMETRY_HOST = 'https://us.i.posthog.com/*';
+const TELEMETRY_HOST_NOT_REQUESTED = 'https://us.i.posthog.com/*';
 
-const EXPECTED_HOSTS = [...EXPECTED_AGENT_HOSTS, EXPECTED_TELEMETRY_HOST];
+const EXPECTED_HOSTS = EXPECTED_AGENT_HOSTS;
 
 describe('ext-browser manifests — permission surface', () => {
   for (const target of ['chrome', 'firefox'] as const) {
@@ -47,18 +52,17 @@ describe('ext-browser manifests — permission surface', () => {
         expect(manifest.permissions).not.toContain('scripting');
       });
 
-      it('scopes host_permissions to the supported agents plus the one telemetry host', () => {
+      it('scopes host_permissions to the supported agents only', () => {
         expect(manifest.host_permissions).toEqual(EXPECTED_HOSTS);
       });
 
-      it('runs on exactly four agent sites — the telemetry host is talked TO, not run on', () => {
-        // A content script matching the PostHog host would be a different kind of
-        // permission entirely; the send is a fetch from the worker.
+      it('⭐ does NOT request the telemetry host — the send works over plain CORS', () => {
+        // Re-adding it would cost a fifth line in the install dialog and buy
+        // nothing. See the constant's comment for the measurement.
+        expect(manifest.host_permissions).not.toContain(TELEMETRY_HOST_NOT_REQUESTED);
         const matches = (manifest.content_scripts ?? [])
           .flatMap((cs: { matches?: string[] }) => cs.matches ?? []);
-        expect(matches).not.toContain(EXPECTED_TELEMETRY_HOST);
-        expect(manifest.host_permissions.filter((h: string) => h !== EXPECTED_TELEMETRY_HOST))
-          .toEqual(EXPECTED_AGENT_HOSTS);
+        expect(matches).not.toContain(TELEMETRY_HOST_NOT_REQUESTED);
       });
 
       it('is MV3 and version-locked', () => {

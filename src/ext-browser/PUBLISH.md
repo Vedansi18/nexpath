@@ -131,14 +131,14 @@ once testing is done.
 - **Name:** Nexpath · **Category:** Developer Tools.
 - **Summary:** "Behaviour guidance for vibe coders using AI coding agents."
 - **Permission justifications** (both stores ask): `storage` (save key/settings), `tabs` (show the
-  popup on the right tab), and host access to **five** hosts —
-  `*.replit.com`, `bolt.new`, `*.stackblitz.com`, `lovable.dev` (the agent sites the extension runs
-  on) plus `us.i.posthog.com` (the analytics host it POSTs a rating to; it is talked **to**, never
-  run **on** — no content script matches it). (Injection is declarative — `content_scripts` +
-  `web_accessible_resources` — so no `scripting` permission is requested.)
-- ⚠️ **The install dialog now reads "Access your data for sites in 5 domains", not 4.** That dialog
-  is the browser's own consent UI and cannot be suppressed — only its contents change. Expect the
-  extra host to draw a reviewer question; the answer is the bullet above.
+  popup on the right tab), host access limited to
+  `*.replit.com`, `bolt.new`, `*.stackblitz.com`, `lovable.dev`. (Injection is declarative —
+  `content_scripts` + `web_accessible_resources` — so no `scripting` permission is requested.)
+- **The rating POST needs no host permission**, and none is requested. `host_permissions` exists to
+  bypass CORS, and `us.i.posthog.com/capture/` sends CORS headers for a `chrome-extension://` origin
+  (verified by OPTIONS preflight), so an ordinary request from the worker succeeds. The install
+  dialog therefore still reads **4 domains**. If a reviewer asks why an analytics host appears in the
+  source but not in the permissions, that is the answer.
 - **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
   a random installation ID, a 1–4 rating, and content-free action names + timestamps. **Never**
   prompt text, option text, URLs or project paths. Keep this identical to the *Privacy* section of

@@ -57,7 +57,21 @@ import {
   type LifecycleSignalsKeyStore,
 } from './lifecycle-signals.js';
 
-/** `store/config.ts:15`. */
+/**
+ * `store/config.ts:15`.
+ *
+ * Reached WITHOUT a `host_permissions` entry, and that is deliberate.
+ * `host_permissions` exists to bypass CORS; measured against the live endpoint
+ * (OPTIONS preflight, 2026-08-31) `us.i.posthog.com/capture/` reflects a
+ * `chrome-extension://` origin, allows `POST` and allows `content-type`, so an
+ * ordinary CORS request from the worker succeeds on its own. Declaring the host
+ * would request a permission this does not need and add a fifth line to the
+ * install dialog for nothing. `manifest.test.ts` pins the absence.
+ *
+ * If this endpoint ever stops sending CORS headers the send starts failing
+ * silently — `postEnvelope` swallows it, and the signals stay buffered. That is
+ * when the host permission has to be added, and its user-visible cost paid.
+ */
 export const POSTHOG_ENDPOINT = 'https://us.i.posthog.com/capture/';
 
 /** `store/config.ts:16` — a PUBLIC PostHog ingest key; write-only by design. */
