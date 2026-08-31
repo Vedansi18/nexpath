@@ -10,6 +10,8 @@
  * because the store is different: a `storage.local` value can be corrupt or
  * unreadable in a way a table the CLI exclusively owns cannot.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import {
   readCadence,
@@ -248,5 +250,52 @@ describe('what the port does differently, and only because the store is differen
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+/**
+ * Same discipline `submit-hold-budget.test.ts:143-157` applies to its own port:
+ * read the shipped CLI module as text and pin the lines this copy mirrors. The
+ * tests above assert what THIS file does; without these, the CLI could change a
+ * threshold and both copies would keep passing while quietly disagreeing.
+ */
+describe('contract with the shipped CLI copy (the two must not drift)', () => {
+  const shipped = readFileSync(
+    join(process.cwd(), 'src', 'store', 'feedback-cadence.ts'), 'utf8',
+  );
+
+  it('the three thresholds match the shipped module exactly', () => {
+    expect(shipped).toContain('export const USAGE_THRESHOLD_MS = 2 * 60 * 60 * 1000;');
+    expect(shipped).toContain('export const MIN_GAP_MS = 2 * 24 * 60 * 60 * 1000;');
+    expect(shipped).toContain('export const IDLE_CAP_MS = 15 * 60 * 1000;');
+  });
+
+  it('the three storage keys match the shipped module exactly', () => {
+    expect(shipped).toContain("'feedback_active_ms'");
+    expect(shipped).toContain("'feedback_last_activity_at'");
+    expect(shipped).toContain("'feedback_last_shown_at'");
+  });
+
+  it('the shipped module still discards idle breaks the same way', () => {
+    expect(shipped).toContain('delta !== null && delta > 0 && delta <= IDLE_CAP_MS ? delta : 0');
+  });
+
+  it('the shipped module still gates eligibility the same way', () => {
+    expect(shipped).toContain('if (state.activeMs + tail < USAGE_THRESHOLD_MS) return false;');
+    expect(shipped).toContain('if (state.lastFeedbackAt === null) return true;');
+    expect(shipped).toContain('return now - state.lastFeedbackAt >= MIN_GAP_MS;');
+  });
+
+  it('the shipped live clamp is the same, minus the negative guard this port adds', () => {
+    // The CLI cannot see a backwards clock: its `now` comes from one process
+    // writing its own marker. storage.local can, so this port wraps the same
+    // expression in Math.max(..., 0). Everything else is identical.
+    expect(shipped).toContain('Math.min(now - state.lastActivityAt, IDLE_CAP_MS)');
+  });
+
+  it('the shipped markFeedbackShown still resets all three values', () => {
+    expect(shipped).toContain('writeNum(store, KEY_ACTIVE_MS, 0);');
+    expect(shipped).toContain('writeNum(store, KEY_LAST_ACTIVITY_AT, now);');
+    expect(shipped).toContain('writeNum(store, KEY_LAST_SHOWN_AT, now);');
   });
 });
