@@ -516,7 +516,17 @@ export async function runBrowserPePopup(
         // Drop any MPS command arriving mid-PE-loop (stale/hostile) — only the
         // offer stage may consume those.
         let received = await awaitPanelCommand();
-        while (received.type === 'mps_send' || received.type === 'mps_decline' || received.type === 'mps_cancel') {
+        // Wrong-stage commands are IGNORED here, never acted on — the same rule
+        // the MPS loop applies in the other direction.
+        //
+        // `rating` joined this list the moment it became an accepted command
+        // (Phase 4, #7). Before that the validator refused it at both gates, so
+        // it could not reach this loop at all; after it, `translate()` would have
+        // swept it into its catch-all `{ type: 'close' }` and CLOSED the PE
+        // popup, throwing away the user's enhanced prompt. A rating belongs to
+        // the rating surface and means nothing here.
+        const WRONG_STAGE = new Set(['mps_send', 'mps_decline', 'mps_cancel', 'rating']);
+        while (WRONG_STAGE.has(received.type)) {
           log.debug('pe_command_ignored_wrong_stage', { projectRoot, type: received.type });
           received = await awaitPanelCommand();
         }

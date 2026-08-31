@@ -638,3 +638,26 @@ describe('feedback persistence — PE-BR-11 closed (the CLI feedback store, brow
     expect(result.state).toBe('selected_original');
   });
 });
+
+describe('⭐ wrong-stage rating command', () => {
+  it('a rating command must NOT close the PE popup', async () => {
+    const { log } = makeLog();
+    let seq = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        seq = m.payload.viewSeq;
+        setTimeout(() => {
+          deliverPePanelCommand(log, ROOT, seq, { type: 'rating', rating: 3 });
+          setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'use_original' }); }, 0);
+        }, 0);
+      }
+      return { ok: true };
+    };
+    const { result } = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(result.state).toBe('selected_original');
+  });
+});
