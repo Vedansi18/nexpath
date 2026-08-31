@@ -199,11 +199,11 @@ export function setupPeListener(): void {
       // MV3 teardown: the same keepalive the PE panel uses (§4.1 M4 — already
       // handled, do not rebuild it).
       startKeepalive();
-      // Dispatched for symmetry with the PE branch. NOTE: nothing awaits it yet
-      // — `main-world-injector.ts:371` gates the ack promise on `isShowPeMsg`,
-      // so a rating currently resolves immediately with no proof of render.
-      // That matters for §4.1 M3 ("a failed push must not consume cadence") and
-      // belongs with the host wiring in Phase 5.
+      // The SW awaits this as its "the panel really exists" signal — the same
+      // event and the same promise the PE branch uses
+      // (`main-world-injector.ts`). It is what lets §4.1 M3 hold: a push that
+      // never rendered rejects, so the host can decline to consume cadence for
+      // a popup nobody saw.
       window.dispatchEvent(new CustomEvent('nexpath:pe-view-ack'));
       return;
     }
