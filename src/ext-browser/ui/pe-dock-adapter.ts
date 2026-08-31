@@ -48,6 +48,9 @@ import {
 import { fieldScroller } from './surfaces/surface-view.js';
 import { BODY_HINT, DETAILS_HINT, EDIT_KEYS_HINT, PE_FOOTER } from './surfaces/fixtures/pe.js';
 import { PEF_FOOTER } from './surfaces/fixtures/pef.js';
+import {
+  RATING_LABEL, RATING_QUESTION, RATING_FOOTER, ratingRows,
+} from './surfaces/fixtures/rating.js';
 import { MPS_FIRST_FOOTER } from './surfaces/fixtures/mps.js';
 
 const PEF_CATEGORY_BY_LABEL: Record<string, 'not_relevant_enough' | 'too_much_or_too_long'> = {
@@ -219,6 +222,27 @@ export function pefSurfaceModel(): SurfaceModel {
       },
     ],
     footer: PEF_FOOTER,
+  };
+}
+
+/**
+ * The advisory rating surface — the CLI's `runFeedbackPopup`
+ * (`decision-session/feedback-popup.ts`) as a dock surface: four scores worst →
+ * best, the transparency note above them, and a footer that makes clear
+ * skipping is free.
+ *
+ * Wholly static, unlike its three siblings here — nothing about it varies with
+ * the view — so the content lives in `fixtures/rating.ts` beside the CLI
+ * quotations, and this builds a FRESH model per call rather than handing out
+ * one shared object a caller could mutate.
+ */
+export function ratingSurfaceModel(): SurfaceModel {
+  return {
+    id: 'advisory_rating',
+    label: RATING_LABEL,
+    pinch: RATING_QUESTION,
+    rows: ratingRows(),
+    footer: RATING_FOOTER,
   };
 }
 
