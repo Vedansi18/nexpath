@@ -51,7 +51,18 @@ import {
   type PePanelCommandV1,
   type PeSequenceOfferViewV1,
   type PePanelViewV1,
+  type PeRatingViewV1,
 } from '../ui/pe-contract.js';
+import { markFeedbackShown } from '../adapters/rating-cadence.js';
+import {
+  flushLifecycle,
+  sendRating,
+  type FetchLike,
+  type TelemetryKeyStore,
+} from '../adapters/telemetry-send.js';
+
+/** Cadence + identity + buffer + sender all read one `storage.local` adapter. */
+type RatingStore = TelemetryKeyStore;
 
 // ── Command mailbox ─────────────────────────────────────────────────────────────
 //
@@ -580,6 +591,125 @@ export async function runBrowserPePopup(
     return { result, mpsFirstPopupSent: false };
   } finally {
     closePanel();
+    mailboxes.delete(projectRoot);
+  }
+}
+
+
+// ── The advisory rating popup ───────────────────────────────────────────────────
+
+export interface BrowserRatingPopupDeps {
+  log: LogPort;
+  projectRoot: string;
+  /** Same transport the PE popup uses — `browser.tabs.sendMessage(tabId, …)`. */
+  sendToTab: (msg: unknown) => Promise<unknown>;
+  /** Cadence, identity, signal buffer and the sender all read this one store. */
+  store: RatingStore;
+  /** Injected in tests so the real envelope builder runs against a fake wire. */
+  fetch?: FetchLike;
+  now?: () => number;
+}
+
+export type BrowserRatingOutcome =
+  | { state: 'rated'; rating: number }
+  | { state: 'dismissed' }
+  | { state: 'not_shown'; reasonCodes: string[] };
+
+/**
+ * Show the rating surface and act on the answer — the browser's
+ * `stop.ts:513-534`, which is where the CLI reads cadence and shows its own
+ * feedback popup.
+ *
+ * ── WHY THIS SHARES THE PE MAILBOX (§4.1 M1, M2) ────────────────────────────
+ *
+ * Item #7 put `rating` on `PePanelCommandV1`, so a rating click travels the
+ * EXISTING `nexpath:pe-command` route into `deliverPePanelCommand` — which
+ * drops anything whose echoed `viewSeq` does not match `box.expectedSeq`. So the
+ * view has to carry a seq and the box has to expect it before the push, or every
+ * click logs `pe_command_stale` and nothing happens.
+ *
+ * And it must be the SAME `mailboxes` map, not a second one: `isPePopupOpen` is
+ * `mailboxes.has(root)`, the dock is mount-once, and two maps would let a rating
+ * and a PE popup open onto one dock and clobber each other.
+ *
+ * ── WHAT IT DOES NOT DO ─────────────────────────────────────────────────────
+ *
+ * No timeout of its own. The CLI's popup waits for the user indefinitely, and so
+ * does this; if the tab goes away the panel's keepalive stops, the service
+ * worker is torn down, and the map goes with it (§4.1 M4 — the panel already
+ * owns teardown, do not rebuild it here).
+ */
+export async function runBrowserRatingPopup(
+  deps: BrowserRatingPopupDeps,
+): Promise<BrowserRatingOutcome> {
+  const { log, projectRoot, store } = deps;
+  const now = deps.now ?? (() => Date.now());
+
+  // §4.1 M2 — one surface per root, through the one map.
+  if (mailboxes.has(projectRoot)) {
+    log.debug('rating_popup_already_open', { projectRoot });
+    return { state: 'not_shown', reasonCodes: ['popup_already_open'] };
+  }
+
+  const box: Mailbox = { expectedSeq: 0, waiter: null, queued: null };
+  mailboxes.set(projectRoot, box);
+
+  try {
+    // One view, one seq. §4.1 M1: expected BEFORE the push, or the reply that
+    // comes back is dropped as stale.
+    const viewSeq = 1;
+    box.expectedSeq = viewSeq;
+    box.queued = null;
+
+    try {
+      await deps.sendToTab({
+        type: 'nexpath:show-rating',
+        projectRoot,
+        payload: { schemaVersion: PE_PANEL_SCHEMA_VERSION, kind: 'rating', viewSeq } satisfies PeRatingViewV1,
+      });
+    } catch (err) {
+      // §4.1 M3 — the push never rendered, so NO `markFeedbackShown`. Burning
+      // the two-day gap on a popup nobody saw is the one outcome worse than not
+      // asking: the user is not asked now, and not asked again for two days.
+      log.debug('rating_popup_render_failed', { projectRoot, error: String(err) });
+      return { state: 'not_shown', reasonCodes: ['panel_unreachable'] };
+    }
+    log.debug('rating_popup_shown', { projectRoot });
+
+    const command = await new Promise<PePanelCommandV1>((resolve) => {
+      if (box.queued !== null) {
+        const q = box.queued;
+        box.queued = null;
+        resolve(q);
+        return;
+      }
+      box.waiter = resolve;
+    });
+
+    if (command.type === 'rating') {
+      // §4.2 — ORDER MATTERS. The click is the consent for everything buffered,
+      // so the buffer is released FIRST and the rating follows it. Sending the
+      // rating first would put a numerator on the wire ahead of its denominator,
+      // and a flush that then failed would leave the two permanently unmatched.
+      await flushLifecycle(store, deps.fetch ? { fetch: deps.fetch } : {});
+      const sent = await sendRating(store, command.rating, deps.fetch ? { fetch: deps.fetch } : {});
+      // Marked shown whether or not the POST succeeded: the user was asked and
+      // answered. Re-asking because a network call failed would punish them for
+      // the network. `sent` is logged, not acted on.
+      await markFeedbackShown(store, now());
+      log.debug('rating_recorded', { projectRoot, sent });
+      return { state: 'rated', rating: command.rating };
+    }
+
+    // Anything else is a dismissal — Esc and the dock's ✕ both arrive as
+    // `close` (there is no "skipped" command; not answering IS closing).
+    // CLI parity, `stop.ts:530`: `markFeedbackShown` runs on EITHER outcome, and
+    // a dismissal sends nothing and flushes nothing.
+    await markFeedbackShown(store, now());
+    log.debug('rating_dismissed', { projectRoot, via: command.type });
+    return { state: 'dismissed' };
+  } finally {
+    void deps.sendToTab({ type: 'nexpath:pe-close', projectRoot }).catch(() => { /* panel gone */ });
     mailboxes.delete(projectRoot);
   }
 }

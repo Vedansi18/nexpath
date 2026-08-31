@@ -54,7 +54,8 @@ import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js
 import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/pe-pending-store.js';
 import { resolvePePopupCooldown, resolvePeSequenceEnabled } from '../adapters/pe-config.js';
 import { getPendingSequence, recordPendingSequence } from '../adapters/pe-sequence-store.js';
-import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
+import { deliverPePanelCommand, runBrowserPePopup, runBrowserRatingPopup } from './pe-popup-host.js';
+import { isFeedbackEligible as isRatingEligible } from '../adapters/rating-cadence.js';
 // Rating-popup cadence (Phase 1). Aliased on import: `recordActivity` is a
 // generic name in a 1,900-line worker, and this one measures exactly one thing.
 import { recordActivity as recordRatingActivity } from '../adapters/rating-cadence.js';
@@ -1553,6 +1554,45 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
       keyStore.setKey(pendingAdvisoryOgKeyFor(projectRoot), ''),
     ]);
     log.debug('advisory_removed_surface', { projectRoot });
+  }
+
+  // ── The rating popup gate (Phase 5, item #14) ─────────────────────────────
+  //
+  // PLACEMENT IS EXACT, and it is not "before the PE popup". It sits AFTER the
+  // silent advisory consume above and BEFORE the pending-PE section below:
+  //
+  //   - earlier, and the advisory row survives an extra turn — a behaviour
+  //     change nobody asked for;
+  //   - later, and it would run after `markPendingPeShown` has consumed the
+  //     pending PE row, so preempting would DESTROY the enhancement instead of
+  //     deferring it.
+  //
+  // Here, `getPendingPe` has not even been read yet, so an early return leaves
+  // the row exactly as it was and the PE popup opens on the next stop.
+  //
+  // §4.1 M5, accepted: that deferral ages the row against
+  // PE_PENDING_MAX_AGE_MS. If the user's next agent response is more than 30
+  // minutes away the enhancement is consumed silently as stale. Refreshing
+  // `createdAt` on preempt would re-open the cross-sitting resurrection that
+  // gate exists to prevent, so the trade is taken as-is.
+  //
+  // No tab, no popup: a rating cannot render into nothing, and asking the
+  // cadence to spend itself on an impossible render is exactly what §4.1 M3
+  // forbids. `not_shown` falls through to PE, so nothing is lost either way.
+  if (tabId !== undefined && await isRatingEligible(keyStore, clock.now())) {
+    const rating = await runBrowserRatingPopup({
+      log,
+      projectRoot,
+      store: keyStore,
+      sendToTab: (m) => browser.tabs.sendMessage(tabId, m),
+      now: () => clock.now(),
+    });
+    // Shown at all — answered or dismissed — means this turn belonged to the
+    // rating. The dock is mount-once, so PE cannot also open now.
+    if (rating.state !== 'not_shown') {
+      log.debug('pe_deferred_for_rating', { projectRoot, outcome: rating.state });
+      return;
+    }
   }
 
   const state = await idb.loadSessionState(projectRoot);

@@ -49,6 +49,7 @@ vi.mock('../adapters/pe-config.js', () => ({ resolvePePopupCooldown: vi.fn(), re
 vi.mock('../adapters/pe-sequence-store.js', () => ({ recordPendingSequence: vi.fn(), getPendingSequence: vi.fn() }));
 vi.mock('./pe-popup-host.js', () => ({
   runBrowserPePopup: vi.fn(),
+  runBrowserRatingPopup: vi.fn(),
   deliverPePanelCommand: vi.fn(),
 }));
 
@@ -74,7 +75,7 @@ const { isPromptEnhancementSequenceShapedTextV1 } = await import('./pe-engine.js
 const { getPendingPe, markPendingPeShown } = await import('../adapters/pe-pending-store.js');
 const { resolvePePopupCooldown, resolvePeSequenceEnabled } = await import('../adapters/pe-config.js');
 const { recordPendingSequence, getPendingSequence } = await import('../adapters/pe-sequence-store.js');
-const { runBrowserPePopup } = await import('./pe-popup-host.js');
+const { runBrowserPePopup, runBrowserRatingPopup } = await import('./pe-popup-host.js');
 
 const idbLoadSessionState = vi.fn();
 const idbGetProjectDetectedLanguage = vi.fn();
@@ -1646,6 +1647,94 @@ describe('service-worker.ts', () => {
       vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
       vi.mocked(recordPendingSequence).mockResolvedValue(undefined);
       vi.mocked(getPendingSequence).mockResolvedValue(null);
+      vi.mocked(runBrowserRatingPopup).mockResolvedValue({ state: 'not_shown', reasonCodes: ['x'] });
+    });
+
+    /**
+     * The rating gate (Phase 5, item #14). Cadence is empty in every other test
+     * here, so the gate is skipped and nothing else in this file changes.
+     */
+    describe('rating popup gate', () => {
+      /** Enough banked usage that `isFeedbackEligible` says yes. */
+      const eligible = (extra: Record<string, string> = {}) => {
+        keyStoreGetKey.mockImplementation(async (name: string) => {
+          if (name === 'feedback_active_ms') return String(3 * 60 * 60 * 1000);
+          if (name === 'feedback_last_activity_at') return String(Date.now());
+          return extra[name] ?? null;
+        });
+      };
+
+      it('⭐ eligible: the rating is shown, PE is DEFERRED, and the pending row is left intact', async () => {
+        eligible();
+        idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+        vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+        vi.mocked(runBrowserRatingPopup).mockResolvedValue({ state: 'rated', rating: 3 });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+        stopPe(messageListener, 7);
+
+        await vi.waitFor(() => expect(runBrowserRatingPopup).toHaveBeenCalledTimes(1));
+        expect(runBrowserPePopup).not.toHaveBeenCalled();          // PE deferred one turn
+        expect(vi.mocked(markPendingPeShown)).not.toHaveBeenCalled(); // ...row untouched
+        expect(vi.mocked(getPendingPe)).not.toHaveBeenCalled();     // gate is BEFORE that section
+      });
+
+      it('a dismissal also takes the turn — the dock is mount-once', async () => {
+        eligible();
+        vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+        vi.mocked(runBrowserRatingPopup).mockResolvedValue({ state: 'dismissed' });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+        stopPe(messageListener, 7);
+
+        await vi.waitFor(() => expect(runBrowserRatingPopup).toHaveBeenCalledTimes(1));
+        expect(runBrowserPePopup).not.toHaveBeenCalled();
+      });
+
+      it('⭐ not_shown falls THROUGH to the PE popup — nothing is lost', async () => {
+        eligible();
+        idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+        vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+        vi.mocked(runBrowserRatingPopup).mockResolvedValue({ state: 'not_shown', reasonCodes: ['panel_unreachable'] });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+        stopPe(messageListener, 7);
+
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+      });
+
+      it('not eligible: the rating is never opened and PE runs as before', async () => {
+        idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+        vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+        stopPe(messageListener, 7);
+
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+        expect(runBrowserRatingPopup).not.toHaveBeenCalled();
+      });
+
+      it('⭐ the gate runs AFTER the advisory consume — the advisory is not left for another turn', async () => {
+        eligible({ [PENDING_KEY]: '{"advisoryId":"a1"}' });
+        vi.mocked(runBrowserRatingPopup).mockResolvedValue({ state: 'rated', rating: 4 });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+        stopPe(messageListener, 7);
+
+        await vi.waitFor(() => expect(runBrowserRatingPopup).toHaveBeenCalledTimes(1));
+        expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, '');
+      });
+
+      it('with no tab there is nothing to render into, so the gate is skipped', async () => {
+        eligible();
+        vi.mocked(getPendingPe).mockResolvedValue(null);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+        messageListener({ type: 'nexpath:response-stop', projectRoot: P, agent: 'replit' }, {}, vi.fn());
+
+        await vi.waitFor(() => expect(vi.mocked(getPendingPe)).toHaveBeenCalled());
+        expect(runBrowserRatingPopup).not.toHaveBeenCalled();
+      });
     });
 
     it('consumes a queued advisory SILENTLY (MPS-7: the advisory surface is removed by default)', async () => {

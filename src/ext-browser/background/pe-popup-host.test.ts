@@ -7,7 +7,7 @@
  * the synthesized edit_body, F2 smooth send and the terminal outcomes are all
  * proven against the engine's own popup logic, not a mock of it.
  */
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LogPort } from '../../core/ports/log.port.js';
 import type { PendingPeRecord } from '../adapters/pe-pending-store.js';
@@ -17,7 +17,10 @@ import {
   deliverPePanelCommand,
   isPePopupOpen,
   runBrowserPePopup,
+  runBrowserRatingPopup,
 } from './pe-popup-host.js';
+import { recordSignal, readSignals } from '../adapters/lifecycle-signals.js';
+import { _resetIdentityInFlight } from '../adapters/rating-identity.js';
 import type { PePanelCommandV1, PePanelViewV1 } from '../ui/pe-contract.js';
 
 function makeLog(): { log: LogPort; events: Array<[string, Record<string, unknown> | undefined]> } {
@@ -659,5 +662,170 @@ describe('⭐ wrong-stage rating command', () => {
       onFirstRendered: vi.fn().mockResolvedValue(undefined),
     });
     expect(result.state).toBe('selected_original');
+  });
+});
+
+// ── the rating popup loop (Phase 5) ─────────────────────────────────────────
+
+describe('runBrowserRatingPopup', () => {
+  /** A storage.local stand-in; the same shape the other suites here use. */
+  function memoryStore() {
+    const data = new Map<string, string>();
+    return {
+      data,
+      getKey: async (n: string) => data.get(n) ?? null,
+      setKey: async (n: string, v: string) => { data.set(n, v); },
+    };
+  }
+
+  beforeEach(() => { _resetIdentityInFlight(); });
+
+  /** Records every POST so the tests assert the real envelope, not a mock. */
+  function wire(ok = true) {
+    const posts: Record<string, unknown>[] = [];
+    const fetch = (async (_url: string, init: { body: string }) => {
+      posts.push(JSON.parse(init.body) as Record<string, unknown>);
+      return { ok, status: ok ? 200 : 500 };
+    }) as never;
+    return { fetch, posts, events: () => posts.map((p) => p['event'] as string) };
+  }
+
+  /** Show the popup and answer it with `command` once the view has gone out. */
+  async function run(
+    command: unknown,
+    opts: { ok?: boolean; seq?: number; store?: ReturnType<typeof memoryStore>; failPush?: boolean } = {},
+  ) {
+    const { log, events } = makeLog();
+    const store = opts.store ?? memoryStore();
+    const w = wire(opts.ok ?? true);
+    const sent: unknown[] = [];
+    const sendToTab = async (msg: unknown): Promise<unknown> => {
+      sent.push(msg);
+      const m = msg as { type?: string; payload?: { viewSeq: number } };
+      if (m.type === 'nexpath:show-rating') {
+        if (opts.failPush) throw new Error('no content script');
+        const seq = opts.seq ?? m.payload!.viewSeq;
+        if (command !== null) setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, command); }, 0);
+      }
+      return { ok: true };
+    };
+
+    const outcome = await runBrowserRatingPopup({
+      log, projectRoot: ROOT, store, sendToTab, fetch: w.fetch, now: () => 1_700_000_000_000,
+    });
+    return { outcome, store, posts: w.posts, events: w.events(), sent, logEvents: events };
+  }
+
+  it('⭐ a selection sends the rating and marks the popup shown', async () => {
+    const { outcome, store, events, posts } = await run({ type: 'rating', rating: 3 });
+
+    expect(outcome).toEqual({ state: 'rated', rating: 3 });
+    expect(events).toContain('feedback_submitted');
+    const rating = posts.find((p) => p['event'] === 'feedback_submitted');
+    expect((rating!['properties'] as Record<string, unknown>)['rating']).toBe(3);
+    expect(store.data.get('feedback_last_shown_at')).toBe('1700000000000');
+  });
+
+  it('⭐ the lifecycle buffer is flushed BEFORE the rating — denominator first', async () => {
+    const store = memoryStore();
+    await recordSignal(store, 'pe_shorter', 1_699_999_000_000);
+
+    const { events } = await run({ type: 'rating', rating: 4 }, { store });
+
+    // install event, then the buffered action, then the rating — in that order.
+    expect(events[events.length - 1]).toBe('feedback_submitted');
+    expect(events).toContain('pe_shorter');
+    expect(events.indexOf('pe_shorter')).toBeLessThan(events.indexOf('feedback_submitted'));
+    expect(await readSignals(store)).toEqual([]);      // pruned after their sends
+  });
+
+  it('⭐ a dismissal marks it shown and sends NOTHING — CLI parity', async () => {
+    const store = memoryStore();
+    await recordSignal(store, 'pe_close', 1_699_999_000_000);
+
+    const { outcome, posts } = await run({ type: 'close' }, { store });
+
+    expect(outcome).toEqual({ state: 'dismissed' });
+    expect(posts).toEqual([]);                          // no send AND no flush
+    expect(store.data.get('feedback_last_shown_at')).toBe('1700000000000');
+    expect(await readSignals(store)).toHaveLength(1);   // the buffer is untouched
+  });
+
+  it('⭐ a failed push marks NOTHING shown — §4.1 M3, cadence is not spent on a popup nobody saw', async () => {
+    const { outcome, store, posts } = await run(null, { failPush: true });
+
+    expect(outcome).toEqual({ state: 'not_shown', reasonCodes: ['panel_unreachable'] });
+    expect(store.data.get('feedback_last_shown_at')).toBeUndefined();
+    expect(posts).toEqual([]);
+  });
+
+  it('⭐ a command with a stale viewSeq is dropped, not acted on', async () => {
+    // §4.1 M1: the seq guard is why the view carries one and the box expects it
+    // before the push. A stale reply must not send a rating.
+    const store = memoryStore();
+    const { log } = makeLog();
+    const sendToTab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string };
+      if (m.type === 'nexpath:show-rating') {
+        setTimeout(() => {
+          // wrong seq first — dropped; then the right one
+          deliverPePanelCommand(log, ROOT, 99, { type: 'rating', rating: 1 });
+          deliverPePanelCommand(log, ROOT, 1, { type: 'rating', rating: 4 });
+        }, 0);
+      }
+      return { ok: true };
+    };
+    const w = wire();
+
+    const outcome = await runBrowserRatingPopup({
+      log, projectRoot: ROOT, store, sendToTab, fetch: w.fetch, now: () => 1_700_000_000_000,
+    });
+
+    expect(outcome).toEqual({ state: 'rated', rating: 4 });   // NOT 1
+    const rating = w.posts.find((p) => p['event'] === 'feedback_submitted');
+    expect((rating!['properties'] as Record<string, unknown>)['rating']).toBe(4);
+  });
+
+  it('⭐ refuses to open when a PE popup already owns the root — §4.1 M2', async () => {
+    const { log } = makeLog();
+    const store = memoryStore();
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((r) => { release = r; });
+
+    // A PE popup holding the mailbox for ROOT.
+    const pe = runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record,
+      sendToTab: async (msg: unknown) => {
+        const m = msg as { type?: string; payload?: PePanelViewV1 };
+        if (m.type === 'nexpath:show-pe' && m.payload) {
+          const seq = m.payload.viewSeq;
+          void held.then(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'close' }); });
+        }
+        return { ok: true };
+      },
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    await vi.waitFor(() => expect(isPePopupOpen(ROOT)).toBe(true));
+
+    const outcome = await runBrowserRatingPopup({
+      log, projectRoot: ROOT, store,
+      sendToTab: async () => ({ ok: true }),
+      now: () => 1_700_000_000_000,
+    });
+
+    expect(outcome).toEqual({ state: 'not_shown', reasonCodes: ['popup_already_open'] });
+    expect(store.data.get('feedback_last_shown_at')).toBeUndefined();  // no cadence spent
+    release!();
+    await pe;
+  });
+
+  it('releases the mailbox afterwards, so the next stop can open one', async () => {
+    await run({ type: 'rating', rating: 2 });
+    expect(isPePopupOpen(ROOT)).toBe(false);
+  });
+
+  it('closes the panel on the way out', async () => {
+    const { sent } = await run({ type: 'close' });
+    expect((sent as { type?: string }[]).some((m) => m.type === 'nexpath:pe-close')).toBe(true);
   });
 });
