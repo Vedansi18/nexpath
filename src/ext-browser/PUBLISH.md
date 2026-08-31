@@ -77,10 +77,24 @@ The Firefox manifest sets `strict_min_version` **112** and declares
 with the store data disclosures (the API key + prompt text, and the rating telemetry).
 
 `technicalAndInteraction` covers the rating send (installation ID, rating, timestamps). It is
-declared **required**, not optional: Mozilla allows that one category under `optional`, but only for
-an extension that offers a per-category opt-out, and this one has none. Revisit if a telemetry kill
-switch ships. ⚠️ Verify the spelling against AMO at submission — an unrecognised category value is
-rejected there, not at build time.
+declared **required**, not `optional`, and the reason is a mechanism mismatch — not an absence of
+user control. The extension DOES have a kill switch (Settings → Feedback), but that is an extension
+setting; Mozilla's `optional` is a permission the BROWSER toggles in about:addons and the extension
+is expected to honour through `browser.permissions`. Declaring `optional` while ignoring that API
+would advertise a control the extension does not read.
+
+Honouring it properly is blocked by our own support range: `strict_min_version` is **112**, and
+data-collection permissions are a much later Firefox feature (140+). Across most of the range we
+ship to, the key is ignored entirely and the `browser.permissions` data-collection API is not there
+to check — so an `optional` declaration would have to fail open on those versions, which is the
+opposite of what declaring it optional promises.
+
+`required` is therefore the honest declaration: when this extension collects, it does so under its
+own setting, with no browser-level toggle involved. Revisit if `strict_min_version` ever rises past
+the versions that support the API.
+
+⚠️ Verify the spelling against AMO at submission — an unrecognised category value is rejected there,
+not at build time.
 
 ---
 
@@ -141,8 +155,9 @@ once testing is done.
   source but not in the permissions, that is the answer.
 - **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
   a random installation ID, a 1–4 rating, and content-free action names + timestamps. **Never**
-  prompt text, option text, URLs or project paths. Keep this identical to the *Privacy* section of
-  `src/ext-browser/README.md`, which is what the privacy-policy URL points at.
+  prompt text, option text, URLs or project paths. **There is a user control:** Settings → Feedback →
+  "Never ask" stops the prompt, and with it every send. Keep all of this identical to the *Privacy*
+  section of `src/ext-browser/README.md`, which is what the privacy-policy URL points at.
 - **Privacy policy URL**, **screenshots** (1280×800), **128×128 icon** (`icons/icon128.png`).
 
 ---

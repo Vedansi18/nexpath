@@ -85,6 +85,9 @@ workflow without slowing it down.
   Nexpath asks how it is working out for you. Choosing a rating is what sends — and it sends only
   a random installation ID (not tied to you or your machine), your 1–4 rating, and the timestamps
   above. Dismissing the prompt sends nothing and clears nothing.
+- **You can turn the prompt off, and that turns the sending off with it.** Settings → Feedback →
+  "Never ask". Nothing is ever sent without the prompt, so switching it off leaves the extension
+  sending nothing at all.
 - **Your prompt text is never part of that.** The only place prompt text goes is OpenAI, with your
   own key, as described above.
 

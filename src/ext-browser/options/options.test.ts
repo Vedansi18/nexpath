@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -323,4 +325,53 @@ describe('options.ts', () => {
     });
   });
 
+});
+
+/**
+ * The docs describe this control to users and to store reviewers, and they have
+ * gone stale twice on this branch already — once claiming "No telemetry …
+ * nothing is sent" after the sender shipped, once claiming the extension had no
+ * opt-out after this very switch shipped. Both were caught by reading, which is
+ * not a mechanism.
+ *
+ * So: the same discipline the adapters use against the CLI, pointed at the docs.
+ * If a label here is reworded, the sentence that names it has to be reworded
+ * too.
+ */
+describe('the docs still describe this page accurately', () => {
+  const cwd = process.cwd();
+  const readme  = readFileSync(join(cwd, 'src', 'ext-browser', 'README.md'), 'utf8');
+  const publish = readFileSync(join(cwd, 'src', 'ext-browser', 'PUBLISH.md'), 'utf8');
+  const html    = readFileSync(join(cwd, 'src', 'ext-browser', 'options', 'options.html'), 'utf8');
+  const page    = readFileSync(join(cwd, 'src', 'ext-browser', 'options', 'options.ts'), 'utf8');
+
+  it('the card and option the docs name actually exist on the page', () => {
+    expect(html).toContain('<title>Nexpath Settings</title>');
+    expect(html).toContain('<label>Feedback</label>');
+    expect(page).toContain("label: 'Never ask'");
+  });
+
+  it('⭐ the privacy policy tells the user the prompt can be turned off', () => {
+    // The README's Privacy section IS the store privacy-policy target
+    // (PUBLISH.md), so an undisclosed control is a listing problem, not a typo.
+    // Whitespace-normalised: markdown wraps the sentence, and the wrap point is
+    // not the contract.
+    expect(readme.replace(/\s+/g, ' ')).toContain('Settings → Feedback → "Never ask"');
+  });
+
+  it('the store data disclosure names the same control', () => {
+    expect(publish).toContain('Settings → Feedback →');
+    expect(publish).toContain('"Never ask"');
+  });
+
+  it('⭐ PUBLISH.md no longer claims the extension has no opt-out', () => {
+    // The exact stale sentence this switch invalidated.
+    expect(publish).not.toContain('and this one has none');
+  });
+
+  it('⭐ the README does not claim nothing is sent', () => {
+    // The other stale claim, kept pinned so it cannot come back.
+    expect(readme).not.toContain('No telemetry');
+    expect(readme).not.toContain('Nothing is sent to any Nexpath or third-party server');
+  });
 });
