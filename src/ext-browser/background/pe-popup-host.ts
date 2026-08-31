@@ -44,6 +44,7 @@ import {
   type PromptEnhancementMpsFirstPopupModelV1,
 } from './pe-engine.js';
 import { recordPeFeedbackEvent, type PeFeedbackKeyStore } from '../adapters/pe-feedback-store.js';
+import { recordSignal } from '../adapters/lifecycle-signals.js';
 import {
   PE_PANEL_SCHEMA_VERSION,
   isPePanelCommandV1,
@@ -464,7 +465,13 @@ export async function runBrowserPePopup(
       const signalKind = promptEnhancementMpsActionSignalKindV1(
         offerOutcome === 'send' ? 'send' : offerOutcome,
       );
-      if (signalKind) log.debug('pe_action_signal', { kind: signalKind });
+      if (signalKind) {
+        log.debug('pe_action_signal', { kind: signalKind });
+        // CLI parity: `prompt-enhancement-popup-host.ts:222` records this same
+        // MPS kind rather than only logging it. Buffered locally; nothing is
+        // sent until the user consents by rating (§4.2).
+        if (deps.feedbackStore) void recordSignal(deps.feedbackStore, signalKind, Date.now());
+      }
       if (offerOutcome === 'send') {
         return {
           result: { state: 'selected_current', bodyText: sentBody },
@@ -539,7 +546,19 @@ export async function runBrowserPePopup(
         reasonCodes: event.reasonCodes.slice(0, 8),
       }),
       // NF Plan B: content-free per-action signals (kind + timestamp only).
-      actionSignalSink: (kind, occurredAt) => log.debug('pe_action_signal', { kind, occurredAt }),
+      //
+      // CLI parity: the sink is wired to the STORE, not just the log —
+      // `auto.ts:841`, `prompt-enhancement-popup-host.ts:216`, `:259`,
+      // `stop.ts:817`, `:899` all do `recordActionSignal(store, …, kind,
+      // occurredAt)`. The log stays because it was already there.
+      //
+      // Buffering is not sending: these sit in storage.local until the user
+      // clicks a rating, which is this extension's consent moment (§4.2). The
+      // kind is a fixed UI-action enum — no prompt or option text.
+      actionSignalSink: (kind, occurredAt) => {
+        log.debug('pe_action_signal', { kind, occurredAt });
+        if (deps.feedbackStore) void recordSignal(deps.feedbackStore, kind, occurredAt);
+      },
     });
     if (suppressedUneditable) {
       log.debug('pe_popup_suppressed_uneditable_body', { projectRoot });

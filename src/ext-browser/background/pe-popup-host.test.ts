@@ -574,4 +574,62 @@ describe('feedback persistence — PE-BR-11 closed (the CLI feedback store, brow
     const list = JSON.parse(store.data.get('nexpath_pe_feedback_events')!) as Array<{ event: unknown }>;
     expect(JSON.stringify(list[0]!.event)).toContain('too_much_or_too_long');
   });
+  /**
+   * CLI parity for the per-action signals (§4.2). The CLI wires its
+   * `actionSignalSink` to the STORE — `auto.ts:841`,
+   * `prompt-enhancement-popup-host.ts:216`, `:259`, `stop.ts:817`, `:899`. The
+   * browser used to wire it to `log.debug` alone, so every action was observable
+   * for a moment and then gone, and the flush had nothing to send.
+   *
+   * A wire test, because losing the call again would look like nothing: no error,
+   * no failing assertion, just lifecycle events that never arrive.
+   */
+  it('⭐ a popup action is BUFFERED, not merely logged — the CLI records these', async () => {
+    const { log } = makeLog();
+    const store = memoryStore();
+    let seq = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        seq = m.payload.viewSeq;
+        setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'use_original' }); }, 0);
+      }
+      return { ok: true };
+    };
+
+    await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      feedbackStore: store,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const raw = store.data.get('nexpath_lifecycle_signals');
+    expect(raw).toBeTruthy();
+    const signals = JSON.parse(raw!) as Array<{ kind: string; occurredAt: number }>;
+    expect(signals.map((s) => s.kind)).toContain('pe_use_original');
+    for (const s of signals) {
+      expect(Object.keys(s).sort()).toEqual(['kind', 'occurredAt']);   // content-free
+      expect(typeof s.occurredAt).toBe('number');
+    }
+  });
+
+  it('with no store wired, an action still completes — buffering is best-effort', async () => {
+    const { log } = makeLog();
+    let seq = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        seq = m.payload.viewSeq;
+        setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'use_original' }); }, 0);
+      }
+      return { ok: true };
+    };
+
+    const { result } = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.state).toBe('selected_original');
+  });
 });
