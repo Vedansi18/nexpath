@@ -19,6 +19,7 @@ function setupDom(): void {
     <p id="key-status"></p>
     <div id="frequency-group"></div>
     <div id="role-group"></div>
+    <div id="rating-group"></div>
     <div id="self-check"></div>
   `;
 }
@@ -44,6 +45,7 @@ function els() {
     selfCheck: document.getElementById('self-check') as HTMLDivElement,
     freqGroup: document.getElementById('frequency-group') as HTMLDivElement,
     roleGroup: document.getElementById('role-group') as HTMLDivElement,
+    ratingGroup: document.getElementById('rating-group') as HTMLDivElement,
   };
 }
 
@@ -257,4 +259,68 @@ describe('options.ts', () => {
       expect(els().status.textContent).toContain("Couldn't refresh settings");
     });
   });
+  /**
+   * The rating kill switch (Phase 6).
+   *
+   * Read `options.ts:31-35` before changing any of this: advisory frequency was
+   * taken off this page because it "advertised a control over a surface this
+   * extension no longer shows … so the setting read as broken". This control
+   * only belongs here while the service worker honours the value — the test for
+   * that half lives in `service-worker.test.ts`.
+   */
+  describe('feedback rating switch', () => {
+    it('renders exactly two options', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      const { ratingGroup } = els();
+      expect(ratingGroup.querySelectorAll('input[type="radio"]').length).toBe(2);
+      expect(radioFor(ratingGroup, 'on')).not.toBeNull();
+      expect(radioFor(ratingGroup, 'off')).not.toBeNull();
+    });
+
+    it('⭐ defaults to ON when nothing is stored — the popup ships enabled', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      expect(radioFor(els().ratingGroup, 'on').checked).toBe(true);
+    });
+
+    it('pre-selects OFF when the user has turned it off', async () => {
+      mockGet.mockResolvedValue({ nexpath_rating_enabled: 'off' });
+      await loadOptionsModule();
+
+      expect(radioFor(els().ratingGroup, 'off').checked).toBe(true);
+    });
+
+    it('⭐ anything other than the exact string "off" reads as ON', async () => {
+      // Fail-open, and the worker's read agrees — a damaged value must not
+      // silently disable a feature the user never turned off.
+      mockGet.mockResolvedValue({ nexpath_rating_enabled: 'nonsense' });
+      await loadOptionsModule();
+
+      expect(radioFor(els().ratingGroup, 'on').checked).toBe(true);
+    });
+
+    it('persists the choice to the key the worker reads', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      radioFor(els().ratingGroup, 'off').click();
+      await flush();
+
+      expect(mockSet).toHaveBeenCalledWith({ nexpath_rating_enabled: 'off' });
+    });
+
+    it('turning it back on persists that too', async () => {
+      mockGet.mockResolvedValue({ nexpath_rating_enabled: 'off' });
+      await loadOptionsModule();
+
+      radioFor(els().ratingGroup, 'on').click();
+      await flush();
+
+      expect(mockSet).toHaveBeenCalledWith({ nexpath_rating_enabled: 'on' });
+    });
+  });
+
 });

@@ -4,12 +4,30 @@ const KEY_NAME = 'openai_api_key';
 const MODELS_URL = 'https://api.openai.com/v1/models';
 const ROLE_KEY = 'role';
 
+/**
+ * Kill switch for the rating popup.
+ *
+ * A `nexpath_*` key because it is browser-only state: the CLI has no setting
+ * that gates its feedback popup either — `telemetry.enabled` exists there, and
+ * the feedback send deliberately bypasses it ("this explicit action is the
+ * consent", `stop.ts:526`). Folding this into `advisory_frequency` was rejected
+ * for the same reason that key is not bypassed for PE: two unrelated surfaces.
+ *
+ * ⚠️ READ `options.ts:31-35` BEFORE TOUCHING THIS. Advisory frequency was taken
+ * off this page because it "advertised a control over a surface this extension
+ * no longer shows … so the setting read as broken". This toggle only earns its
+ * place because the rating popup is live and the service worker HONOURS the
+ * value — if either stops being true, the control has to come off the page.
+ */
+const RATING_KEY = 'nexpath_rating_enabled';
+
 const input    = document.getElementById('api-key')      as HTMLInputElement;
 const saveBtn  = document.getElementById('save-key')     as HTMLButtonElement;
 const testBtn  = document.getElementById('test-key')     as HTMLButtonElement;
 const keyStatus = document.getElementById('key-status')  as HTMLParagraphElement;
 const checkEl  = document.getElementById('self-check')   as HTMLDivElement;
 const roleGroup = document.getElementById('role-group')      as HTMLDivElement;
+const ratingGroup = document.getElementById('rating-group')  as HTMLDivElement;
 const versionEl = document.getElementById('ext-version')     as HTMLSpanElement | null;
 
 // The footer version is read from the manifest, never written into the markup.
@@ -42,6 +60,17 @@ const ROLE_OPTIONS = [
   { value: 'pm',           label: 'product manager' },
 ] as const;
 const DEFAULT_ROLE = 'founder';
+
+/**
+ * On unless the stored value is exactly 'off'. A missing or damaged value keeps
+ * the popup — the same fail-open direction the worker's read uses, so the two
+ * cannot disagree about what an unreadable setting means.
+ */
+const RATING_OPTIONS = [
+  { value: 'on',  label: 'Ask me occasionally' },
+  { value: 'off', label: 'Never ask' },
+] as const;
+const DEFAULT_RATING = 'on';
 
 function buildRadioGroup(
   container: HTMLDivElement,
@@ -87,6 +116,7 @@ async function loadKey(): Promise<void> {
     setKeyStatus('Key saved — click Test to validate', '');
   }
   await loadRole();
+  await loadRating();
   await renderSelfCheck();
 }
 
@@ -99,6 +129,17 @@ async function loadRole(): Promise<void> {
   buildRadioGroup(roleGroup, 'role', ROLE_OPTIONS, role, async (value) => {
     await browser.storage.local.set({ [ROLE_KEY]: value });
     await renderSelfCheck();
+  });
+}
+
+// ── Rating popup switch ───────────────────────────────────────────────────────
+
+async function loadRating(): Promise<void> {
+  const result = await browser.storage.local.get([RATING_KEY]);
+  const current = result[RATING_KEY] === 'off' ? 'off' : DEFAULT_RATING;
+
+  buildRadioGroup(ratingGroup, 'rating', RATING_OPTIONS, current, async (value) => {
+    await browser.storage.local.set({ [RATING_KEY]: value });
   });
 }
 
