@@ -4,9 +4,9 @@
  * an install stamp, a one-time sent-flag, and a capped list of
  * `{kind, occurredAt}`.
  *
- * Content-free by construction. A signal is a KIND from a fixed two-value enum
- * plus a timestamp. No prompt text, option text, option index, project root or
- * URL is stored — there is no field here that could carry one.
+ * Content-free by construction. A signal is a KIND from a fixed enum of UI
+ * actions plus a timestamp. No prompt text, option text, option index, project
+ * root or URL is stored — there is no field here that could carry one.
  *
  * Writes are unconditional. Buffering locally is not sending: nothing leaves
  * the machine until the user clicks a rating, which is the browser's consent
@@ -31,9 +31,13 @@
  * 4. **Never throws.** Same rule as the cadence: measurement must not be able to
  *    break the pipeline it measures. A damaged buffer reads as EMPTY.
  *
- * 5. **Only the two lifecycle kinds.** The CLI also buffers the Plan-B per-action
- *    kinds (`pe_*`, `mps_*`); §4.2 scopes the browser to `advisory_fired` and
- *    `option_selected` plus the install stamp.
+ * 5. **The kinds are the CLI's LIVE ones, which is not what §4.2 named.** The
+ *    plan scoped this to `advisory_fired` + `option_selected`. Measured, the CLI
+ *    has ZERO production call sites for either — the pair is dead there too, and
+ *    porting only those would have given the browser a buffer that can never
+ *    fill. What the CLI actually records is the Plan-B per-action enum via
+ *    `recordActionSignal`, so that enum is carried here as well. Both sets are
+ *    kept, because the CLI keeps both. (Owner instruction: follow the CLI.)
  */
 
 /** The slice of the key store this module needs; injected so tests need no polyfill. */
@@ -42,11 +46,44 @@ export interface LifecycleSignalsKeyStore {
   setKey(name: string, value: string): Promise<void>;
 }
 
-/** `feedback-signals.ts:15-16` — the CLI's kind strings, which are also the event names. */
+/**
+ * `feedback-signals.ts:15-16` — the CLI's two original kinds.
+ *
+ * ⚠️ MEASURED 2026-08-31: the CLI has ZERO production call sites for
+ * `recordAdvisoryFired` / `recordOptionSelected`. Both are dead there, and the
+ * loops that flush them in `lifecycle-flush.ts` never have anything to send.
+ * They are kept here only because the CLI keeps them — dropping them would be
+ * the browser diverging first.
+ */
 export const SIGNAL_ADVISORY_FIRED  = 'advisory_fired';
 export const SIGNAL_OPTION_SELECTED = 'option_selected';
 
-export type SignalKind = typeof SIGNAL_ADVISORY_FIRED | typeof SIGNAL_OPTION_SELECTED;
+/**
+ * `feedback-signals.ts:24-28` — the CLI's Plan-B per-action kinds, and the ones
+ * it ACTUALLY records (`auto.ts:841`, `prompt-enhancement-popup-host.ts:216`,
+ * `:222`, `:259`, `stop.ts:377`).
+ *
+ * The kind IS the event name, and it is a fixed enum of UI actions. No prompt
+ * text, option text or option index is ever recorded — the same guarantee the
+ * CLI's own header makes.
+ */
+export const ACTION_SIGNAL_KINDS = [
+  'pe_use_current', 'pe_use_original', 'pe_shorter', 'pe_more_thorough',
+  'pe_more_project_grounded', 'pe_apply_details', 'pe_back', 'pe_close',
+  'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption', 'mps_apply_details',
+] as const;
+
+export type PromptActionSignalKind = typeof ACTION_SIGNAL_KINDS[number];
+
+export type SignalKind =
+  | typeof SIGNAL_ADVISORY_FIRED
+  | typeof SIGNAL_OPTION_SELECTED
+  | PromptActionSignalKind;
+
+/** True for the Plan-B action kinds, which flush through the action sender. */
+export function isActionKind(kind: string): kind is PromptActionSignalKind {
+  return (ACTION_SIGNAL_KINDS as readonly string[]).includes(kind);
+}
 
 /** CLI-mirrored config keys keep the CLI's bare names, as the cadence keys do. */
 export const KEY_INSTALLED_AT         = 'installed_at';
@@ -69,7 +106,9 @@ export interface LifecycleSignal {
   occurredAt: number;
 }
 
-const KINDS: readonly string[] = [SIGNAL_ADVISORY_FIRED, SIGNAL_OPTION_SELECTED];
+const KINDS: readonly string[] = [
+  SIGNAL_ADVISORY_FIRED, SIGNAL_OPTION_SELECTED, ...ACTION_SIGNAL_KINDS,
+];
 
 function isSignal(v: unknown): v is LifecycleSignal {
   if (typeof v !== 'object' || v === null) return false;

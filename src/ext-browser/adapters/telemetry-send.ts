@@ -1,5 +1,5 @@
 /**
- * The browser's one-shot telemetry sender — the rating, and the three lifecycle
+ * The browser's one-shot telemetry sender — the rating, and the lifecycle
  * events, on the CLI's exact envelope.
  *
  * One file for both because the rating and the lifecycle events share an
@@ -51,6 +51,7 @@ import {
   getInstalledAt,
   isInstalledEventSent,
   markInstalledEventSent,
+  isActionKind,
   SIGNAL_ADVISORY_FIRED,
   SIGNAL_OPTION_SELECTED,
   type LifecycleSignalsKeyStore,
@@ -216,6 +217,22 @@ export function sendOptionSelected(
 }
 
 /**
+ * `lifecycle-send.ts:100` — ONE per-action event, where the event NAME is the
+ * action kind (`pe_shorter`, `mps_send`, …), backdated to when it occurred.
+ *
+ * These are the events the CLI actually produces; `advisory_fired` and
+ * `option_selected` are dead on both sides. See `lifecycle-signals.ts`.
+ */
+export function sendActionEvent(
+  store:      TelemetryKeyStore,
+  kind:       string,
+  occurredAt: number,
+  opts:       SendOptions = {},
+): Promise<boolean> {
+  return send(store, kind, occurredAt, { action_ts: occurredAt }, opts);
+}
+
+/**
  * Release the buffer — `telemetry/lifecycle-flush.ts`.
  *
  * Called on the rating click and BEFORE the rating itself (§4.2), so the
@@ -246,9 +263,12 @@ export async function flushLifecycle(
     // Read once, oldest first. The CLI reads its two kinds separately; one pass
     // over a single ordered list is the same set in the same order.
     for (const signal of await readSignals(store)) {
-      const ok = signal.kind === SIGNAL_ADVISORY_FIRED
-        ? await sendAdvisoryFired(store, signal.occurredAt, opts)
-        : await sendOptionSelected(store, signal.occurredAt, opts);
+      // Three senders, one per kind family, exactly as the CLI's three loops do:
+      // an action kind posts under its OWN name, the other two under theirs.
+      let ok: boolean;
+      if (isActionKind(signal.kind))                      ok = await sendActionEvent(store, signal.kind, signal.occurredAt, opts);
+      else if (signal.kind === SIGNAL_ADVISORY_FIRED)     ok = await sendAdvisoryFired(store, signal.occurredAt, opts);
+      else                                                ok = await sendOptionSelected(store, signal.occurredAt, opts);
       if (ok) await pruneSignalAt(store, signal.kind, signal.occurredAt);
     }
   } catch {

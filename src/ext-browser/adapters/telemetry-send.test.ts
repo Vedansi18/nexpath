@@ -6,11 +6,12 @@ import {
   flushLifecycle,
   POSTHOG_ENDPOINT, POSTHOG_API_KEY, POSTHOG_LIB_NAME, POSTHOG_LIB_VERSION, SURFACE,
   FEEDBACK_EVENT, EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED,
+  sendActionEvent,
   type FetchLike, type TelemetryKeyStore,
 } from './telemetry-send.js';
 import {
   recordSignal, readSignals, KEY_INSTALLED_AT, KEY_INSTALLED_EVENT_SENT,
-  SIGNAL_ADVISORY_FIRED, SIGNAL_OPTION_SELECTED,
+  SIGNAL_ADVISORY_FIRED, SIGNAL_OPTION_SELECTED, ACTION_SIGNAL_KINDS,
 } from './lifecycle-signals.js';
 import { _resetIdentityInFlight, KEY_INSTALLATION_ID } from './rating-identity.js';
 
@@ -339,5 +340,82 @@ describe('contract with the shipped CLI telemetry (the two must not drift)', () 
     const flat = flush.replace(/\s+/g, ' ');
     expect(flat).toContain('if (await sendAdvisoryFired(store, ts, opts)) { pruneSignalAt(store, SIGNAL_ADVISORY_FIRED, ts); }');
     expect(flat).toContain('if (await sendOptionSelected(store, ts, opts)) { pruneSignalAt(store, SIGNAL_OPTION_SELECTED, ts); }');
+  });
+});
+
+// ── the CLI's live kinds ─────────────────────────────────────────────────────
+
+describe('the Plan-B action kinds — the ones the CLI actually records', () => {
+  it('an action signal flushes under its OWN name, with action_ts', async () => {
+    const { store } = memStore({
+      [KEY_INSTALLED_AT]: String(T0),
+      [KEY_INSTALLED_EVENT_SENT]: 'true',
+    });
+    await recordSignal(store, 'pe_shorter', T0 + 1);
+    await recordSignal(store, 'mps_send',   T0 + 2);
+    const { fetch, calls, events } = fakeFetch();
+
+    await flushLifecycle(store, { fetch });
+
+    expect(events()).toEqual(['pe_shorter', 'mps_send']);
+    expect((calls[0].body.properties as Record<string, unknown>).action_ts).toBe(T0 + 1);
+    expect(await readSignals(store)).toEqual([]);
+  });
+
+  it('carries no more than the id, the lib fields, surface and action_ts', async () => {
+    const { store } = memStore();
+    const { fetch, calls } = fakeFetch();
+
+    await sendActionEvent(store, 'pe_close', T0, { fetch });
+
+    expect(Object.keys(calls[0].body.properties as Record<string, unknown>).sort())
+      .toEqual(['$lib', '$lib_version', 'action_ts', 'installation_id', 'surface']);
+  });
+
+  it('the three kind families share one buffer and each takes its own sender', async () => {
+    const { store } = memStore({
+      [KEY_INSTALLED_AT]: String(T0),
+      [KEY_INSTALLED_EVENT_SENT]: 'true',
+    });
+    await recordSignal(store, SIGNAL_ADVISORY_FIRED,  T0 + 1);
+    await recordSignal(store, 'pe_back',              T0 + 2);
+    await recordSignal(store, SIGNAL_OPTION_SELECTED, T0 + 3);
+    const { fetch, events } = fakeFetch();
+
+    await flushLifecycle(store, { fetch });
+
+    expect(events()).toEqual([EVENT_ADVISORY_FIRED, 'pe_back', EVENT_OPTION_SELECTED]);
+  });
+});
+
+/**
+ * The measurement that put the action kinds here at all. If the CLI ever starts
+ * calling `recordAdvisoryFired` / `recordOptionSelected` for real, or stops
+ * calling `recordActionSignal`, this fails and the browser should follow.
+ */
+describe('contract: which kinds the CLI actually records', () => {
+  const cwd = process.cwd();
+  const read = (...p: string[]) => readFileSync(join(cwd, ...p), 'utf8');
+  const signals = read('src', 'store', 'feedback-signals.ts');
+  const callers = ['auto.ts', 'prompt-enhancement-popup-host.ts', 'stop.ts']
+    .map((f) => read('src', 'cli', 'commands', f)).join('\n');
+
+  it('the CLI still records the per-action kinds', () => {
+    expect(callers).toMatch(/recordActionSignal\(/);
+  });
+
+  it('⭐ the CLI still records NEITHER advisory_fired NOR option_selected', () => {
+    expect(callers).not.toMatch(/recordAdvisoryFired\(/);
+    expect(callers).not.toMatch(/recordOptionSelected\(/);
+  });
+
+  it('the action-kind enum is the CLI\'s, in the CLI\'s order', () => {
+    const flat = signals.replace(/\s+/g, ' ');
+    expect(flat).toContain(ACTION_SIGNAL_KINDS.map((k) => `'${k}'`).join(', '));
+  });
+
+  it('the CLI still posts an action event under the kind as the event name', () => {
+    const flat = read('src', 'telemetry', 'lifecycle-send.ts').replace(/\s+/g, ' ');
+    expect(flat).toContain('return sendLifecycle(store, kind, occurredAt, { action_ts: occurredAt }, opts);');
   });
 });
