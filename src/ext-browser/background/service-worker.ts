@@ -58,6 +58,7 @@ import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
 // Rating-popup cadence (Phase 1). Aliased on import: `recordActivity` is a
 // generic name in a 1,900-line worker, and this one measures exactly one thing.
 import { recordActivity as recordRatingActivity } from '../adapters/rating-cadence.js';
+import { setInstalledAtIfMissing } from '../adapters/lifecycle-signals.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -92,6 +93,17 @@ browser.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
     browser.runtime.openOptionsPage();
   }
+
+  // The install stamp for the rating popup's lifecycle events (Phase 3, §4.2).
+  //
+  // Written on UPDATE as well as install, and deliberately so: the helper is
+  // if-missing, so this is what backfills a stamp for an installation that
+  // predates the field. It mirrors the CLI's `setInstalledAtIfMissing`.
+  //
+  // Storing it sends nothing. The stamp sits in storage.local until the user
+  // clicks a rating, which is this extension's consent moment — see
+  // adapters/telemetry-send.ts.
+  void setInstalledAtIfMissing(keyStore);
 
   // Every install/update starts a NEW extension generation; content scripts already
   // running in open agent tabs belong to the dead one — their runtime.sendMessage

@@ -275,6 +275,44 @@ describe('service-worker.ts', () => {
       expect(tabsReloadMock).toHaveBeenCalledWith(22);
     });
 
+    /**
+     * The install stamp for the rating popup's lifecycle events (Phase 3, §4.2).
+     *
+     * This is a WIRE test, and it exists because the consequence of the call
+     * going missing is not "no stamp" — it is a WRONG one. `getInstalledAt`
+     * backfills at flush time, so with nothing stamped at install the
+     * `nexpath_installed` event reports the moment of the user's FIRST RATING
+     * as their install date, silently and plausibly.
+     */
+    it('⭐ stamps the install time on a fresh install', async () => {
+      const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      installedListener({ reason: 'install' });
+
+      await vi.waitFor(() =>
+        expect(keyStoreSetKey.mock.calls.map((c) => c[0])).toContain('installed_at'));
+    });
+
+    it('stamps on UPDATE too — that is what backfills an install predating the field', async () => {
+      const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      installedListener({ reason: 'update' });
+
+      await vi.waitFor(() =>
+        expect(keyStoreSetKey.mock.calls.map((c) => c[0])).toContain('installed_at'));
+    });
+
+    it('does not re-stamp when a stamp is already there', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) =>
+        name === 'installed_at' ? '1700000000000' : null);
+      const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      installedListener({ reason: 'update' });
+
+      await vi.waitFor(() => expect(tabsQueryMock).toHaveBeenCalled());   // the listener ran
+      expect(keyStoreSetKey.mock.calls.map((c) => c[0])).not.toContain('installed_at');
+    });
+
     it('reloads agent tabs on fresh install too (any onInstalled = new generation)', async () => {
       tabsQueryMock.mockResolvedValue([{ id: 7 }]);
       const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });

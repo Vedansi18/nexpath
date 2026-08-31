@@ -13,12 +13,26 @@ const load = (target: 'chrome' | 'firefox') =>
   JSON.parse(readFileSync(new URL(`./manifest.${target}.json`, import.meta.url), 'utf8'));
 
 const EXPECTED_PERMISSIONS = ['storage', 'tabs'];
-const EXPECTED_HOSTS = [
+/** The four agent sites the extension actually runs on. */
+const EXPECTED_AGENT_HOSTS = [
   'https://*.replit.com/*',
   'https://bolt.new/*',
   'https://*.stackblitz.com/*',
   'https://lovable.dev/*',
 ];
+
+/**
+ * The ONLY non-agent host, and the only one the extension talks to rather than
+ * runs on: the PostHog capture endpoint the rating popup posts to
+ * (`adapters/telemetry-send.ts`).
+ *
+ * It is listed separately because the distinction is the whole point of this
+ * file — every entry here is a line in the install dialog. Adding this one took
+ * that dialog from "4 domains" to "5", which is user-visible and store-reviewed.
+ */
+const EXPECTED_TELEMETRY_HOST = 'https://us.i.posthog.com/*';
+
+const EXPECTED_HOSTS = [...EXPECTED_AGENT_HOSTS, EXPECTED_TELEMETRY_HOST];
 
 describe('ext-browser manifests — permission surface', () => {
   for (const target of ['chrome', 'firefox'] as const) {
@@ -33,8 +47,18 @@ describe('ext-browser manifests — permission surface', () => {
         expect(manifest.permissions).not.toContain('scripting');
       });
 
-      it('scopes host_permissions to the supported agents only', () => {
+      it('scopes host_permissions to the supported agents plus the one telemetry host', () => {
         expect(manifest.host_permissions).toEqual(EXPECTED_HOSTS);
+      });
+
+      it('runs on exactly four agent sites — the telemetry host is talked TO, not run on', () => {
+        // A content script matching the PostHog host would be a different kind of
+        // permission entirely; the send is a fetch from the worker.
+        const matches = (manifest.content_scripts ?? [])
+          .flatMap((cs: { matches?: string[] }) => cs.matches ?? []);
+        expect(matches).not.toContain(EXPECTED_TELEMETRY_HOST);
+        expect(manifest.host_permissions.filter((h: string) => h !== EXPECTED_TELEMETRY_HOST))
+          .toEqual(EXPECTED_AGENT_HOSTS);
       });
 
       it('is MV3 and version-locked', () => {
