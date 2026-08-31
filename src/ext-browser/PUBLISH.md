@@ -73,8 +73,14 @@ not `npm install`, and match the Node version above.
 
 The Firefox manifest sets `strict_min_version` **112** and declares
 `browser_specific_settings.gecko.data_collection_permissions.required = ["authenticationInfo",
-"websiteContent"]` (Mozilla's built-in data-consent) — keep these in sync with the store data
-disclosures (the API key + prompt text).
+"websiteContent", "technicalAndInteraction"]` (Mozilla's built-in data-consent) — keep these in sync
+with the store data disclosures (the API key + prompt text, and the rating telemetry).
+
+`technicalAndInteraction` covers the rating send (installation ID, rating, timestamps). It is
+declared **required**, not optional: Mozilla allows that one category under `optional`, but only for
+an extension that offers a per-category opt-out, and this one has none. Revisit if a telemetry kill
+switch ships. ⚠️ Verify the spelling against AMO at submission — an unrecognised category value is
+rejected there, not at build time.
 
 ---
 
@@ -125,9 +131,18 @@ once testing is done.
 - **Name:** Nexpath · **Category:** Developer Tools.
 - **Summary:** "Behaviour guidance for vibe coders using AI coding agents."
 - **Permission justifications** (both stores ask): `storage` (save key/settings), `tabs` (show the
-  popup on the right tab), host access limited to
-  `*.replit.com`, `bolt.new`, `*.stackblitz.com`, `lovable.dev`. (Injection is declarative —
-  `content_scripts` + `web_accessible_resources` — so no `scripting` permission is requested.)
+  popup on the right tab), and host access to **five** hosts —
+  `*.replit.com`, `bolt.new`, `*.stackblitz.com`, `lovable.dev` (the agent sites the extension runs
+  on) plus `us.i.posthog.com` (the analytics host it POSTs a rating to; it is talked **to**, never
+  run **on** — no content script matches it). (Injection is declarative — `content_scripts` +
+  `web_accessible_resources` — so no `scripting` permission is requested.)
+- ⚠️ **The install dialog now reads "Access your data for sites in 5 domains", not 4.** That dialog
+  is the browser's own consent UI and cannot be suppressed — only its contents change. Expect the
+  extra host to draw a reviewer question; the answer is the bullet above.
+- **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
+  a random installation ID, a 1–4 rating, and content-free action names + timestamps. **Never**
+  prompt text, option text, URLs or project paths. Keep this identical to the *Privacy* section of
+  `src/ext-browser/README.md`, which is what the privacy-policy URL points at.
 - **Privacy policy URL**, **screenshots** (1280×800), **128×128 icon** (`icons/icon128.png`).
 
 ---

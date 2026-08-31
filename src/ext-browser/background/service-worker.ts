@@ -81,7 +81,10 @@ log.debug('build_identity', { build: BUILD_ID, peEngine: PE_ENGINE_READY });
 
 // ── First-install: open options page ──────────────────────────────────────────
 
-// Must stay in sync with the manifests' host_permissions/content-script matches.
+// The AGENT sites only — must stay in sync with the manifests' content-script
+// matches. NOT the whole of `host_permissions`: that also carries
+// `us.i.posthog.com`, which the extension talks TO and never runs ON, and
+// reloading a tab there would be nonsense.
 const AGENT_TAB_URL_PATTERNS = [
   'https://*.replit.com/*',
   'https://bolt.new/*',
