@@ -2697,4 +2697,71 @@ describe('service-worker.ts', () => {
     });
   });
 
+  /**
+   * The rating-popup cadence heartbeats (Phase 1, item #18).
+   *
+   * These exist because deleting BOTH calls from the worker left the whole suite
+   * green: the adapter is well covered on its own, and nothing observed whether
+   * the worker ever calls it. A cadence that is never fed simply never reaches
+   * its threshold, and the popup silently never appears — the quietest possible
+   * failure. So these assert the WIRE, not the arithmetic.
+   */
+  describe('rating cadence heartbeats', () => {
+    const cadenceWrites = (): string[] => keyStoreSetKey.mock.calls
+      .map((c) => c[0] as string)
+      .filter((k) => k.startsWith('feedback_'));
+
+    it('a genuine prompt submit records activity', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      expect(cadenceWrites()).toContain('feedback_active_ms');
+      expect(cadenceWrites()).toContain('feedback_last_activity_at');
+    });
+
+    it('a response stop records activity too', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+
+      messageListener(
+        { type: 'nexpath:response-stop', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {},
+        sendResponse,
+      );
+
+      // The stop handler is DETACHED (`void handleResponseStop(...)`) and the ack
+      // is sent before it starts, so waiting on sendResponse would race past the
+      // heartbeat. Wait for the write itself.
+      await vi.waitFor(() => expect(cadenceWrites()).toContain('feedback_last_activity_at'));
+    });
+
+    it('⭐ a DUPLICATE submit does not — the extension must not inflate the usage it measures', async () => {
+      // The dedup guard returns before the heartbeat, which is why the call sits
+      // below it (mirroring auto.ts:936-938 sitting below the injected-prompt guard).
+      // An enhanced prompt we injected ourselves comes back through this path.
+      keyStoreGetKey.mockImplementation(async (name: string) =>
+        name.startsWith('nexpath_last_prompt::')
+          ? JSON.stringify({ text: 'hi', at: Date.now() })
+          : null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      expect(cadenceWrites()).toEqual([]);
+    });
+  });
+
 });

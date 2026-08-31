@@ -55,6 +55,9 @@ import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/p
 import { resolvePePopupCooldown, resolvePeSequenceEnabled } from '../adapters/pe-config.js';
 import { getPendingSequence, recordPendingSequence } from '../adapters/pe-sequence-store.js';
 import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
+// Rating-popup cadence (Phase 1). Aliased on import: `recordActivity` is a
+// generic name in a 1,900-line worker, and this one measures exactly one thing.
+import { recordActivity as recordRatingActivity } from '../adapters/rating-cadence.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -884,6 +887,19 @@ async function runPromptSubmitPipeline(
   }
   await keyStore.setKey(lastPromptKeyFor(projectRoot), JSON.stringify({ text: promptText, at: now }));
 
+  // ── Step 1.3: Record active usage — one heartbeat per genuine user prompt,
+  //     feeding the rating-popup cadence (adapters/rating-cadence.ts).
+  //
+  //     Placed HERE, below the dedup guard, for the reason auto.ts:936-938 puts
+  //     its own call below the injected-prompt guard: an enhanced prompt we
+  //     injected ourselves comes back through this path as a fresh submit, and
+  //     counting it would let the extension inflate the user's usage with its
+  //     own traffic. Everything above returns before reaching this line.
+  //
+  //     Best-effort by contract — the cadence functions never throw, and this is
+  //     measurement, not a gate on the pipeline it measures.
+  await recordRatingActivity(keyStore, now);
+
   // ── Step 1.5: Resolve frequency + role config — mirrors cli/commands/auto.ts's
   // step 1.5 exactly (same fallback default, same resolveFrequencyConfig call) so
   // the browser's advisory-firing gating is the same logic as the CLI's, just fed
@@ -1474,6 +1490,10 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     log.debug('response_stop_quiet_window', { projectRoot });
     return;
   }
+  // Second cadence heartbeat, below the echo guard for the same reason the
+  // submit one sits below the dedup guard: a stop this extension provoked must
+  // not count as the user working. See adapters/rating-cadence.ts.
+  await recordRatingActivity(keyStore, clock.now());
   let legacySurface = false;
   try {
     legacySurface = (await keyStore.getKey(ADVISORY_LEGACY_SURFACE_KEY)) === 'enabled';
