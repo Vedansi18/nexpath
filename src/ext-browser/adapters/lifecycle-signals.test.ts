@@ -189,3 +189,73 @@ describe('the install-event sent flag', () => {
     expect(await isInstalledEventSent(store)).toBe(false);
   });
 });
+
+/**
+ * The regression for a bug that was measured, not imagined: before the writes
+ * were serialised, two overlapping `recordSignal` calls left ONE signal. The
+ * whole buffer lives under one storage key, so both read the old list and the
+ * second write erased the first — and `pe-popup-host.ts` fires these off with
+ * `void` on every popup action, so overlap is the normal case, not the edge one.
+ */
+describe('⭐ concurrent writes do not lose each other', () => {
+  /** A store with a real await on both sides, so overlap actually happens. */
+  function slowStore() {
+    const data: Record<string, string> = {};
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const store: LifecycleSignalsKeyStore = {
+      getKey: async (k) => { await tick(); return k in data ? data[k] : null; },
+      setKey: async (k, v) => { await tick(); data[k] = v; },
+    };
+    return { store, data };
+  }
+
+  it('two overlapping records both survive', async () => {
+    const { store } = slowStore();
+
+    await Promise.all([
+      recordSignal(store, 'pe_close', T0),
+      recordSignal(store, 'pe_back',  T0 + 1),
+    ]);
+
+    expect((await readSignals(store)).map((s) => s.kind)).toEqual(['pe_close', 'pe_back']);
+  });
+
+  it('ten overlapping records all survive', async () => {
+    const { store } = slowStore();
+
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => recordSignal(store, SIGNAL_ADVISORY_FIRED, T0 + i)),
+    );
+
+    expect(await readSignals(store)).toHaveLength(10);
+  });
+
+  it('a prune racing a record does not drop the record', async () => {
+    const { store } = slowStore();
+    await recordSignal(store, SIGNAL_ADVISORY_FIRED, T0);
+
+    await Promise.all([
+      pruneSignalAt(store, SIGNAL_ADVISORY_FIRED, T0),
+      recordSignal(store, 'mps_send', T0 + 5),
+    ]);
+
+    expect((await readSignals(store)).map((s) => s.kind)).toEqual(['mps_send']);
+  });
+
+  it('a failing write does not wedge the queue for the next caller', async () => {
+    const data: Record<string, string> = {};
+    let failNext = true;
+    const store: LifecycleSignalsKeyStore = {
+      getKey: async (k) => (k in data ? data[k] : null),
+      setKey: async (k, v) => {
+        if (failNext) { failNext = false; throw new Error('quota'); }
+        data[k] = v;
+      },
+    };
+
+    await recordSignal(store, 'pe_close', T0);        // this one is lost to the failure
+    await recordSignal(store, 'pe_back',  T0 + 1);    // this one must still land
+
+    expect((await readSignals(store)).map((s) => s.kind)).toEqual(['pe_back']);
+  });
+});

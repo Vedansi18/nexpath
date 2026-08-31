@@ -144,6 +144,31 @@ export async function readSignals(store: LifecycleSignalsKeyStore): Promise<Life
   return parsed.filter(isSignal).sort((a, b) => a.occurredAt - b.occurredAt);
 }
 
+/**
+ * Every read-modify-write on the buffer runs through here, one at a time.
+ *
+ * The CLI needs nothing like this: its `recordSignal` is a synchronous SQL
+ * INSERT. Here the whole list lives under ONE `storage.local` key, so a record
+ * or a prune is read → modify → write with two awaits in the middle, and two
+ * overlapping calls both read the OLD list and the second write erases the
+ * first. Measured: two concurrent `recordSignal` calls left ONE signal.
+ *
+ * That is reachable in production — `pe-popup-host.ts` fires these off with
+ * `void` on every popup action, and a flush's prunes interleave with them the
+ * same way. A lost action signal is silent: the event simply never arrives.
+ *
+ * A plain promise chain is enough because there is exactly one worker thread;
+ * this orders the await points, it is not a cross-process lock. Failures are
+ * swallowed into the chain so one broken write cannot wedge every later one.
+ */
+let writeChain: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(task: () => Promise<T>): Promise<T> {
+  const next = writeChain.then(task, task);
+  writeChain = next.then(() => undefined, () => undefined);
+  return next;
+}
+
 async function writeSignals(store: LifecycleSignalsKeyStore, list: LifecycleSignal[]): Promise<void> {
   try {
     await store.setKey(KEY_SIGNALS, JSON.stringify(list));
@@ -156,15 +181,17 @@ async function writeSignals(store: LifecycleSignalsKeyStore, list: LifecycleSign
  * Buffer one signal. Over the cap the OLDEST are dropped, so the buffer holds
  * the most recent `MAX_SIGNALS`.
  */
-export async function recordSignal(
+export function recordSignal(
   store:      LifecycleSignalsKeyStore,
   kind:       SignalKind,
   occurredAt: number = Date.now(),
 ): Promise<void> {
-  const list = await readSignals(store);
-  list.push({ kind, occurredAt });
-  list.sort((a, b) => a.occurredAt - b.occurredAt);
-  await writeSignals(store, list.slice(Math.max(0, list.length - MAX_SIGNALS)));
+  return serialize(async () => {
+    const list = await readSignals(store);
+    list.push({ kind, occurredAt });
+    list.sort((a, b) => a.occurredAt - b.occurredAt);
+    await writeSignals(store, list.slice(Math.max(0, list.length - MAX_SIGNALS)));
+  });
 }
 
 /**
@@ -174,14 +201,16 @@ export async function recordSignal(
  * occurred_at = ?`, which also removes duplicates of the pair. Called only
  * after that signal's own send succeeded, so a failed send stays buffered.
  */
-export async function pruneSignalAt(
+export function pruneSignalAt(
   store:      LifecycleSignalsKeyStore,
   kind:       SignalKind,
   occurredAt: number,
 ): Promise<void> {
-  const list = await readSignals(store);
-  const kept = list.filter((s) => !(s.kind === kind && s.occurredAt === occurredAt));
-  if (kept.length !== list.length) await writeSignals(store, kept);
+  return serialize(async () => {
+    const list = await readSignals(store);
+    const kept = list.filter((s) => !(s.kind === kind && s.occurredAt === occurredAt));
+    if (kept.length !== list.length) await writeSignals(store, kept);
+  });
 }
 
 async function readNum(store: LifecycleSignalsKeyStore, key: string): Promise<number | null> {

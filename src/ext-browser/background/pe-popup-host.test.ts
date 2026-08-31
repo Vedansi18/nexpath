@@ -603,8 +603,13 @@ describe('feedback persistence — PE-BR-11 closed (the CLI feedback store, brow
       onFirstRendered: vi.fn().mockResolvedValue(undefined),
     });
 
+    // The sink is fire-and-forget (`void recordSignal(...)`) and the buffer's
+    // writes are serialised, so the write lands a microtask or two after the
+    // popup resolves. Waiting for it is the honest assertion; asserting
+    // immediately would only pass by accident of scheduling.
+    await vi.waitFor(() => expect(store.data.get('nexpath_lifecycle_signals')).toBeTruthy());
+
     const raw = store.data.get('nexpath_lifecycle_signals');
-    expect(raw).toBeTruthy();
     const signals = JSON.parse(raw!) as Array<{ kind: string; occurredAt: number }>;
     expect(signals.map((s) => s.kind)).toContain('pe_use_original');
     for (const s of signals) {
