@@ -110,9 +110,12 @@ describe('configRemoveTokenAction', () => {
 // ── modeBDisclosureLine ────────────────────────────────────────────────────────
 
 describe('modeBDisclosureLine', () => {
-  it('states plainly that prompt context leaves the machine, and that no prompt text is stored', () => {
+  it('states plainly that prompt context leaves the machine — and carries NO storage claim (A5, 2026-08-31)', () => {
+    // The "stores no prompt text" sentence was removed from every public surface
+    // pending the privacy review; this guards that it cannot quietly return.
     const line = modeBDisclosureLine().toLowerCase();
     expect(line).toContain('prompt context will be sent');
-    expect(line).toContain('stores no prompt text');
+    expect(line).not.toContain('stores no prompt');
+    expect(line).not.toContain('never stored');
   });
 });

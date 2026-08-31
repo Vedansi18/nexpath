@@ -125,8 +125,9 @@ function serviceBaseUrl(): string {
 
 /**
  * The Mode-B disclosure — mirrors the CLI's `modeBDisclosureLine()` wording
- * (D-6): plainly says prompt context leaves the machine and names the real
- * destination. ⛔ Never "nothing leaves your machine" — untrue in this mode.
+ * (D-6, storage-claim sentence removed 2026-08-31 to match the site's approved
+ * copy — A5): plainly says prompt context leaves the machine and names the
+ * real destination. ⛔ Never "nothing leaves your machine" — untrue here.
  */
 function renderTokenDisclosure(hasToken: boolean): void {
   if (!hasToken) { tokenDisclosure.hidden = true; return; }
@@ -134,7 +135,7 @@ function renderTokenDisclosure(hasToken: boolean): void {
   try { host = new URL(serviceBaseUrl()).host; } catch { /* keep the raw value */ }
   tokenDisclosure.textContent =
     `With no OpenAI API key configured, prompt context will be sent to ${host} ` +
-    'to be answered. This service stores no prompt text.';
+    'to be answered.';
   tokenDisclosure.hidden = false;
 }
 

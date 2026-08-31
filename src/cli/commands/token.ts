@@ -41,7 +41,9 @@ const defaultPrint = (line: string): void => { console.log(line); };
 // from it.
 export function modeBDisclosureLine(): string {
   const host = resolveApiBaseUrl();
-  return `With no OpenAI API key configured, prompt context will be sent to ${host} to be answered. This service stores no prompt text.`;
+  // Storage-claim sentence removed 2026-08-31 (A5): all public surfaces carry
+  // only the data-flow disclosure, matching the site's approved copy.
+  return `With no OpenAI API key configured, prompt context will be sent to ${host} to be answered.`;
 }
 
 export async function configSetTokenAction(opts: ConfigTokenOpts = {}): Promise<void> {
