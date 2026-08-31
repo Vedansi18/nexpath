@@ -19,7 +19,7 @@
  *    rare in the first place.
  */
 
-import { isPeCloseMsg, isPeInjectMsg, isPePreparingMsg, isShowPeMsg } from './ipc.js';
+import { isPeCloseMsg, isPeInjectMsg, isPePreparingMsg, isShowPeMsg, isShowRatingMsg } from './ipc.js';
 // The renderer is the UI developer's dock (PR #1) behind the pe-dock-adapter
 // bridge — same PePanelControllerV1 contract the retired pe-panel implemented,
 // so nothing else in this file or SW-side changed for the swap.
@@ -181,6 +181,29 @@ export function setupPeListener(): void {
       startKeepalive();
       // Ack AFTER the mount so the SW's first-render bookkeeping (consume row,
       // mark cooldown) reflects a panel that actually exists on screen.
+      window.dispatchEvent(new CustomEvent('nexpath:pe-view-ack'));
+      return;
+    }
+
+    if (isShowRatingMsg(msg)) {
+      // Deliberately NOT dismissing the sticky notice: it belongs to a held
+      // prompt, and a rating has nothing to do with one. If a hold really is in
+      // flight, erasing its notice would tell the user the hold ended.
+      if (msg.payload.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
+        console.warn(`[nexpath] rating view schemaVersion mismatch: got ${String(msg.payload.schemaVersion)}, expected ${SUPPORTED_SCHEMA_VERSION}. Ignoring.`);
+        return;
+      }
+      clearWatchdog();
+      const ctrl = ensureMounted();
+      ctrl.show(msg.payload);
+      // MV3 teardown: the same keepalive the PE panel uses (§4.1 M4 — already
+      // handled, do not rebuild it).
+      startKeepalive();
+      // Dispatched for symmetry with the PE branch. NOTE: nothing awaits it yet
+      // — `main-world-injector.ts:371` gates the ack promise on `isShowPeMsg`,
+      // so a rating currently resolves immediately with no proof of render.
+      // That matters for §4.1 M3 ("a failed push must not consume cadence") and
+      // belongs with the host wiring in Phase 5.
       window.dispatchEvent(new CustomEvent('nexpath:pe-view-ack'));
       return;
     }
