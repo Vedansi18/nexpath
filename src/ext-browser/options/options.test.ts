@@ -224,14 +224,18 @@ describe('options.ts', () => {
       expect(html).not.toMatch(/Service URL/i);
     });
 
-    it('footer is the NexPath brand linking to the website, version still runtime-injected', async () => {
+    it('footer is the clickable "Nexpath web" wordmark linking home — no version display, no icon', async () => {
       const { readFileSync } = await import('node:fs');
       const html = readFileSync('src/ext-browser/options/options.html', 'utf8');
       expect(html).toContain('class="footer-brand"');
       expect(html).toContain('href="https://parseos.tech/nexpath/"');
-      expect(html).toMatch(/>Nexpath</);
+      // The wordmark and the "web" qualifier live inside ONE anchor: the whole
+      // "Nexpath web" is the click target.
+      expect(html).toMatch(/<a class="footer-brand"[^>]*>Nexpath <span class="footer-web">web<\/span><\/a>/);
       expect(html).not.toContain('nexpath.dev');
-      expect(html).toContain('id="ext-version"');
+      // Version display removed (owner 2026-09-01) — and no glyph/icon characters.
+      expect(html).not.toContain('ext-version');
+      expect(html).not.toMatch(/footer-brand[^<]*<[^>]*>[^<]*[↗➚➜→]/u);
     });
   });
 
