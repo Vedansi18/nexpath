@@ -88,7 +88,20 @@ workflow without slowing it down.
   and only when a suggestion fires — ParseOS receives nothing.
 - With a **Nexpath token**: prompt context is sent to **Nexpath's own service**, which forwards it
   to OpenAI to generate the suggestion and meters your account credit.
-- **No telemetry, no tracking, no remote code** — in either mode. Full policy:
+- **No tracking and no remote code.** There is no analytics script, no ad or tracking network, and
+  no code is ever downloaded and run.
+- **Usage signals stay on your machine until you choose to send them.** Nexpath keeps a local,
+  content-free record of *which* popup buttons you press and *when* — a fixed list of action names
+  (for example `pe_shorter`, `mps_send`) and timestamps. It never records prompt text, the text of
+  an option, which site you are on, or your project path.
+- **The only thing that sends is the rating prompt, and only when you answer it.** Occasionally
+  Nexpath asks how it is working out for you. Choosing a rating is what sends — and it sends only
+  a random installation ID (not tied to you or your machine), your 1–4 rating, and the timestamps
+  above.
+- **If you dismiss the prompt, one line goes out saying just that** — your installation ID and the
+  time, so we can tell "asked and declined" apart from "never asked". No rating, because you did not
+  give one, and the local usage signals above stay on your machine: only answering releases those.- **Your prompt text is never sold or shared.** The only places prompt text goes are the two
+  routes above — OpenAI with your key, or the Nexpath service with your token. Full policy:
   [privacy policy](https://hi0001234d.github.io/nexpath/privacy.html).
 
 ---

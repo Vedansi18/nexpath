@@ -166,7 +166,9 @@ vi.mock('./chat-pipeline.js', () => ({
 vi.mock('./ipc.js', () => ({
   spawnAuto: vi.fn(),
   spawnStop: vi.fn(),
+  spawnRecordSignal: vi.fn(() => Promise.resolve()),
 }));
+import { spawnRecordSignal } from './ipc.js';
 vi.mock('./advisory-fallback.js', () => ({
   createAdvisoryFallback: vi.fn(() => ({
     armIfPending: mockArmIfPending,
@@ -405,11 +407,24 @@ describe('activate', () => {
       expect(provider.getCurrentPayload()).toEqual(payload);
     });
 
-    it('onPublish never crashes when given a null payload (malformed row)', async () => {
+    it('onPublish records pe_shown for the PE popup (Windsurf-poller parity)', async () => {
+      vi.mocked(spawnRecordSignal).mockClear();
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      capturedDeps().onPublish?.({ currentBodyId: 'body-1', bodyRevision: 3 });
+      const peShownCalls = vi.mocked(spawnRecordSignal).mock.calls.filter((c) => c[0] === 'pe_shown');
+      expect(peShownCalls).toHaveLength(1);
+    });
+
+    it('onPublish never crashes when given a null payload (malformed row) and records nothing', async () => {
+      vi.mocked(spawnRecordSignal).mockClear();
       mockShowOnboarding.mockResolvedValueOnce(undefined);
       mockDetectHost.mockReturnValueOnce('windsurf');
       await activate(makeCtx(true) as never);
       expect(() => capturedDeps().onPublish?.(null)).not.toThrow();
+      const peShownCalls = vi.mocked(spawnRecordSignal).mock.calls.filter((c) => c[0] === 'pe_shown');
+      expect(peShownCalls).toHaveLength(0);
     });
 
     it('onDeliver: succeeds via the clipboard-free Cascade command when it is registered', async () => {
@@ -730,6 +745,33 @@ describe('activate', () => {
       const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
       expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-1');
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: pe_body_visible'));
+    });
+
+    it('checkPeOrigin: records pe_shown once when the PE popup is published', async () => {
+      vi.mocked(spawnRecordSignal).mockClear();
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 100, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      const peShownCalls = vi.mocked(spawnRecordSignal).mock.calls.filter((c) => c[0] === 'pe_shown');
+      expect(peShownCalls).toHaveLength(1);
+    });
+
+    it('checkPeOrigin: does NOT record pe_shown twice for the same createdAt (re-publish guard)', async () => {
+      vi.mocked(spawnRecordSignal).mockClear();
+      mockIsPeOriginTurn.mockResolvedValue(true);
+      mockReadPendingPromptEnhancement.mockResolvedValue({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 500, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().checkPeOrigin!(makeEvent()); // publishes → records pe_shown
+      await pipelineDeps().checkPeOrigin!(makeEvent()); // same createdAt → no second record
+      const peShownCalls = vi.mocked(spawnRecordSignal).mock.calls.filter((c) => c[0] === 'pe_shown');
+      expect(peShownCalls).toHaveLength(1);
     });
 
     it('checkPeOrigin: ACKs not_counted_as_shown (never render_failure) when the pending row vanished before it could be read', async () => {

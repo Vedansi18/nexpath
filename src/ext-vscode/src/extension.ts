@@ -58,7 +58,8 @@ import {
   type ChatHistoryWatcher,
 } from './chat-history-watcher.js';
 import { createChatEventHandler } from './chat-pipeline.js';
-import { spawnAuto, spawnStop } from './ipc.js';
+import { spawnAuto, spawnStop, spawnRecordSignal } from './ipc.js';
+import { peEventTypeToSignalKind } from './pe-signal-map.js';
 import { resolveWorkspaceFromDbPath, canonicalizeCwd } from './resolve-db-workspace.js';
 import { createAdvisoryFallback, type AdvisoryFallback } from './advisory-fallback.js';
 import { createAdvisoryPoller, type AdvisoryPoller } from './advisory-poller.js';
@@ -499,6 +500,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (!event) return;
       log(`[nexpath] PE event: ${JSON.stringify(describePeEventSafely(event))}`);
+      // Record a content-free feedback signal for this action, mirroring what the
+      // CLI records for its own popup. Fire-and-forget: never blocks the webview,
+      // never throws. Only the action's signal kind is sent — no body/details
+      // text. Attributed to the workspace project the same way the pipeline
+      // spawns resolve it (canonicalized workspace folder).
+      const signalKind = peEventTypeToSignalKind(event.eventType);
+      if (signalKind) {
+        const projectCwd = canonicalizeCwd(
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
+        );
+        void spawnRecordSignal(signalKind, { cwd: projectCwd });
+      }
       // P7 (PEH-7): gate the one event type that actually attempts
       // delivery today. No real insertion exists yet (P8/P9) — logging the
       // gate decision here proves "delivery unreachable unless intent_ready"
@@ -572,6 +585,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const advisoryFallback: AdvisoryFallback = createAdvisoryFallback({
     publishPayload: (payload) => viewProvider?.publishPayload(payload),
+    // Record the content-free `advisory_fired` signal when the advisory is shown
+    // in the webview — the same signal the CLI records for its own popup. Fire-
+    // and-forget; `projectRoot` is already the canonicalized project the advisory
+    // belongs to (armed from `cwdForEvent`).
+    recordAdvisoryShown: (projectRoot) =>
+      void spawnRecordSignal('advisory_fired', { cwd: projectRoot }),
     statusBar: {
       show: (text, tooltip) => {
         statusBarItem.text = text;
@@ -751,7 +770,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         executeCommand: (id, ...args) => vscode.commands.executeCommand(id, ...args),
         getCommands: (filter) => vscode.commands.getCommands(filter),
       })),
-      onPublish: (payload) => { if (payload) peViewProvider?.publishPayload(payload); },
+      onPublish: (payload) => {
+        if (!payload) return;
+        peViewProvider?.publishPayload(payload);
+        // Windsurf-poller PE-show parity: record the same content-free `pe_shown`
+        // signal the checkPeOrigin path records, so PE popups are counted on
+        // Windsurf too. The poller dedups by createdAt (its own `handledAt`), so
+        // onPublish fires once per distinct PE — no extra guard needed here.
+        // Fire-and-forget; only the kind is sent, no body text.
+        void spawnRecordSignal('pe_shown', {
+          cwd: canonicalizeCwd(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()),
+        });
+      },
       onOutcome: (outcome) => log(`[nexpath] windsurf PE poller insert outcome: ${outcome}`),
     });
     pePoller.start();
@@ -1137,8 +1167,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           parsed = parsePromptEnhancementExtensionPayloadV1(pending.resultJson);
           if (parsed) {
             if (pending.createdAt >= peLastPublishedCreatedAt) {
+              const isNewPeShow = pending.createdAt > peLastPublishedCreatedAt;
               peLastPublishedCreatedAt = pending.createdAt;
               peViewProvider?.publishPayload(parsed);
+              // Record the content-free `pe_shown` signal once per DISTINCT popup
+              // (strictly-new createdAt), so a same-createdAt re-publish does not
+              // double-count. Fire-and-forget; only the kind is sent, no body text.
+              if (isNewPeShow) {
+                void spawnRecordSignal('pe_shown', { cwd: projectRoot });
+              }
             } else {
               log(`[nexpath] PE publish suppressed: a newer turn's payload is already visible (createdAt ${pending.createdAt} < ${peLastPublishedCreatedAt})`);
             }

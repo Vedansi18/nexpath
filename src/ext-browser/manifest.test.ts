@@ -13,7 +13,8 @@ const load = (target: 'chrome' | 'firefox') =>
   JSON.parse(readFileSync(new URL(`./manifest.${target}.json`, import.meta.url), 'utf8'));
 
 const EXPECTED_PERMISSIONS = ['storage', 'tabs'];
-const EXPECTED_HOSTS = [
+/** The four agent sites the extension runs on — and the whole of `host_permissions`. */
+const EXPECTED_AGENT_HOSTS = [
   'https://*.replit.com/*',
   'https://bolt.new/*',
   'https://*.stackblitz.com/*',
@@ -27,6 +28,24 @@ const EXPECTED_HOSTS = [
   // unpacked build when they need a local instance.
   'https://parseos.tech/*',
 ];
+
+/**
+ * The rating popup POSTs to this host (`adapters/telemetry-send.ts`), and it is
+ * deliberately NOT in `host_permissions`.
+ *
+ * `host_permissions` exists to bypass CORS. Measured against the live endpoint
+ * (OPTIONS preflight, 2026-08-31): `us.i.posthog.com/capture/` reflects a
+ * `chrome-extension://` origin, allows `POST`, and allows the `content-type`
+ * header — so an ordinary CORS request from the worker succeeds without it.
+ *
+ * Declaring it anyway would request a permission the extension does not need and
+ * add a fifth line to the install dialog for nothing. Least privilege, and the
+ * store reviewers' preference. If a future endpoint stops sending CORS headers,
+ * THAT is when this has to be added — and the user-visible cost paid.
+ */
+const TELEMETRY_HOST_NOT_REQUESTED = 'https://us.i.posthog.com/*';
+
+const EXPECTED_HOSTS = EXPECTED_AGENT_HOSTS;
 
 describe('ext-browser manifests — permission surface', () => {
   for (const target of ['chrome', 'firefox'] as const) {
@@ -43,6 +62,15 @@ describe('ext-browser manifests — permission surface', () => {
 
       it('scopes host_permissions to the supported agents only', () => {
         expect(manifest.host_permissions).toEqual(EXPECTED_HOSTS);
+      });
+
+      it('⭐ does NOT request the telemetry host — the send works over plain CORS', () => {
+        // Re-adding it would cost a fifth line in the install dialog and buy
+        // nothing. See the constant's comment for the measurement.
+        expect(manifest.host_permissions).not.toContain(TELEMETRY_HOST_NOT_REQUESTED);
+        const matches = (manifest.content_scripts ?? [])
+          .flatMap((cs: { matches?: string[] }) => cs.matches ?? []);
+        expect(matches).not.toContain(TELEMETRY_HOST_NOT_REQUESTED);
       });
 
       it('is MV3 and version-locked', () => {

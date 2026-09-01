@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -310,5 +312,124 @@ describe('options.ts', () => {
 
       expect(els().status.textContent).toContain("Couldn't refresh settings");
     });
+  });
+  
+});
+
+/**
+ * The docs describe this control to users and to store reviewers, and they have
+ * gone stale twice on this branch already — once claiming "No telemetry …
+ * nothing is sent" after the sender shipped, once claiming the extension had no
+ * opt-out after this very switch shipped. Both were caught by reading, which is
+ * not a mechanism.
+ *
+ * So: the same discipline the adapters use against the CLI, pointed at the docs.
+ * If a label here is reworded, the sentence that names it has to be reworded
+ * too.
+ */
+describe('the docs still describe this page accurately', () => {
+  const cwd = process.cwd();
+  const readme  = readFileSync(join(cwd, 'src', 'ext-browser', 'README.md'), 'utf8');
+  const publish = readFileSync(join(cwd, 'src', 'ext-browser', 'PUBLISH.md'), 'utf8');
+  const html    = readFileSync(join(cwd, 'src', 'ext-browser', 'options', 'options.html'), 'utf8');
+  const page    = readFileSync(join(cwd, 'src', 'ext-browser', 'options', 'options.ts'), 'utf8');
+
+
+  it('⭐ neither document claims a control the extension does not have', () => {
+    // The toggle was removed on 2026-09-01 — the prompt is shown to every user.
+    // These two sentences were true for exactly one release, and a privacy
+    // policy that promises a switch nobody can find is the worst kind of stale.
+    for (const doc of [readme, publish]) {
+      const flat = doc.replace(/\s+/g, ' ');
+      expect(flat).not.toContain('Never ask');
+      expect(flat).not.toContain('Settings → Feedback →');
+      expect(flat).not.toContain('turn the prompt off');
+    }
+  });
+
+  it('⭐ the page really has no feedback toggle to claim', () => {
+    // The other half: if the control ever comes back, the sentences above have
+    // to come back with it, and this fails until they do.
+    expect(page).not.toContain('nexpath_rating_enabled');
+    expect(html).not.toContain('rating-group');
+    const worker = readFileSync(join(cwd, 'src', 'ext-browser', 'background', 'service-worker.ts'), 'utf8');
+    expect(worker).not.toContain('nexpath_rating_enabled');
+  });
+
+  it('⭐ the store disclosure says plainly that there is no opt-out', () => {
+    expect(publish.replace(/\s+/g, ' ')).toContain('There is NO per-user opt-out');
+  });
+
+  it('PUBLISH.md no longer claims the extension has no opt-out for the OLD reason', () => {
+    // The exact stale sentence this switch invalidated.
+    expect(publish).not.toContain('and this one has none');
+  });
+
+  it('⭐ the privacy policy discloses the dismissal send', () => {
+    // The dismissal is the ONE event that goes out without the rating click, so
+    // it is the one the policy must name. The README said "Dismissing the
+    // prompt sends nothing" until the event shipped — pinned so that sentence
+    // cannot come back while the send exists.
+    const flat = readme.replace(/\s+/g, ' ');
+    expect(flat).toContain('If you dismiss the prompt, one line goes out');
+    expect(flat).not.toContain('Dismissing the prompt sends nothing');
+    expect(publish.replace(/\s+/g, ' ')).toContain('Dismissing the prompt sends ONE line');
+  });
+
+  it('⭐ the README does not claim nothing is sent', () => {
+    // The other stale claim, kept pinned so it cannot come back.
+    expect(readme).not.toContain('No telemetry');
+    expect(readme).not.toContain('Nothing is sent to any Nexpath or third-party server');
+  });
+});
+
+/**
+ * The store-disclosure event list, against the code that sends them.
+ *
+ * A list a reviewer reads is only worth having if it cannot drift, and this one
+ * has two ways to go wrong: an event ships that the table does not name, or the
+ * table names one that no longer exists. Both are checked.
+ */
+describe('the store disclosure lists exactly the events the code sends', () => {
+  const cwd = process.cwd();
+  const publish = readFileSync(join(cwd, 'src', 'ext-browser', 'PUBLISH.md'), 'utf8');
+  const sender = readFileSync(join(cwd, 'src', 'ext-browser', 'adapters', 'telemetry-send.ts'), 'utf8');
+  const buffer = readFileSync(join(cwd, 'src', 'ext-browser', 'adapters', 'lifecycle-signals.ts'), 'utf8');
+
+  /** Every event name the shipped code can put on the wire. */
+  const SENT = [
+    'nexpath_installed',
+    'feedback_submitted', 'feedback_dismissed',
+    'feedback_rating_bad', 'feedback_rating_fine', 'feedback_rating_good', 'feedback_rating_excellent',
+    'pe_use_current', 'pe_use_original', 'pe_apply_details', 'pe_close',
+    'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption', 'mps_apply_details',
+  ];
+
+  it('⭐ every event the code can send is named in the table', () => {
+    const flat = publish.replace(/\s+/g, ' ');
+    for (const name of SENT) {
+      // `_fine`-style shorthand counts: the table groups the four ratings.
+      const named = flat.includes(name) || flat.includes(name.replace('feedback_rating_', '_'));
+      expect(named, name).toBe(true);
+    }
+  });
+
+  it('⭐ and every name in the table still exists in the code', () => {
+    // The table names PROPERTIES too (`feedback_at`, `action_ts`); those are not
+    // events and are excluded rather than matched loosely.
+    const PROPERTIES = new Set(['feedback_at', 'installed_at', 'dismissed_at', 'action_ts']);
+    const inTable = [...publish.matchAll(/`(nexpath_[a-z_]+|feedback_[a-z_]+|pe_[a-z_]+|mps_[a-z_]+)`/g)]
+      .map((m) => m[1]!)
+      .filter((n) => !PROPERTIES.has(n));
+    expect(inTable.length).toBeGreaterThan(10);          // the table is actually there
+    const code = sender + buffer;
+    for (const name of new Set(inTable)) {
+      expect(code.includes(`'${name}'`), name).toBe(true);
+    }
+  });
+
+  it('the table says the sixteen are all of them', () => {
+    expect(publish).toContain('Sixteen, and no others');
+    expect(SENT).toHaveLength(16);
   });
 });

@@ -80,8 +80,28 @@ not `npm install`, and match the Node version above.
 
 The Firefox manifest sets `strict_min_version` **112** and declares
 `browser_specific_settings.gecko.data_collection_permissions.required = ["authenticationInfo",
-"websiteContent"]` (Mozilla's built-in data-consent) — keep these in sync with the store data
-disclosures (the API key + prompt text).
+"websiteContent", "technicalAndInteraction"]` (Mozilla's built-in data-consent) — keep these in sync
+with the store data disclosures (the API key + prompt text, and the rating telemetry).
+
+`technicalAndInteraction` covers the rating send (installation ID, rating, timestamps). It is
+declared **required**, not `optional`, and the reason is a mechanism mismatch — not an absence of
+user control. The extension DOES have a kill switch (Settings → Feedback), but that is an extension
+setting; Mozilla's `optional` is a permission the BROWSER toggles in about:addons and the extension
+is expected to honour through `browser.permissions`. Declaring `optional` while ignoring that API
+would advertise a control the extension does not read.
+
+Honouring it properly is blocked by our own support range: `strict_min_version` is **112**, and
+data-collection permissions are a much later Firefox feature (140+). Across most of the range we
+ship to, the key is ignored entirely and the `browser.permissions` data-collection API is not there
+to check — so an `optional` declaration would have to fail open on those versions, which is the
+opposite of what declaring it optional promises.
+
+`required` is therefore the honest declaration: when this extension collects, it does so under its
+own setting, with no browser-level toggle involved. Revisit if `strict_min_version` ever rises past
+the versions that support the API.
+
+⚠️ Verify the spelling against AMO at submission — an unrecognised category value is rejected there,
+not at build time.
 
 ---
 
@@ -129,6 +149,40 @@ release went out Unlisted for the tester round, then flipped Public.)
   Nexpath service origin (`parseos.tech`), contacted **only** in token mode. (Injection is
   declarative — `content_scripts` + `web_accessible_resources` — so no `scripting` permission is
   requested.)
+- **The rating POST needs no host permission**, and none is requested. `host_permissions` exists to
+  bypass CORS, and `us.i.posthog.com/capture/` sends CORS headers for a `chrome-extension://` origin
+  (verified by OPTIONS preflight), so an ordinary request from the worker succeeds. The install
+  dialog therefore still reads **4 domains**. If a reviewer asks why an analytics host appears in the
+  source but not in the permissions, that is the answer.
+- **The complete event list** (reviewers do ask for it by name). Sixteen, and no others. Every one
+  carries the same four fields — a random installation ID, `$lib`, `$lib_version`, `surface:"browser"` —
+  plus the one timestamp named beside it. **No event has a field that can hold text.**
+
+  | Event | When | Extra field |
+  |---|---|---|
+  | `nexpath_installed` | once, on the first send after install | `installed_at` |
+  | `feedback_submitted` | the user answers the rating prompt | `rating`, `feedback_at` |
+  | `feedback_rating_bad` / `_fine` / `_good` / `_excellent` | the same answer under its own name | `rating`, `feedback_at` |
+  | `feedback_dismissed` | the prompt was shown and closed unanswered | `dismissed_at` |
+  | `pe_use_current`, `pe_use_original`, `pe_apply_details`, `pe_close` | a prompt-enhancement popup button | `action_ts` |
+  | `mps_send`, `mps_cancel`, `mps_decline`, `mps_interruption`, `mps_apply_details` | a sequence-offer button | `action_ts` |
+
+  The nine `pe_*` / `mps_*` events are BUFFERED locally as they happen and leave only when the user
+  answers a rating; `feedback_dismissed` is the one event that goes out without that answer, and it
+  releases nothing that was buffered. Keep this table in step with `adapters/telemetry-send.ts` — a
+  test in `options.test.ts` fails if an event name here is not in the code, or the reverse.
+
+- **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
+  a random installation ID, a 1–4 rating, and content-free action names + timestamps. Dismissing the
+  prompt sends ONE line — the installation ID and a timestamp — and releases none of the buffered
+  action names. **Never** prompt text, option text, URLs or project paths.
+- ⚠️ **There is NO per-user opt-out, and a reviewer may ask.** The rating prompt is shown to every
+  installation (owner decision 2026-09-01); the options page carries no toggle for it and the
+  extension reads no setting that would disable it. This matches the CLI, whose feedback send is
+  deliberately independent of `telemetry.enabled` because the click is the consent. What limits the
+  data is its shape, not a switch: nothing is sent unless the user answers or dismisses the prompt,
+  and no field in any envelope can hold text. Keep this and the event table identical to the
+  *Privacy* section of `src/ext-browser/README.md`, which is what the privacy-policy URL points at.
 - **Privacy policy URL** (`docs/privacy.html` via GitHub Pages), **screenshots** (exactly 1280×800),
   **128×128 icon** (`icons/icon128.png`).
 
