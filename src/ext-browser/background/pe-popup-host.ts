@@ -541,6 +541,25 @@ export async function runBrowserPePopup(
           log.debug('pe_command_ignored_wrong_stage', { projectRoot, type: received.type });
           received = await awaitPanelCommand();
         }
+        // The details merge — the one user action whose signal the browser was
+        // losing.
+        //
+        // In the CLI, Enter on "Additional details" sends `apply_details`, which
+        // the engine maps to `pe_apply_details`
+        // (`cli-submit-popup.ts:64-73`). The browser's dock merges LOCALLY and
+        // sends `edit_body` instead (`pe-dock-adapter.ts:393`), and `edit_body`
+        // is deliberately NOT in that map — in the CLI it is an inline body edit,
+        // which would emit a signal per keystroke-commit.
+        //
+        // So the signal has to be recorded HERE, where the browser knows the
+        // command means a details merge and nothing else: `:393` is the only
+        // panel-side emitter of `edit_body`, and it sits in `case 'apply-details'`.
+        // Same kind the CLI records, so the two surfaces report the same action
+        // under the same name.
+        if (received.type === 'edit_body' && deps.feedbackStore) {
+          void recordSignal(deps.feedbackStore, 'pe_apply_details', Date.now());
+          log.debug('pe_action_signal', { kind: 'pe_apply_details' });
+        }
         const { first, stash } = translate(received, view);
         if (stash) stashed = stash;
         return first;

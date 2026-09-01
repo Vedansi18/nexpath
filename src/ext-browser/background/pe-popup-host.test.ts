@@ -621,6 +621,45 @@ describe('feedback persistence — PE-BR-11 closed (the CLI feedback store, brow
     }
   });
 
+  /**
+   * The details merge — the one browser action whose signal was missing.
+   *
+   * The CLI's Enter on "Additional details" sends `apply_details` and the engine
+   * maps it to `pe_apply_details`. The browser's dock merges locally and sends
+   * `edit_body`, which is NOT in that map (in the CLI it means an inline body
+   * edit), so the action was recorded on one surface and not the other.
+   */
+  it('⭐ a details merge records pe_apply_details — the CLI records it, so the browser must too', async () => {
+    const { log } = makeLog();
+    const store = memoryStore();
+    let shows = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        const seq = m.payload.viewSeq;
+        shows += 1;
+        // First frame: merge details. Second frame (the engine's echo): finish.
+        const cmd: PePanelCommandV1 = shows === 1
+          ? { type: 'edit_body', bodyText: 'body plus the merged details' }
+          : { type: 'use_original' };
+        setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, cmd); }, 0);
+      }
+      return { ok: true };
+    };
+
+    await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      feedbackStore: store,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await vi.waitFor(() => {
+      const raw = store.data.get('nexpath_lifecycle_signals');
+      expect(raw).toBeTruthy();
+      expect(JSON.parse(raw!).map((s: { kind: string }) => s.kind)).toContain('pe_apply_details');
+    });
+  });
+
   it('with no store wired, an action still completes — buffering is best-effort', async () => {
     const { log } = makeLog();
     let seq = 0;
