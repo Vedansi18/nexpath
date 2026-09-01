@@ -201,7 +201,7 @@ export function persistPromptEnhancementSequenceContinuationCancelV1(
  */
 export interface FeedbackDeps {
   render: FeedbackRenderFn | null;
-  send:   (store: Store, rating: number) => Promise<boolean>;
+  send:   (store: Store, rating: number, now?: number) => Promise<boolean>;
   /**
    * Required, not optional, and deliberately so: an optional field would let a
    * test that forgets it fall through to the REAL sender, which posts to
@@ -215,7 +215,7 @@ export interface FeedbackDeps {
    */
   sendDismissed: (store: Store) => Promise<boolean>;
   /** Required for the same reason `sendDismissed` is — see above. */
-  sendRatingOption: (store: Store, rating: number) => Promise<boolean>;
+  sendRatingOption: (store: Store, rating: number, now?: number) => Promise<boolean>;
 }
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
@@ -526,9 +526,17 @@ export async function runStop(
   //      consuming the cadence) when no renderer is available.
   if (isFeedbackEligible(store)) {
     const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
-    const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
+    // The two rating envelopes describe ONE click, so they take one timestamp
+    // rather than each calling `Date.now()` — a millisecond apart is enough to
+    // break anything that joins them on time, and the browser's end-to-end suite
+    // caught exactly that happening under load.
+    const fbSend = feedbackDeps
+      ? feedbackDeps.send
+      : (s: Store, r: number, n?: number) => sendFeedback(s, r, n === undefined ? {} : { now: n });
     const fbDismissed = feedbackDeps ? feedbackDeps.sendDismissed : sendFeedbackDismissed;
-    const fbRatingOption = feedbackDeps ? feedbackDeps.sendRatingOption : sendFeedbackRatingOption;
+    const fbRatingOption = feedbackDeps
+      ? feedbackDeps.sendRatingOption
+      : (s: Store, r: number, n?: number) => sendFeedbackRatingOption(s, r, n === undefined ? {} : { now: n });
     if (fbRender) {
       // The popup blocks for user input; don't hold the global DB lock across it (MPS-8) — release
       // before, re-acquire + reload after, so other sessions are not blocked and their concurrent
@@ -541,7 +549,8 @@ export async function runStop(
         // events (install + advisory + option-selected), then send the rating.
         // Flush regardless of telemetry.enabled — this explicit action is the consent.
         await flushLifecycle(store);
-        await fbSend(store, result.rating);
+        const answeredAt = Date.now();
+        await fbSend(store, result.rating, answeredAt);
         // The same answer under its own event NAME (`feedback_rating_good` and
         // its siblings), alongside `feedback_submitted` rather than instead of
         // it — replacing would rename history and break existing charts.
@@ -549,7 +558,7 @@ export async function runStop(
         // AFTER the rating, not before: this is a second envelope on the SAME
         // consent, and if one of the two has to fail it should be the
         // convenience one, not the record the dashboards were built on.
-        await fbRatingOption(store, result.rating);
+        await fbRatingOption(store, result.rating, answeredAt);
       } else {
         // Shown and closed without an answer. Reported so that "asked and
         // declined" is distinguishable from "never asked" — without it the

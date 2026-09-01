@@ -88,7 +88,7 @@ describe('feedback popup integration', () => {
     const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
     expect(result.outcome).toBe('feedback_shown');
-    expect(send).toHaveBeenCalledWith(store, 3);
+    expect(send).toHaveBeenCalledWith(store, 3, expect.any(Number));
     // consent gate: buffered lifecycle events flushed on a rating
     expect(flushLifecycle).toHaveBeenCalledWith(store);
     // cadence reset
@@ -137,7 +137,7 @@ describe('feedback popup integration', () => {
     await runStop(makePayload(), store, undefined, undefined, deps);
 
     expect(sendRatingOption).toHaveBeenCalledOnce();
-    expect(sendRatingOption).toHaveBeenCalledWith(store, 3);   // the rating the user picked
+    expect(sendRatingOption).toHaveBeenCalledWith(store, 3, expect.any(Number));   // rating + the shared timestamp
   });
 
   it('⭐ a dismissal reports no option — there is none to report', async () => {
@@ -215,7 +215,7 @@ describe('feedback popup integration', () => {
 
       const result = await runStop(makePayload(), s, undefined, undefined, deps);
       expect(result.outcome).toBe('feedback_shown');
-      expect(send).toHaveBeenCalledWith(s, 3);
+      expect(send).toHaveBeenCalledWith(s, 3, expect.any(Number));
       closeStore(s);
 
       // Reopen: markFeedbackShown ran after release→popup→reacquire+reload, so the

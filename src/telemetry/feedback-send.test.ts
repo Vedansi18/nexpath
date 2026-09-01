@@ -161,9 +161,11 @@ describe('per-option event names — pinned to FEEDBACK_OPTIONS', () => {
     // convenience. If one has to fail, it should be the second one.
     const stop = readFileSync(join(process.cwd(), 'src', 'cli', 'commands', 'stop.ts'), 'utf8');
     const flat = stop.replace(/\s+/g, ' ');
-    expect(flat).toContain('await flushLifecycle(store); await fbSend(store, result.rating);');
-    expect(stop.indexOf('fbRatingOption(store, result.rating)'))
-      .toBeGreaterThan(stop.indexOf('fbSend(store, result.rating)'));
+    expect(flat).toContain('await flushLifecycle(store); const answeredAt = Date.now(); await fbSend(store, result.rating, answeredAt);');
+    // ONE timestamp, shared: the two envelopes describe a single click.
+    expect(flat).toContain('await fbRatingOption(store, result.rating, answeredAt);');
+    expect(stop.indexOf('fbRatingOption(store, result.rating, answeredAt)'))
+      .toBeGreaterThan(stop.indexOf('fbSend(store, result.rating, answeredAt)'));
   });
 
   it('⭐ and it is NOT sent on a dismissal — there is no option to report', () => {
@@ -172,12 +174,11 @@ describe('per-option event names — pinned to FEEDBACK_OPTIONS', () => {
     expect(elseBranch.slice(0, 900)).not.toContain('fbRatingOption');
   });
 
-  it('⭐ the BROWSER still sends none of them — Phase 3 has not landed', () => {
+  it('⭐ the browser ships the identical four names and sends them too', () => {
     // Dropped from this guard the moment Phase 3 ships, together with the
     // browser's own tests and the Privacy section that enumerates what is sent.
     const host = readFileSync(join(process.cwd(), 'src', 'ext-browser', 'background', 'pe-popup-host.ts'), 'utf8');
-    expect(host).not.toContain('feedbackRatingEvent');
-    expect(host).not.toContain('sendRatingOption');
+    expect(host).toContain('sendRatingOption');
   });
 });
 

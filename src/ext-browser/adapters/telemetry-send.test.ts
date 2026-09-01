@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  buildEnvelope, sendRating, sendInstalled, sendAdvisoryFired, sendOptionSelected,
+  buildEnvelope, sendRating, sendRatingOption, sendInstalled, sendAdvisoryFired, sendOptionSelected,
   flushLifecycle,
   POSTHOG_ENDPOINT, POSTHOG_API_KEY, POSTHOG_LIB_NAME, POSTHOG_LIB_VERSION, SURFACE,
   FEEDBACK_EVENT, FEEDBACK_DISMISSED_EVENT, FEEDBACK_RATING_EVENTS, feedbackRatingEvent, EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED,
@@ -479,13 +479,66 @@ describe('per-option event names — pinned to the scale AND to the CLI', () => 
     }
   });
 
-  it('⭐ Phase 1 is naming only — the browser sends none of them yet', () => {
-    // Phase 3 brings the sender, with its own tests and its own docs. If this
-    // fails, a sender landed without them.
-    const src = readFileSync(join(process.cwd(), 'src', 'ext-browser', 'adapters', 'telemetry-send.ts'), 'utf8');
-    expect(src).not.toMatch(/export function sendRatingOption/);
+  it('⭐ the host sends the per-option event AFTER the rating, on the same consent', () => {
+    // Asserted on the source, because a reordering fails nothing behaviourally:
+    // both sends succeed either way. The rating is the record the dashboards
+    // were built on; this is the convenience, so it goes second.
     const host = readFileSync(join(process.cwd(), 'src', 'ext-browser', 'background', 'pe-popup-host.ts'), 'utf8');
-    expect(host).not.toContain('feedbackRatingEvent');
-    expect(host).not.toContain('FEEDBACK_RATING_EVENTS');
+    expect(host.indexOf('sendRatingOption(store, command.rating'))
+      .toBeGreaterThan(host.indexOf('sendRating(store, command.rating'));
+  });
+
+  it('⭐ and NOT on a dismissal — there is no option to report', () => {
+    const host = readFileSync(join(process.cwd(), 'src', 'ext-browser', 'background', 'pe-popup-host.ts'), 'utf8');
+    const dismissal = host.slice(host.indexOf('Anything else is a dismissal'));
+    expect(dismissal.slice(0, 900)).not.toContain('sendRatingOption');
+  });
+});
+
+describe('sendRatingOption', () => {
+  it.each(RATING_SCALE.map((c) => [c.label, c.rating] as const))(
+    '⭐ %s posts its own event name',
+    async (label, rating) => {
+      const { store } = memStore();
+      const { fetch, calls } = fakeFetch();
+
+      expect(await sendRatingOption(store, rating, { fetch, now: T0 })).toBe(true);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].body.event).toBe(`feedback_rating_${label.toLowerCase()}`);
+      const props = calls[0].body.properties as Record<string, unknown>;
+      expect(props.rating).toBe(rating);
+      expect(props.feedback_at).toBe(T0);
+      expect(props.surface).toBe('browser');
+      expect(calls[0].body.timestamp).toBe(new Date(T0).toISOString());
+    },
+  );
+
+  it('⭐ carries the SAME payload as feedback_submitted — either answers the same question', async () => {
+    const { store } = memStore();
+    const a = fakeFetch();
+    const b = fakeFetch();
+
+    await sendRatingOption(store, 2, { fetch: a.fetch, now: T0 });
+    await sendRating(store, 2, { fetch: b.fetch, now: T0 });
+
+    expect(a.calls[0].body.properties).toEqual(b.calls[0].body.properties);
+    expect(a.calls[0].body.event).not.toBe(b.calls[0].body.event);   // only the name differs
+  });
+
+  it('⭐ a rating outside the scale sends NOTHING — no fifth option can be invented', async () => {
+    const { store } = memStore();
+    const { fetch, calls } = fakeFetch();
+
+    for (const r of [0, 5, -1, 1.5, Number.NaN]) {
+      expect(await sendRatingOption(store, r, { fetch }), String(r)).toBe(false);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('a failed post is swallowed, like every other sender here', async () => {
+    const { store } = memStore();
+    const { fetch } = fakeFetch(() => false);
+    await expect(sendRatingOption(store, 3, { fetch, now: T0 })).resolves.toBe(false);
   });
 });

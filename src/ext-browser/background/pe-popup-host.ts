@@ -58,6 +58,7 @@ import {
   flushLifecycle,
   sendRating,
   sendRatingDismissed,
+  sendRatingOption,
   type FetchLike,
   type TelemetryKeyStore,
 } from '../adapters/telemetry-send.js';
@@ -712,12 +713,23 @@ export async function runBrowserRatingPopup(
       // rating first would put a numerator on the wire ahead of its denominator,
       // and a flush that then failed would leave the two permanently unmatched.
       await flushLifecycle(store, deps.fetch ? { fetch: deps.fetch } : {});
-      const sent = await sendRating(store, command.rating, deps.fetch ? { fetch: deps.fetch } : {});
-      // Marked shown whether or not the POST succeeded: the user was asked and
+      // ONE timestamp for both envelopes. They describe a single click, so they
+      // must agree: letting each sender call `Date.now()` put them 1 ms apart
+      // under load (caught by the end-to-end suite, which asserts the payloads
+      // are equal), and anything joining them on time would have missed.
+      const answeredAt = now();
+      const opts = deps.fetch ? { fetch: deps.fetch, now: answeredAt } : { now: answeredAt };
+      const sent = await sendRating(store, command.rating, opts);
+      // The same answer under its own event name, AFTER the rating and on the
+      // same consent — CLI parity (`stop.ts`, Phase 2 of r16). The rating is the
+      // record the dashboards were built on; this is the convenience. If one of
+      // the two has to fail, it should be this one, so it goes second.
+      const named = await sendRatingOption(store, command.rating, opts);
+      // Marked shown whether or not the POSTs succeeded: the user was asked and
       // answered. Re-asking because a network call failed would punish them for
-      // the network. `sent` is logged, not acted on.
-      await markFeedbackShown(store, now());
-      log.debug('rating_recorded', { projectRoot, sent });
+      // the network. Both results are logged, neither is acted on.
+      await markFeedbackShown(store, answeredAt);
+      log.debug('rating_recorded', { projectRoot, sent, named });
       return { state: 'rated', rating: command.rating };
     }
 

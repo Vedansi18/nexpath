@@ -772,7 +772,8 @@ describe('runBrowserRatingPopup', () => {
     const { events } = await run({ type: 'rating', rating: 4 }, { store });
 
     // install event, then the buffered action, then the rating — in that order.
-    expect(events[events.length - 1]).toBe('feedback_submitted');
+    // The per-option event (r16) trails the rating on the same consent.
+    expect(events.slice(-2)).toEqual(['feedback_submitted', 'feedback_rating_excellent']);
     expect(events).toContain('pe_shorter');
     expect(events.indexOf('pe_shorter')).toBeLessThan(events.indexOf('feedback_submitted'));
     expect(await readSignals(store)).toEqual([]);      // pruned after their sends

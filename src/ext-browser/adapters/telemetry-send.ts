@@ -242,6 +242,29 @@ export function sendRating(
 }
 
 /**
+ * The same answer under its own event NAME — `feedback_rating_good` and its
+ * siblings — ALONGSIDE `feedback_submitted`, never instead of it (§9.8:
+ * replacing would rename history and break every existing chart).
+ *
+ * Identical payload to `sendRating`, so either event answers the same question;
+ * what differs is that this one is a name, which in PostHog is a first-class
+ * object with its own trend, funnel step and alert.
+ *
+ * A rating outside the scale sends NOTHING — a caller cannot invent a fifth
+ * option by passing 5.
+ */
+export function sendRatingOption(
+  store:  TelemetryKeyStore,
+  rating: number,
+  opts:   SendOptions & { now?: number } = {},
+): Promise<boolean> {
+  const event = feedbackRatingEvent(rating);
+  if (!event) return Promise.resolve(false);
+  const now = opts.now ?? Date.now();
+  return send(store, event, now, { rating, feedback_at: now }, opts);
+}
+
+/**
  * Report a dismissal. The rating envelope without the rating — there isn't one.
  *
  * Deliberately does NOT flush, and the caller must not either: releasing the

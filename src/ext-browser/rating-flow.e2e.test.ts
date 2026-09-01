@@ -167,10 +167,14 @@ describe('rating popup — end to end', () => {
       'pe_shorter',
       'pe_apply_details',
       'feedback_submitted',
+      'feedback_rating_good',      // the same answer under its own name (r16)
     ]);
 
-    const rating = w.posts.at(-1)!;
-    expect(rating['event']).toBe('feedback_submitted');
+    // The two rating envelopes carry the SAME payload — either can answer the
+    // same question; only the event name differs.
+    const rating = w.posts.find((p) => p['event'] === 'feedback_submitted')!;
+    const named  = w.posts.find((p) => p['event'] === 'feedback_rating_good')!;
+    expect(named['properties']).toEqual(rating['properties']);
     const props = rating['properties'] as Record<string, unknown>;
     expect(props['rating']).toBe(3);
     expect(props['surface']).toBe('browser');
@@ -316,6 +320,7 @@ describe('the whole event inventory', () => {
       'nexpath_installed',
       ...LIVE_ACTIONS,
       'feedback_submitted',
+      'feedback_rating_excellent',
     ]);
 
     // ── 2. Each carries what it should, and nothing more ───────────────────
