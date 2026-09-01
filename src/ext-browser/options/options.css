@@ -223,7 +223,7 @@ footer a:hover { color: #6c7086; }
 /* Advanced disclosure — collapsed by default so normal users never meet it */
 
 
-/* Step list for the token onboarding (Hiren's messaging spec 2026-08-31). */
+/* Step list for the token onboarding (product messaging direction, 2026-08-31). */
 .token-steps {
   margin: 6px 0 10px;
   padding-left: 20px;

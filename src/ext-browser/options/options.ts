@@ -42,7 +42,6 @@ const tokenStatus     = document.getElementById('token-status')       as HTMLPar
 // from the console; when present it still drives Test and the disclosure.
 const baseUrlInput    = document.getElementById('nexpath-base-url')   as HTMLInputElement | null;
 let storedBaseUrl = '';
-const tokenDisclosure = document.getElementById('token-disclosure')   as HTMLParagraphElement;
 
 // ── Project role — same value set, labels and default as the CLI installer
 // (src/cli/commands/install.ts's ROLE_OPTIONS).
@@ -123,21 +122,10 @@ function serviceBaseUrl(): string {
   return (value.length > 0 ? value : DEFAULT_API_BASE_URL).replace(/\/+$/, '');
 }
 
-/**
- * The Mode-B disclosure — mirrors the CLI's `modeBDisclosureLine()` wording
- * (D-6, storage-claim sentence removed 2026-08-31 to match the site's approved
- * copy — A5): plainly says prompt context leaves the machine and names the
- * real destination. ⛔ Never "nothing leaves your machine" — untrue here.
- */
-function renderTokenDisclosure(hasToken: boolean): void {
-  if (!hasToken) { tokenDisclosure.hidden = true; return; }
-  let host = serviceBaseUrl();
-  try { host = new URL(serviceBaseUrl()).host; } catch { /* keep the raw value */ }
-  tokenDisclosure.textContent =
-    `With no OpenAI API key configured, prompt context will be sent to ${host} ` +
-    'to be answered.';
-  tokenDisclosure.hidden = false;
-}
+// The Mode-B disclosure paragraph was REMOVED entirely on 2026-09-01 (product
+// decision: no storage/data-flow statements shown to users for now; revisit at a
+// future privacy pass). The guard below keeps any stale markup hidden.
+try { const d = document.getElementById('token-disclosure'); if (d) d.hidden = true; } catch { /* no-op */ }
 
 async function loadToken(): Promise<void> {
   const result = await browser.storage.local.get([NEXPATH_TOKEN_KEY, NEXPATH_BASE_URL_KEY]);
@@ -152,7 +140,6 @@ async function loadToken(): Promise<void> {
     tokenInput.value = savedToken as string;
     setTokenStatus('Token saved — click Test to validate', '');
   }
-  renderTokenDisclosure(hasToken);
 }
 
 tokenSaveBtn.addEventListener('click', async () => {
@@ -167,7 +154,6 @@ tokenSaveBtn.addEventListener('click', async () => {
     if (baseUrlInput) payload[NEXPATH_BASE_URL_KEY] = baseUrlInput.value.trim();
     await browser.storage.local.set(payload);
     setTokenStatus('Saved — click Test to validate', '');
-    renderTokenDisclosure(true);
     await renderSelfCheck();
   } catch (err) {
     setTokenStatus(`Save failed: ${String(err)}`, 'err');
@@ -198,8 +184,7 @@ tokenTestBtn.addEventListener('click', async () => {
       if (baseUrlInput) payload[NEXPATH_BASE_URL_KEY] = baseUrlInput.value.trim();
       await browser.storage.local.set(payload);
       setTokenStatus('Token valid ✅', 'ok');
-      renderTokenDisclosure(true);
-    } else if (resp.status === 401) {
+      } else if (resp.status === 401) {
       setTokenStatus('Invalid token ❌ — regenerate it on your account page', 'err');
     } else {
       setTokenStatus(`Service returned ${resp.status} — try again`, 'err');

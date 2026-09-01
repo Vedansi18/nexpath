@@ -21,7 +21,6 @@ function setupDom(): void {
     <button id="test-token"></button>
     <button id="save-token"></button>
     <p id="token-status"></p>
-    <p id="token-disclosure" hidden></p>
     <div id="frequency-group"></div>
     <div id="role-group"></div>
     <div id="self-check"></div>
@@ -190,7 +189,7 @@ describe('options.ts', () => {
     });
   });
 
-  // Hiren's onboarding spec (2026-08-31): the token card must carry the exact,
+  // Onboarding spec (2026-08-31): the token card must carry the exact,
   // step-wise path to a token — register link, verify, copy, paste/Save/Test —
   // so a user with no OpenAI key is never left guessing where tokens come from.
   describe('token onboarding steps (shipped options.html)', () => {
@@ -207,7 +206,7 @@ describe('options.ts', () => {
     });
   });
 
-  // Owner 2026-08-31 (implementing Hiren's settings-page direction): token card
+  // Owner direction 2026-08-31 (settings-page restructure): token card
   // FIRST, no Advanced/Service-URL field, footer is the brand linking home.
   describe('page structure (shipped options.html)', () => {
     it('puts the Nexpath Token card before the OpenAI key card', async () => {
