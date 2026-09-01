@@ -407,11 +407,24 @@ describe('activate', () => {
       expect(provider.getCurrentPayload()).toEqual(payload);
     });
 
-    it('onPublish never crashes when given a null payload (malformed row)', async () => {
+    it('onPublish records pe_shown for the PE popup (Windsurf-poller parity)', async () => {
+      vi.mocked(spawnRecordSignal).mockClear();
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      capturedDeps().onPublish?.({ currentBodyId: 'body-1', bodyRevision: 3 });
+      const peShownCalls = vi.mocked(spawnRecordSignal).mock.calls.filter((c) => c[0] === 'pe_shown');
+      expect(peShownCalls).toHaveLength(1);
+    });
+
+    it('onPublish never crashes when given a null payload (malformed row) and records nothing', async () => {
+      vi.mocked(spawnRecordSignal).mockClear();
       mockShowOnboarding.mockResolvedValueOnce(undefined);
       mockDetectHost.mockReturnValueOnce('windsurf');
       await activate(makeCtx(true) as never);
       expect(() => capturedDeps().onPublish?.(null)).not.toThrow();
+      const peShownCalls = vi.mocked(spawnRecordSignal).mock.calls.filter((c) => c[0] === 'pe_shown');
+      expect(peShownCalls).toHaveLength(0);
     });
 
     it('onDeliver: succeeds via the clipboard-free Cascade command when it is registered', async () => {

@@ -770,7 +770,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         executeCommand: (id, ...args) => vscode.commands.executeCommand(id, ...args),
         getCommands: (filter) => vscode.commands.getCommands(filter),
       })),
-      onPublish: (payload) => { if (payload) peViewProvider?.publishPayload(payload); },
+      onPublish: (payload) => {
+        if (!payload) return;
+        peViewProvider?.publishPayload(payload);
+        // Windsurf-poller PE-show parity: record the same content-free `pe_shown`
+        // signal the checkPeOrigin path records, so PE popups are counted on
+        // Windsurf too. The poller dedups by createdAt (its own `handledAt`), so
+        // onPublish fires once per distinct PE — no extra guard needed here.
+        // Fire-and-forget; only the kind is sent, no body text.
+        void spawnRecordSignal('pe_shown', {
+          cwd: canonicalizeCwd(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()),
+        });
+      },
       onOutcome: (outcome) => log(`[nexpath] windsurf PE poller insert outcome: ${outcome}`),
     });
     pePoller.start();
