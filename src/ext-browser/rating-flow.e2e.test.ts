@@ -270,3 +270,124 @@ describe('rating popup — end to end', () => {
     },
   );
 });
+
+/**
+ * Every event this extension can emit, driven through the real chain in one run.
+ *
+ * The suite above proves the SEAMS hold; this proves the INVENTORY is complete —
+ * that each of the eleven live events reaches the wire with the right name and
+ * the right shape, and that the six that exist in code but are unreachable stay
+ * unreachable.
+ */
+describe('the whole event inventory', () => {
+  /** The nine action kinds a browser user can actually produce. */
+  const LIVE_ACTIONS = [
+    'pe_use_current', 'pe_use_original', 'pe_apply_details', 'pe_close',
+    'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption', 'mps_apply_details',
+  ] as const;
+
+  /** In the code, but no browser UI can reach them — see the commit for why. */
+  const UNREACHABLE = [
+    'pe_shorter', 'pe_more_thorough', 'pe_more_project_grounded', 'pe_back',
+    'advisory_fired', 'option_selected',
+  ] as const;
+
+  it('⭐ all eleven live events reach the wire, each with the right shape', async () => {
+    const s = store();
+    const w = wire();
+
+    // Nine actions, buffered by the real buffer exactly as the popup host does.
+    for (const [i, kind] of LIVE_ACTIONS.entries()) {
+      await recordSignal(s, kind, T0 - 10_000 + i);
+    }
+
+    const cs = contentScript();
+    const run = runBrowserRatingPopup({
+      log, projectRoot: ROOT, store: s, sendToTab: cs.sendToTab, fetch: w.fetch, now: () => T0,
+    });
+    await vi.waitFor(() => expect(surfaceEl()).toBeTruthy());
+    rowByLabel('Excellent').click();
+    expect(await run).toEqual({ state: 'rated', rating: 4 });
+
+    // ── 1. Every one of the eleven, in the order the wire saw them ──────────
+    expect(w.events()).toEqual([
+      'nexpath_installed',
+      ...LIVE_ACTIONS,
+      'feedback_submitted',
+    ]);
+
+    // ── 2. Each carries what it should, and nothing more ───────────────────
+    const byEvent = new Map(w.posts.map((p) => [p['event'] as string, p]));
+    const props = (name: string) => byEvent.get(name)!['properties'] as Record<string, unknown>;
+    const COMMON = ['$lib', '$lib_version', 'installation_id', 'surface'];
+
+    expect(Object.keys(props('nexpath_installed')).sort())
+      .toEqual([...COMMON, 'installed_at'].sort());
+
+    expect(Object.keys(props('feedback_submitted')).sort())
+      .toEqual([...COMMON, 'feedback_at', 'rating'].sort());
+    expect(props('feedback_submitted')['rating']).toBe(4);
+
+    for (const kind of LIVE_ACTIONS) {
+      expect(Object.keys(props(kind)).sort(), kind)
+        .toEqual([...COMMON, 'action_ts'].sort());
+      expect(props(kind)['surface'], kind).toBe('browser');
+      expect(props(kind)['$lib'], kind).toBe('nexpath');
+    }
+
+    // ── 3. Backdated, not stamped at flush time ────────────────────────────
+    for (const [i, kind] of LIVE_ACTIONS.entries()) {
+      expect(props(kind)['action_ts'], kind).toBe(T0 - 10_000 + i);
+      expect(byEvent.get(kind)!['timestamp'], kind)
+        .toBe(new Date(T0 - 10_000 + i).toISOString());
+    }
+
+    // ── 4. Nothing unreachable slipped in ──────────────────────────────────
+    for (const kind of UNREACHABLE) expect(w.events(), kind).not.toContain(kind);
+
+    // ── 5. One identity, and the buffer is empty afterwards ────────────────
+    expect(new Set(w.posts.map((p) => p['distinct_id'])).size).toBe(1);
+    expect(await readSignals(s)).toEqual([]);
+  });
+
+  it('⭐ the install event fires ONCE, however many ratings follow', async () => {
+    const s = store();
+
+    for (const round of [1, 2, 3]) {
+      const w = wire();
+      await recordSignal(s, 'pe_close', T0 + round);
+      // A fresh window each time: cadence is reset by the previous rating.
+      await markFeedbackShown(s, T0 - 10 * 24 * 60 * 60_000);
+      const cs = contentScript();
+      const run = runBrowserRatingPopup({
+        log, projectRoot: ROOT, store: s, sendToTab: cs.sendToTab, fetch: w.fetch, now: () => T0 + round,
+      });
+      await vi.waitFor(() => expect(surfaceEl()).toBeTruthy());
+      rowByLabel('Fine').click();
+      await run;
+
+      const installs = w.events().filter((e) => e === 'nexpath_installed').length;
+      expect(installs, `round ${round}`).toBe(round === 1 ? 1 : 0);
+      expect(w.events()).toContain('feedback_submitted');
+      for (const a of liveAdapters.splice(0)) a.destroy();
+    }
+  });
+
+  it('a signal recorded while the popup is open still goes out on the NEXT rating', async () => {
+    const s = store();
+    const first = wire();
+    const cs = contentScript();
+    const run = runBrowserRatingPopup({
+      log, projectRoot: ROOT, store: s, sendToTab: cs.sendToTab, fetch: first.fetch, now: () => T0,
+    });
+    await vi.waitFor(() => expect(surfaceEl()).toBeTruthy());
+    await recordSignal(s, 'mps_decline', T0);          // arrives mid-popup
+    rowByLabel('Bad').click();
+    await run;
+
+    // It may or may not have made this flush — but it must not be LOST.
+    const sentNow = first.events().includes('mps_decline');
+    const stillBuffered = (await readSignals(s)).some((x) => x.kind === 'mps_decline');
+    expect(sentNow || stillBuffered).toBe(true);
+  });
+});
