@@ -43,6 +43,12 @@ describe('record-signal command', () => {
     expect(await rows()).toEqual([{ project_root: '/proj', kind: 'pe_shorter', occurred_at: 1000 }]);
   });
 
+  it('records pe_shown (the shown-popup kind)', async () => {
+    const code = await recordSignalAction({ kind: 'pe_shown', project: '/p', at: '7', db: dbPath });
+    expect(code).toBe(0);
+    expect(await rows()).toEqual([{ project_root: '/p', kind: 'pe_shown', occurred_at: 7 }]);
+  });
+
   it('records the two standalone signals (advisory_fired, option_selected)', async () => {
     expect(await recordSignalAction({ kind: 'advisory_fired',  project: '/p', at: '1', db: dbPath })).toBe(0);
     expect(await recordSignalAction({ kind: 'option_selected', project: '/p', at: '2', db: dbPath })).toBe(0);

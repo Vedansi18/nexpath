@@ -1156,8 +1156,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           parsed = parsePromptEnhancementExtensionPayloadV1(pending.resultJson);
           if (parsed) {
             if (pending.createdAt >= peLastPublishedCreatedAt) {
+              const isNewPeShow = pending.createdAt > peLastPublishedCreatedAt;
               peLastPublishedCreatedAt = pending.createdAt;
               peViewProvider?.publishPayload(parsed);
+              // Record the content-free `pe_shown` signal once per DISTINCT popup
+              // (strictly-new createdAt), so a same-createdAt re-publish does not
+              // double-count. Fire-and-forget; only the kind is sent, no body text.
+              if (isNewPeShow) {
+                void spawnRecordSignal('pe_shown', { cwd: projectRoot });
+              }
             } else {
               log(`[nexpath] PE publish suppressed: a newer turn's payload is already visible (createdAt ${pending.createdAt} < ${peLastPublishedCreatedAt})`);
             }
