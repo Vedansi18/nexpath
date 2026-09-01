@@ -54,7 +54,12 @@ import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js
 import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/pe-pending-store.js';
 import { resolvePePopupCooldown, resolvePeSequenceEnabled } from '../adapters/pe-config.js';
 import { getPendingSequence, recordPendingSequence } from '../adapters/pe-sequence-store.js';
-import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
+import { deliverPePanelCommand, runBrowserPePopup, runBrowserRatingPopup } from './pe-popup-host.js';
+import { isFeedbackEligible as isRatingEligible } from '../adapters/rating-cadence.js';
+// Rating-popup cadence (Phase 1). Aliased on import: `recordActivity` is a
+// generic name in a 1,900-line worker, and this one measures exactly one thing.
+import { recordActivity as recordRatingActivity } from '../adapters/rating-cadence.js';
+import { setInstalledAtIfMissing } from '../adapters/lifecycle-signals.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -77,7 +82,10 @@ log.debug('build_identity', { build: BUILD_ID, peEngine: PE_ENGINE_READY });
 
 // ── First-install: open options page ──────────────────────────────────────────
 
-// Must stay in sync with the manifests' host_permissions/content-script matches.
+// The AGENT sites only — must stay in sync with the manifests' content-script
+// matches. NOT the whole of `host_permissions`: that also carries
+// `us.i.posthog.com`, which the extension talks TO and never runs ON, and
+// reloading a tab there would be nonsense.
 const AGENT_TAB_URL_PATTERNS = [
   'https://*.replit.com/*',
   'https://bolt.new/*',
@@ -89,6 +97,17 @@ browser.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
     browser.runtime.openOptionsPage();
   }
+
+  // The install stamp for the rating popup's lifecycle events (Phase 3, §4.2).
+  //
+  // Written on UPDATE as well as install, and deliberately so: the helper is
+  // if-missing, so this is what backfills a stamp for an installation that
+  // predates the field. It mirrors the CLI's `setInstalledAtIfMissing`.
+  //
+  // Storing it sends nothing. The stamp sits in storage.local until the user
+  // clicks a rating, which is this extension's consent moment — see
+  // adapters/telemetry-send.ts.
+  void setInstalledAtIfMissing(keyStore);
 
   // Every install/update starts a NEW extension generation; content scripts already
   // running in open agent tabs belong to the dead one — their runtime.sendMessage
@@ -884,6 +903,19 @@ async function runPromptSubmitPipeline(
   }
   await keyStore.setKey(lastPromptKeyFor(projectRoot), JSON.stringify({ text: promptText, at: now }));
 
+  // ── Step 1.3: Record active usage — one heartbeat per genuine user prompt,
+  //     feeding the rating-popup cadence (adapters/rating-cadence.ts).
+  //
+  //     Placed HERE, below the dedup guard, for the reason auto.ts:936-938 puts
+  //     its own call below the injected-prompt guard: an enhanced prompt we
+  //     injected ourselves comes back through this path as a fresh submit, and
+  //     counting it would let the extension inflate the user's usage with its
+  //     own traffic. Everything above returns before reaching this line.
+  //
+  //     Best-effort by contract — the cadence functions never throw, and this is
+  //     measurement, not a gate on the pipeline it measures.
+  await recordRatingActivity(keyStore, now);
+
   // ── Step 1.5: Resolve frequency + role config — mirrors cli/commands/auto.ts's
   // step 1.5 exactly (same fallback default, same resolveFrequencyConfig call) so
   // the browser's advisory-firing gating is the same logic as the CLI's, just fed
@@ -1474,6 +1506,15 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     log.debug('response_stop_quiet_window', { projectRoot });
     return;
   }
+  // NO cadence heartbeat here, deliberately. The CLI splits the two sides:
+  // `recordActivity` has exactly one production call site, the submit hook
+  // (auto.ts:938), and stop is the READ side (stop.ts:513,530 —
+  // isFeedbackEligible / markFeedbackShown). Feeding here too would count one
+  // slow turn twice: a prompt→stop→prompt spanning 20 minutes in two 10-minute
+  // halves banks both halves, where the CLI sees one 20-minute gap and discards
+  // it as an idle break past IDLE_CAP_MS. The popup would come due sooner in the
+  // browser than in the CLI on exactly the sessions agents are slowest.
+  // A test in service-worker.test.ts pins this absence.
   let legacySurface = false;
   try {
     legacySurface = (await keyStore.getKey(ADVISORY_LEGACY_SURFACE_KEY)) === 'enabled';
@@ -1513,6 +1554,50 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
       keyStore.setKey(pendingAdvisoryOgKeyFor(projectRoot), ''),
     ]);
     log.debug('advisory_removed_surface', { projectRoot });
+  }
+
+  // ── The rating popup gate (Phase 5, item #14) ─────────────────────────────
+  //
+  // PLACEMENT IS EXACT, and it is not "before the PE popup". It sits AFTER the
+  // silent advisory consume above and BEFORE the pending-PE section below:
+  //
+  //   - earlier, and the advisory row survives an extra turn — a behaviour
+  //     change nobody asked for;
+  //   - later, and it would run after `markPendingPeShown` has consumed the
+  //     pending PE row, so preempting would DESTROY the enhancement instead of
+  //     deferring it.
+  //
+  // Here, `getPendingPe` has not even been read yet, so an early return leaves
+  // the row exactly as it was and the PE popup opens on the next stop.
+  //
+  // §4.1 M5, accepted: that deferral ages the row against
+  // PE_PENDING_MAX_AGE_MS. If the user's next agent response is more than 30
+  // minutes away the enhancement is consumed silently as stale. Refreshing
+  // `createdAt` on preempt would re-open the cross-sitting resurrection that
+  // gate exists to prevent, so the trade is taken as-is.
+  //
+  // No tab, no popup: a rating cannot render into nothing, and asking the
+  // cadence to spend itself on an impossible render is exactly what §4.1 M3
+  // forbids. `not_shown` falls through to PE, so nothing is lost either way.
+  // No enable/disable switch, deliberately (owner decision 2026-09-01): the
+  // rating prompt is shown to every user. The control that used to live on the
+  // options page is gone, and so is the stored key — an installation that set it
+  // before is NOT honoured, because a setting nothing reads is the exact failure
+  // that took advisory frequency off that page (`options/options.ts:31-35`).
+  if (tabId !== undefined && await isRatingEligible(keyStore, clock.now())) {
+    const rating = await runBrowserRatingPopup({
+      log,
+      projectRoot,
+      store: keyStore,
+      sendToTab: (m) => browser.tabs.sendMessage(tabId, m),
+      now: () => clock.now(),
+    });
+    // Shown at all — answered or dismissed — means this turn belonged to the
+    // rating. The dock is mount-once, so PE cannot also open now.
+    if (rating.state !== 'not_shown') {
+      log.debug('pe_deferred_for_rating', { projectRoot, outcome: rating.state });
+      return;
+    }
   }
 
   const state = await idb.loadSessionState(projectRoot);

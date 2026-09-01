@@ -75,7 +75,21 @@ workflow without slowing it down.
 - Your **API key** and settings are stored **locally in your browser** — never bundled or logged.
 - To generate a decision session, Nexpath sends **recent prompt context to OpenAI** using **your**
   key — that is the only place your prompt text is sent, and only when a session fires.
-- **No telemetry, no tracking, no remote code.** Nothing is sent to any Nexpath or third-party server.
+- **No tracking and no remote code.** There is no analytics script, no ad or tracking network, and
+  no code is ever downloaded and run.
+- **Usage signals stay on your machine until you choose to send them.** Nexpath keeps a local,
+  content-free record of *which* popup buttons you press and *when* — a fixed list of action names
+  (for example `pe_shorter`, `mps_send`) and timestamps. It never records prompt text, the text of
+  an option, which site you are on, or your project path.
+- **The only thing that sends is the rating prompt, and only when you answer it.** Occasionally
+  Nexpath asks how it is working out for you. Choosing a rating is what sends — and it sends only
+  a random installation ID (not tied to you or your machine), your 1–4 rating, and the timestamps
+  above.
+- **If you dismiss the prompt, one line goes out saying just that** — your installation ID and the
+  time, so we can tell "asked and declined" apart from "never asked". No rating, because you did not
+  give one, and the local usage signals above stay on your machine: only answering releases those.
+- **Your prompt text is never part of that.** The only place prompt text goes is OpenAI, with your
+  own key, as described above.
 
 ---
 
