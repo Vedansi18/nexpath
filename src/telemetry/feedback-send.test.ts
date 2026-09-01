@@ -235,3 +235,24 @@ describe('sendFeedbackRatingOption', () => {
     },
   );
 });
+
+describe('the two rating envelopes describe ONE click', () => {
+  it('⭐ given one timestamp, both carry it identically', async () => {
+    // The source pin above catches someone writing `Date.now()` again; this
+    // catches a sender that simply ignores the timestamp it was handed. The
+    // browser's end-to-end suite found the original defect by comparing the two
+    // payloads — this is the same guarantee, on this side.
+    const a: Captured = { calls: 0 };
+    await sendFeedback(store, 3, { fetch: okFetch(a), now: 4_242 });
+    const rating = a.envelope!;
+
+    const b: Captured = { calls: 0 };
+    await sendFeedbackRatingOption(store, 3, { fetch: okFetch(b), now: 4_242 });
+    const option = b.envelope!;
+
+    expect(option.timestamp).toBe(rating.timestamp);
+    expect(option.properties.feedback_at).toBe(rating.properties.feedback_at);
+    expect(option.properties).toEqual(rating.properties);
+    expect(option.event).not.toBe(rating.event);   // only the name differs
+  });
+});
