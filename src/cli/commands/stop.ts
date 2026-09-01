@@ -10,7 +10,7 @@ import {
 } from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordActionSignal, type PromptActionSignalKind } from '../../store/feedback-signals.js';
-import { sendFeedback, sendFeedbackDismissed } from '../../telemetry/feedback-send.js';
+import { sendFeedback, sendFeedbackDismissed, sendFeedbackRatingOption } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
@@ -214,6 +214,8 @@ export interface FeedbackDeps {
    * is the outcome that matters.
    */
   sendDismissed: (store: Store) => Promise<boolean>;
+  /** Required for the same reason `sendDismissed` is — see above. */
+  sendRatingOption: (store: Store, rating: number) => Promise<boolean>;
 }
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
@@ -526,6 +528,7 @@ export async function runStop(
     const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
     const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
     const fbDismissed = feedbackDeps ? feedbackDeps.sendDismissed : sendFeedbackDismissed;
+    const fbRatingOption = feedbackDeps ? feedbackDeps.sendRatingOption : sendFeedbackRatingOption;
     if (fbRender) {
       // The popup blocks for user input; don't hold the global DB lock across it (MPS-8) — release
       // before, re-acquire + reload after, so other sessions are not blocked and their concurrent
@@ -539,6 +542,14 @@ export async function runStop(
         // Flush regardless of telemetry.enabled — this explicit action is the consent.
         await flushLifecycle(store);
         await fbSend(store, result.rating);
+        // The same answer under its own event NAME (`feedback_rating_good` and
+        // its siblings), alongside `feedback_submitted` rather than instead of
+        // it — replacing would rename history and break existing charts.
+        //
+        // AFTER the rating, not before: this is a second envelope on the SAME
+        // consent, and if one of the two has to fail it should be the
+        // convenience one, not the record the dashboards were built on.
+        await fbRatingOption(store, result.rating);
       } else {
         // Shown and closed without an answer. Reported so that "asked and
         // declined" is distinguishable from "never asked" — without it the

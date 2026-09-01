@@ -73,8 +73,9 @@ const dismissRender: FeedbackRenderFn = async () => null;
 let store: Store;
 /** Never the real sender: a stray real call would POST to PostHog for real. */
 let sendDismissed: ReturnType<typeof vi.fn>;
+let sendRatingOption: ReturnType<typeof vi.fn>;
 
-beforeEach(async () => { store = await openStore(':memory:'); sendDismissed = vi.fn().mockResolvedValue(true); });
+beforeEach(async () => { store = await openStore(':memory:'); sendDismissed = vi.fn().mockResolvedValue(true); sendRatingOption = vi.fn().mockResolvedValue(true); });
 afterEach(() => { closeStore(store); vi.restoreAllMocks(); });
 
 describe('feedback popup integration', () => {
@@ -82,7 +83,7 @@ describe('feedback popup integration', () => {
     vi.mocked(flushLifecycle).mockClear();
     makeEligible(store);
     const send = vi.fn().mockResolvedValue(true);
-    const deps: FeedbackDeps = { render: pickRating(3), send, sendDismissed };
+    const deps: FeedbackDeps = { render: pickRating(3), send, sendDismissed, sendRatingOption };
 
     const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
@@ -104,7 +105,7 @@ describe('feedback popup integration', () => {
     vi.mocked(flushLifecycle).mockClear();
     makeEligible(store);
     const send = vi.fn().mockResolvedValue(true);
-    const deps: FeedbackDeps = { render: dismissRender, send, sendDismissed };
+    const deps: FeedbackDeps = { render: dismissRender, send, sendDismissed, sendRatingOption };
 
     const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
@@ -119,7 +120,7 @@ describe('feedback popup integration', () => {
     vi.mocked(flushLifecycle).mockClear();
     makeEligible(store);
     const send = vi.fn().mockResolvedValue(true);
-    const deps: FeedbackDeps = { render: pickRating(2), send, sendDismissed };
+    const deps: FeedbackDeps = { render: pickRating(2), send, sendDismissed, sendRatingOption };
 
     await runStop(makePayload(), store, undefined, undefined, deps);
 
@@ -128,12 +129,49 @@ describe('feedback popup integration', () => {
     expect(sendDismissed).not.toHaveBeenCalled();    // the two are exclusive
   });
 
+  it('⭐ a selection also reports the option under its own event name', async () => {
+    makeEligible(store);
+    const send = vi.fn().mockResolvedValue(true);
+    const deps: FeedbackDeps = { render: pickRating(3), send, sendDismissed, sendRatingOption };
+
+    await runStop(makePayload(), store, undefined, undefined, deps);
+
+    expect(sendRatingOption).toHaveBeenCalledOnce();
+    expect(sendRatingOption).toHaveBeenCalledWith(store, 3);   // the rating the user picked
+  });
+
+  it('⭐ a dismissal reports no option — there is none to report', async () => {
+    makeEligible(store);
+    const send = vi.fn().mockResolvedValue(true);
+    const deps: FeedbackDeps = { render: dismissRender, send, sendDismissed, sendRatingOption };
+
+    await runStop(makePayload(), store, undefined, undefined, deps);
+
+    expect(sendDismissed).toHaveBeenCalledOnce();
+    expect(sendRatingOption).not.toHaveBeenCalled();
+  });
+
+  it('a failed per-option send does not disturb the rating or the cadence', async () => {
+    // It is the second envelope on one consent; the record the dashboards were
+    // built on must not depend on it.
+    makeEligible(store);
+    const send = vi.fn().mockResolvedValue(true);
+    sendRatingOption.mockResolvedValue(false);
+    const deps: FeedbackDeps = { render: pickRating(1), send, sendDismissed, sendRatingOption };
+
+    const result = await runStop(makePayload(), store, undefined, undefined, deps);
+
+    expect(result.outcome).toBe('feedback_shown');
+    expect(send).toHaveBeenCalledOnce();
+    expect(readCadence(store).lastFeedbackAt).not.toBeNull();
+  });
+
   it('preempts the advisory when both are due', async () => {
     makeEligible(store);
     insertAdvisory(store);
     const advisorySelect: SelectFn = vi.fn().mockResolvedValue('some option');
     const send = vi.fn().mockResolvedValue(true);
-    const deps: FeedbackDeps = { render: pickRating(4), send, sendDismissed };
+    const deps: FeedbackDeps = { render: pickRating(4), send, sendDismissed, sendRatingOption };
 
     const result = await runStop(makePayload(), store, advisorySelect, undefined, deps);
 
@@ -145,7 +183,7 @@ describe('feedback popup integration', () => {
     insertAdvisory(store);
     const send = vi.fn().mockResolvedValue(true);
     const render = vi.fn<FeedbackRenderFn>(async () => null);
-    const deps: FeedbackDeps = { render, send, sendDismissed };
+    const deps: FeedbackDeps = { render, send, sendDismissed, sendRatingOption };
 
     const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
@@ -157,7 +195,7 @@ describe('feedback popup integration', () => {
     makeEligible(store);
     insertAdvisory(store);
     const send = vi.fn().mockResolvedValue(true);
-    const deps: FeedbackDeps = { render: null, send, sendDismissed };
+    const deps: FeedbackDeps = { render: null, send, sendDismissed, sendRatingOption };
 
     const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
@@ -173,7 +211,7 @@ describe('feedback popup integration', () => {
       let s = await openStore(dbPath);
       makeEligible(s);
       const send = vi.fn().mockResolvedValue(true);
-      const deps: FeedbackDeps = { render: pickRating(3), send, sendDismissed };
+      const deps: FeedbackDeps = { render: pickRating(3), send, sendDismissed, sendRatingOption };
 
       const result = await runStop(makePayload(), s, undefined, undefined, deps);
       expect(result.outcome).toBe('feedback_shown');

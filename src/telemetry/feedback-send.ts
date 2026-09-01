@@ -110,6 +110,59 @@ export async function sendFeedback(
 }
 
 /**
+ * Post the per-option event for a rating — `feedback_rating_good` and its three
+ * siblings — ALONGSIDE `feedback_submitted`, never instead of it (plan §9.8).
+ *
+ * The same payload as the rating send, so either event can answer the same
+ * question; the difference is that this one is a NAME, which in PostHog is a
+ * first-class object with its own trend, funnel step and alert.
+ *
+ * A rating outside the scale has no event and sends nothing — the caller cannot
+ * invent a fifth option by passing 5.
+ *
+ * Best-effort: never throws. It is a second envelope on the same consent as the
+ * rating, so the caller sends it after the flush and after `sendFeedback`; a
+ * failure here must not affect either.
+ */
+export async function sendFeedbackRatingOption(
+  store:  Store,
+  rating: number,
+  opts:   SendFeedbackOptions = {},
+): Promise<boolean> {
+  try {
+    const event = feedbackRatingEvent(rating);
+    if (!event) return false;
+
+    const apiKey = getConfig(store.db, 'telemetry_sync_api_key');
+    if (!apiKey) return false;
+
+    const endpoint = getConfig(store.db, 'telemetry_sync_endpoint') ?? DEFAULT_POSTHOG_ENDPOINT;
+    const now      = opts.now ?? Date.now();
+
+    const installationId = getInstallationId(store);
+
+    const envelope: PostHogSingleEnvelope = {
+      api_key:     apiKey,
+      event,
+      distinct_id: installationId,
+      timestamp:   new Date(now).toISOString(),
+      properties: {
+        $lib:            POSTHOG_LIB_NAME,
+        $lib_version:    POSTHOG_LIB_VERSION,
+        rating,
+        installation_id: installationId,
+        feedback_at:     now,
+      },
+    };
+
+    const result = await postEvent(endpoint, envelope, opts.fetch ? { fetch: opts.fetch } : {});
+    return result.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Post the dismissal. Same envelope as the rating with the rating left out —
  * there isn't one.
  *
