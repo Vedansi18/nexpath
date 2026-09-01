@@ -88,9 +88,6 @@ workflow without slowing it down.
 - **If you dismiss the prompt, one line goes out saying just that** — your installation ID and the
   time, so we can tell "asked and declined" apart from "never asked". No rating, because you did not
   give one, and the local usage signals above stay on your machine: only answering releases those.
-- **You can turn the prompt off, and that turns the sending off with it.** Settings → Feedback →
-  "Never ask". Nothing is ever sent without the prompt, so switching it off leaves the extension
-  sending nothing at all.
 - **Your prompt text is never part of that.** The only place prompt text goes is OpenAI, with your
   own key, as described above.
 

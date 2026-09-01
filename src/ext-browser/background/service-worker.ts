@@ -1540,30 +1540,6 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
  * stop (stop.ts:614–616); a cooldown hit consumes it with a ring event
  * (stop.ts:552–561).
  */
-/**
- * The options page's rating kill switch (Phase 6).
- *
- * This read is the whole reason that control is allowed on the page at all.
- * Advisory frequency was removed from it (`options/options.ts:31-35`) because it
- * "advertised a control over a surface this extension no longer shows … so the
- * setting read as broken" — a toggle that changes nothing is worse than no
- * toggle. If this call ever goes away, the control must come off the page.
- *
- * FAIL-OPEN, and only the exact string 'off' disables: an unreadable or
- * corrupted setting leaves the popup working rather than silently switching off
- * a feature the user never turned off. The options page defaults the same way,
- * so the two cannot disagree about what a missing value means.
- */
-const RATING_ENABLED_KEY = 'nexpath_rating_enabled';
-
-async function isRatingEnabled(): Promise<boolean> {
-  try {
-    return (await keyStore.getKey(RATING_ENABLED_KEY)) !== 'off';
-  } catch {
-    return true;
-  }
-}
-
 async function handleResponseStopPeFirst(projectRoot: string, tabId: number | undefined): Promise<void> {
   // The submit pipeline queues the advisory AND parks the PE before clearing
   // its inflight marker — wait for the MARKER here (not for a row: the PE
@@ -1603,7 +1579,12 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
   // No tab, no popup: a rating cannot render into nothing, and asking the
   // cadence to spend itself on an impossible render is exactly what §4.1 M3
   // forbids. `not_shown` falls through to PE, so nothing is lost either way.
-  if (tabId !== undefined && await isRatingEnabled() && await isRatingEligible(keyStore, clock.now())) {
+  // No enable/disable switch, deliberately (owner decision 2026-09-01): the
+  // rating prompt is shown to every user. The control that used to live on the
+  // options page is gone, and so is the stored key — an installation that set it
+  // before is NOT honoured, because a setting nothing reads is the exact failure
+  // that took advisory frequency off that page (`options/options.ts:31-35`).
+  if (tabId !== undefined && await isRatingEligible(keyStore, clock.now())) {
     const rating = await runBrowserRatingPopup({
       log,
       projectRoot,

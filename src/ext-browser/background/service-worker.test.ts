@@ -1725,37 +1725,7 @@ describe('service-worker.ts', () => {
         expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, '');
       });
 
-      /**
-       * The options page's kill switch (Phase 6). These exist because deleting
-       * `await isRatingEnabled() &&` from the gate left all 1,436 tests green —
-       * the toggle would have gone on advertising a control that did nothing,
-       * which is the exact reason advisory frequency was taken off that page
-       * (`options/options.ts:31-35`).
-       */
-      it('⭐ switched OFF: the rating is never opened, and PE runs as usual', async () => {
-        eligible({ nexpath_rating_enabled: 'off' });
-        idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
-        vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
-        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
-
-        stopPe(messageListener, 7);
-
-        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
-        expect(runBrowserRatingPopup).not.toHaveBeenCalled();
-      });
-
-      it('⭐ only the exact string "off" disables it — anything else fails OPEN', async () => {
-        // A damaged value must not silently switch off a feature the user never
-        // turned off. The options page defaults the same way, so the two cannot
-        // disagree about what a missing or junk value means.
-        eligible({ nexpath_rating_enabled: 'OFF' });
-        vi.mocked(runBrowserRatingPopup).mockResolvedValue({ state: 'rated', rating: 3 });
-        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
-
-        stopPe(messageListener, 7);
-
-        await vi.waitFor(() => expect(runBrowserRatingPopup).toHaveBeenCalledTimes(1));
-      });
+      
 
       it('with no tab there is nothing to render into, so the gate is skipped', async () => {
         eligible();

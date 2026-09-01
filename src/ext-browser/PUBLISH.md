@@ -174,10 +174,14 @@ once testing is done.
 - **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
   a random installation ID, a 1–4 rating, and content-free action names + timestamps. Dismissing the
   prompt sends ONE line — the installation ID and a timestamp — and releases none of the buffered
-  action names. **Never** prompt text, option text, URLs or project paths. **There is a user
-  control:** Settings → Feedback → "Never ask" stops the prompt, and with it every send. Keep all of
-  this identical to the *Privacy* section of `src/ext-browser/README.md`, which is what the
-  privacy-policy URL points at.
+  action names. **Never** prompt text, option text, URLs or project paths.
+- ⚠️ **There is NO per-user opt-out, and a reviewer may ask.** The rating prompt is shown to every
+  installation (owner decision 2026-09-01); the options page carries no toggle for it and the
+  extension reads no setting that would disable it. This matches the CLI, whose feedback send is
+  deliberately independent of `telemetry.enabled` because the click is the consent. What limits the
+  data is its shape, not a switch: nothing is sent unless the user answers or dismisses the prompt,
+  and no field in any envelope can hold text. Keep this and the event table identical to the
+  *Privacy* section of `src/ext-browser/README.md`, which is what the privacy-policy URL points at.
 - **Privacy policy URL**, **screenshots** (1280×800), **128×128 icon** (`icons/icon128.png`).
 
 ---

@@ -21,7 +21,6 @@ function setupDom(): void {
     <p id="key-status"></p>
     <div id="frequency-group"></div>
     <div id="role-group"></div>
-    <div id="rating-group"></div>
     <div id="self-check"></div>
   `;
 }
@@ -47,7 +46,6 @@ function els() {
     selfCheck: document.getElementById('self-check') as HTMLDivElement,
     freqGroup: document.getElementById('frequency-group') as HTMLDivElement,
     roleGroup: document.getElementById('role-group') as HTMLDivElement,
-    ratingGroup: document.getElementById('rating-group') as HTMLDivElement,
   };
 }
 
@@ -261,70 +259,7 @@ describe('options.ts', () => {
       expect(els().status.textContent).toContain("Couldn't refresh settings");
     });
   });
-  /**
-   * The rating kill switch (Phase 6).
-   *
-   * Read `options.ts:31-35` before changing any of this: advisory frequency was
-   * taken off this page because it "advertised a control over a surface this
-   * extension no longer shows … so the setting read as broken". This control
-   * only belongs here while the service worker honours the value — the test for
-   * that half lives in `service-worker.test.ts`.
-   */
-  describe('feedback rating switch', () => {
-    it('renders exactly two options', async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
-
-      const { ratingGroup } = els();
-      expect(ratingGroup.querySelectorAll('input[type="radio"]').length).toBe(2);
-      expect(radioFor(ratingGroup, 'on')).not.toBeNull();
-      expect(radioFor(ratingGroup, 'off')).not.toBeNull();
-    });
-
-    it('⭐ defaults to ON when nothing is stored — the popup ships enabled', async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
-
-      expect(radioFor(els().ratingGroup, 'on').checked).toBe(true);
-    });
-
-    it('pre-selects OFF when the user has turned it off', async () => {
-      mockGet.mockResolvedValue({ nexpath_rating_enabled: 'off' });
-      await loadOptionsModule();
-
-      expect(radioFor(els().ratingGroup, 'off').checked).toBe(true);
-    });
-
-    it('⭐ anything other than the exact string "off" reads as ON', async () => {
-      // Fail-open, and the worker's read agrees — a damaged value must not
-      // silently disable a feature the user never turned off.
-      mockGet.mockResolvedValue({ nexpath_rating_enabled: 'nonsense' });
-      await loadOptionsModule();
-
-      expect(radioFor(els().ratingGroup, 'on').checked).toBe(true);
-    });
-
-    it('persists the choice to the key the worker reads', async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
-
-      radioFor(els().ratingGroup, 'off').click();
-      await flush();
-
-      expect(mockSet).toHaveBeenCalledWith({ nexpath_rating_enabled: 'off' });
-    });
-
-    it('turning it back on persists that too', async () => {
-      mockGet.mockResolvedValue({ nexpath_rating_enabled: 'off' });
-      await loadOptionsModule();
-
-      radioFor(els().ratingGroup, 'on').click();
-      await flush();
-
-      expect(mockSet).toHaveBeenCalledWith({ nexpath_rating_enabled: 'on' });
-    });
-  });
-
+  
 });
 
 /**
@@ -345,26 +280,33 @@ describe('the docs still describe this page accurately', () => {
   const html    = readFileSync(join(cwd, 'src', 'ext-browser', 'options', 'options.html'), 'utf8');
   const page    = readFileSync(join(cwd, 'src', 'ext-browser', 'options', 'options.ts'), 'utf8');
 
-  it('the card and option the docs name actually exist on the page', () => {
-    expect(html).toContain('<title>Nexpath Settings</title>');
-    expect(html).toContain('<label>Feedback</label>');
-    expect(page).toContain("label: 'Never ask'");
+
+  it('⭐ neither document claims a control the extension does not have', () => {
+    // The toggle was removed on 2026-09-01 — the prompt is shown to every user.
+    // These two sentences were true for exactly one release, and a privacy
+    // policy that promises a switch nobody can find is the worst kind of stale.
+    for (const doc of [readme, publish]) {
+      const flat = doc.replace(/\s+/g, ' ');
+      expect(flat).not.toContain('Never ask');
+      expect(flat).not.toContain('Settings → Feedback →');
+      expect(flat).not.toContain('turn the prompt off');
+    }
   });
 
-  it('⭐ the privacy policy tells the user the prompt can be turned off', () => {
-    // The README's Privacy section IS the store privacy-policy target
-    // (PUBLISH.md), so an undisclosed control is a listing problem, not a typo.
-    // Whitespace-normalised: markdown wraps the sentence, and the wrap point is
-    // not the contract.
-    expect(readme.replace(/\s+/g, ' ')).toContain('Settings → Feedback → "Never ask"');
+  it('⭐ the page really has no feedback toggle to claim', () => {
+    // The other half: if the control ever comes back, the sentences above have
+    // to come back with it, and this fails until they do.
+    expect(page).not.toContain('nexpath_rating_enabled');
+    expect(html).not.toContain('rating-group');
+    const worker = readFileSync(join(cwd, 'src', 'ext-browser', 'background', 'service-worker.ts'), 'utf8');
+    expect(worker).not.toContain('nexpath_rating_enabled');
   });
 
-  it('the store data disclosure names the same control', () => {
-    expect(publish).toContain('Settings → Feedback →');
-    expect(publish).toContain('"Never ask"');
+  it('⭐ the store disclosure says plainly that there is no opt-out', () => {
+    expect(publish.replace(/\s+/g, ' ')).toContain('There is NO per-user opt-out');
   });
 
-  it('⭐ PUBLISH.md no longer claims the extension has no opt-out', () => {
+  it('PUBLISH.md no longer claims the extension has no opt-out for the OLD reason', () => {
     // The exact stale sentence this switch invalidated.
     expect(publish).not.toContain('and this one has none');
   });
