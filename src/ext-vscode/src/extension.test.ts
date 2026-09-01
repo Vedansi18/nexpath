@@ -166,6 +166,7 @@ vi.mock('./chat-pipeline.js', () => ({
 vi.mock('./ipc.js', () => ({
   spawnAuto: vi.fn(),
   spawnStop: vi.fn(),
+  spawnRecordSignal: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('./advisory-fallback.js', () => ({
   createAdvisoryFallback: vi.fn(() => ({

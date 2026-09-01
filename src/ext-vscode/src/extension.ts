@@ -58,7 +58,8 @@ import {
   type ChatHistoryWatcher,
 } from './chat-history-watcher.js';
 import { createChatEventHandler } from './chat-pipeline.js';
-import { spawnAuto, spawnStop } from './ipc.js';
+import { spawnAuto, spawnStop, spawnRecordSignal } from './ipc.js';
+import { peEventTypeToSignalKind } from './pe-signal-map.js';
 import { resolveWorkspaceFromDbPath, canonicalizeCwd } from './resolve-db-workspace.js';
 import { createAdvisoryFallback, type AdvisoryFallback } from './advisory-fallback.js';
 import { createAdvisoryPoller, type AdvisoryPoller } from './advisory-poller.js';
@@ -499,6 +500,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (!event) return;
       log(`[nexpath] PE event: ${JSON.stringify(describePeEventSafely(event))}`);
+      // Record a content-free feedback signal for this action, mirroring what the
+      // CLI records for its own popup. Fire-and-forget: never blocks the webview,
+      // never throws. Only the action's signal kind is sent — no body/details
+      // text. Attributed to the workspace project the same way the pipeline
+      // spawns resolve it (canonicalized workspace folder).
+      const signalKind = peEventTypeToSignalKind(event.eventType);
+      if (signalKind) {
+        const projectCwd = canonicalizeCwd(
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
+        );
+        void spawnRecordSignal(signalKind, { cwd: projectCwd });
+      }
       // P7 (VED-PE-7): gate the one event type that actually attempts
       // delivery today. No real insertion exists yet (P8/P9) — logging the
       // gate decision here proves "delivery unreachable unless intent_ready"
