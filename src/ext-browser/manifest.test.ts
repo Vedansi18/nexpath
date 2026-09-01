@@ -21,9 +21,10 @@ const EXPECTED_HOSTS = [
   // Nexpath-token mode (llm-credentials.ts): the service worker fetches the
   // configured Nexpath service directly, and unlike api.openai.com the service
   // sends no CORS headers — host permission is what authorises the call.
-  // The production origin is the shipped default base URL; localhost stays
-  // permitted for developers pointing the Advanced field at a local instance.
-  'http://localhost:8000/*',
+  // ONLY the production origin ships. localhost was dropped for 0.1.53: the
+  // Advanced service-URL field it existed for no longer exists, and a shipped
+  // localhost permission is reviewer bait; developers add it to their own
+  // unpacked build when they need a local instance.
   'https://parseos.tech/*',
 ];
 
@@ -100,7 +101,7 @@ describe('ext-browser manifests — permission surface', () => {
   it('never ships a version below one already submitted to a store', () => {
     // Append at release time. A version that shipped can never be re-used or gone below,
     // so this list only grows.
-    const RELEASED = ['0.1.5', '0.1.51'];
+    const RELEASED = ['0.1.5', '0.1.51', '0.1.52'];
     const parse = (v: string) => v.split('.').map(Number);
     const isBelow = (a: number[], b: number[]) => {
       for (let i = 0; i < Math.max(a.length, b.length); i++) {

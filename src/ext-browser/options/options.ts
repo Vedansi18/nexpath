@@ -20,7 +20,7 @@ const roleGroup = document.getElementById('role-group')      as HTMLDivElement;
 // plain "Nexpath web" link home; the browser's own extensions page remains the
 // place to read the installed version.
 
-// ── Nexpath token (D-5 branch build — optional alternative to an OpenAI key) ──
+// ── Nexpath token (optional alternative to an OpenAI key) ─────────────────────
 const tokenInput      = document.getElementById('nexpath-token')      as HTMLInputElement;
 const tokenSaveBtn    = document.getElementById('save-token')         as HTMLButtonElement;
 const tokenTestBtn    = document.getElementById('test-token')         as HTMLButtonElement;
