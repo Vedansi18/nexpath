@@ -233,11 +233,13 @@ footer a:hover { color: #6c7086; }
 .token-steps li { margin: 3px 0; }
 .token-steps a { color: inherit; text-decoration: underline; }
 
-/* Footer branding (owner 2026-08-31): the product name, white, linking home. */
+/* Footer branding (owner 2026-09-01): wordmark + muted "web" qualifier, one click
+   target linking home. No version text, no icons. */
 .footer-brand {
   color: #ffffff;
   font-weight: 600;
   text-decoration: none;
+  letter-spacing: 0.01em;
 }
 .footer-brand:hover { text-decoration: underline; }
-.footer-version { font-size: 0.75rem; opacity: 0.55; margin-left: 6px; }
+.footer-brand .footer-web { font-weight: 400; color: #6c7086; }

@@ -16,20 +16,9 @@ const testBtn  = document.getElementById('test-key')     as HTMLButtonElement;
 const keyStatus = document.getElementById('key-status')  as HTMLParagraphElement;
 const checkEl  = document.getElementById('self-check')   as HTMLDivElement;
 const roleGroup = document.getElementById('role-group')      as HTMLDivElement;
-const versionEl = document.getElementById('ext-version')     as HTMLSpanElement | null;
-
-// The footer version is read from the manifest, never written into the markup.
-// It was hard-coded once ("nexpath v0.1.5") and silently went stale the moment the
-// manifest moved on — the settings page then tells every user the wrong version, and
-// it shows up in the store screenshots too. Reading it here means it can only ever
-// be the version that actually shipped.
-if (versionEl) {
-  try {
-    versionEl.textContent = `v${browser.runtime.getManifest().version}`;
-  } catch {
-    versionEl.textContent = '';   // manifest unavailable — say nothing rather than lie
-  }
-}
+// No version display on this page (product decision 2026-09-01): the footer is the
+// plain "Nexpath web" link home; the browser's own extensions page remains the
+// place to read the installed version.
 
 // ── Nexpath token (D-5 branch build — optional alternative to an OpenAI key) ──
 const tokenInput      = document.getElementById('nexpath-token')      as HTMLInputElement;
