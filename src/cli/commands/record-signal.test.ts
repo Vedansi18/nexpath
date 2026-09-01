@@ -49,6 +49,15 @@ describe('record-signal command', () => {
     expect(await rows()).toEqual([{ project_root: '/p', kind: 'pe_shown', occurred_at: 7 }]);
   });
 
+  it('accepts every MPS action kind (readiness for when the extension MPS surface lands)', async () => {
+    const mpsKinds = ['mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption', 'mps_apply_details'];
+    let at = 10;
+    for (const kind of mpsKinds) {
+      expect(await recordSignalAction({ kind, project: '/p', at: String(at++), db: dbPath })).toBe(0);
+    }
+    expect((await rows()).map((r) => r.kind)).toEqual(mpsKinds);
+  });
+
   it('records the two standalone signals (advisory_fired, option_selected)', async () => {
     expect(await recordSignalAction({ kind: 'advisory_fired',  project: '/p', at: '1', db: dbPath })).toBe(0);
     expect(await recordSignalAction({ kind: 'option_selected', project: '/p', at: '2', db: dbPath })).toBe(0);
