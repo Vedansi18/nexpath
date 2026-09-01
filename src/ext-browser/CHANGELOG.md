@@ -14,8 +14,8 @@ Nexpath token support — run without an OpenAI API key.
 
 ### Changed
 - **Settings page rebuilt around the simpler setup**: the Nexpath token card comes first with
-  step-by-step instructions and a link to your account page; the Advanced service-URL field was
-  removed; the footer is now a single "Nexpath web" link and no longer shows a version number.
+  step-by-step instructions and a link to your account page; the footer is now a single
+  "Nexpath web" link and no longer shows a version number.
 - **A held prompt can no longer be lost.** If the page itself abandons the request while a
   suggestion is open, the original prompt is restored into the composer instead of disappearing.
 - **Duplicate prompts are recognised across whitespace differences** — a resend that differs only

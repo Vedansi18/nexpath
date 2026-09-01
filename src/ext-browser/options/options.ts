@@ -292,7 +292,7 @@ async function renderSelfCheck(): Promise<void> {
     </div>
     <div class="check-row">
       <span class="check-label">Capture sites</span>
-      <span class="check-val ok">Replit · Bolt · Lovable ✅</span>
+      <span class="check-val ok">Replit · Lovable · Bolt ✅</span>
     </div>
   `;
 }

@@ -90,6 +90,41 @@ describe('ext-browser manifests — permission surface', () => {
     expect(html).not.toContain('ext-version');
   });
 
+  // User-facing platform copy rules (product decision, re-affirmed 2026-09-01):
+  // only the three supported platforms are ever named where a user reads, in the
+  // canonical order Replit → Lovable → Bolt. "StackBlitz" stays a functional host
+  // in the manifests' technical arrays but must never surface in user-facing text.
+  // Both rules were previously enforced only by review and each regressed once.
+  const USER_FACING_DOCS = [
+    './options/options.html',
+    './README.md',
+    './PUBLISH.md',
+    './CHANGELOG.md',
+    '../../docs/privacy.html',
+  ];
+
+  it('user-facing text never names StackBlitz', () => {
+    for (const doc of USER_FACING_DOCS) {
+      const text = readFileSync(new URL(doc, import.meta.url), 'utf8');
+      expect(text.toLowerCase(), `${doc} names StackBlitz`).not.toContain('stackblitz');
+    }
+  });
+
+  it('platforms appear in the canonical order Replit, Lovable, Bolt', () => {
+    // CHANGELOG is excluded: its entries are shipped prose, mentioning platforms
+    // per-fix, not as a lineup — retro-editing history would be worse.
+    const lineupDocs = ['./options/options.html', './README.md', './PUBLISH.md', '../../docs/privacy.html'];
+    const sources = lineupDocs.map((doc) => [doc, readFileSync(new URL(doc, import.meta.url), 'utf8')] as const);
+    sources.push(['manifest description', load('chrome').description as string]);
+    for (const [label, text] of sources) {
+      const lower = text.toLowerCase();
+      const at = (name: string) => lower.indexOf(name);
+      expect(at('replit'), `${label} lacks Replit`).toBeGreaterThan(-1);
+      expect(at('lovable'), `${label}: Lovable must follow Replit`).toBeGreaterThan(at('replit'));
+      expect(at('bolt'), `${label}: Bolt must follow Lovable`).toBeGreaterThan(at('lovable'));
+    }
+  });
+
   // Store version ordering is per-component NUMERIC, not decimal: 0.1.51 is [0,1,51], which
   // outranks [0,1,6]. Shipping 0.1.51 therefore made 0.1.6 through 0.1.50 permanently
   // unreleasable — they would be downgrades, which both stores reject forever.
