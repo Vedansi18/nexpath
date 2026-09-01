@@ -34,6 +34,36 @@ export const FEEDBACK_EVENT = 'feedback_submitted';
  */
 export const FEEDBACK_DISMISSED_EVENT = 'feedback_dismissed';
 
+/**
+ * One event NAME per rating option, on top of `feedback_submitted`'s `rating`
+ * property (plan §9.8: the property stays — replacing it would rename history
+ * and break every existing chart).
+ *
+ * Why a name and not just the property: in PostHog an event name is a
+ * first-class object with its own trend, funnel step and alert, where a property
+ * filter has to be re-applied on every chart.
+ *
+ * ⚠️ WHY THIS LIST IS DUPLICATED RATHER THAN DERIVED FROM `FEEDBACK_OPTIONS`.
+ * Importing `decision-session/feedback-popup.ts` from here would close a cycle:
+ * that module imports `DecisionSession.js`, which imports `telemetry/`. So this
+ * follows the discipline the repo already uses for exactly this problem
+ * (`submit-hold-budget.ts`, `adapters/rating-cadence.ts`): keep the copy, and
+ * pin it with a contract test that reads the shipped source as text. The names
+ * are the labels lowercased, so a reworded label fails that test rather than
+ * silently renaming an event.
+ */
+export const FEEDBACK_RATING_EVENTS: Readonly<Record<number, string>> = {
+  1: 'feedback_rating_bad',
+  2: 'feedback_rating_fine',
+  3: 'feedback_rating_good',
+  4: 'feedback_rating_excellent',
+};
+
+/** The per-option event for a rating, or undefined if it is not one of the four. */
+export function feedbackRatingEvent(rating: number): string | undefined {
+  return FEEDBACK_RATING_EVENTS[rating];
+}
+
 export interface SendFeedbackOptions {
   fetch?: FetchLike;
   now?:   number;

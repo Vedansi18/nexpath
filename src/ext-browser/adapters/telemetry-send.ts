@@ -104,6 +104,30 @@ export const FEEDBACK_EVENT = 'feedback_submitted';
  */
 export const FEEDBACK_DISMISSED_EVENT = 'feedback_dismissed';
 
+/**
+ * One event NAME per rating option, alongside `feedback_submitted`'s `rating`
+ * property — the property stays (plan §9.8), because replacing it would rename
+ * history and break every chart already built on it.
+ *
+ * ⚠️ A COPY, deliberately, and pinned twice. The names cannot be derived from
+ * the browser's own `RATING_SCALE` without this adapter importing `ui/`, a
+ * direction nothing else in `adapters/` takes; and they cannot be derived from
+ * the CLI's `FEEDBACK_OPTIONS` because that module reaches `telemetry/` and
+ * would close a cycle. So the contract tests pin this list against BOTH — the
+ * browser's scale and the CLI's file — and a rename on either side fails here.
+ */
+export const FEEDBACK_RATING_EVENTS: Readonly<Record<number, string>> = {
+  1: 'feedback_rating_bad',
+  2: 'feedback_rating_fine',
+  3: 'feedback_rating_good',
+  4: 'feedback_rating_excellent',
+};
+
+/** The per-option event for a rating, or undefined if it is not one of the four. */
+export function feedbackRatingEvent(rating: number): string | undefined {
+  return FEEDBACK_RATING_EVENTS[rating];
+}
+
 /** `lifecycle-send.ts:22-24`. */
 export const EVENT_INSTALLED       = 'nexpath_installed';
 export const EVENT_ADVISORY_FIRED  = 'advisory_fired';

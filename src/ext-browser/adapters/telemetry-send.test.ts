@@ -5,7 +5,7 @@ import {
   buildEnvelope, sendRating, sendInstalled, sendAdvisoryFired, sendOptionSelected,
   flushLifecycle,
   POSTHOG_ENDPOINT, POSTHOG_API_KEY, POSTHOG_LIB_NAME, POSTHOG_LIB_VERSION, SURFACE,
-  FEEDBACK_EVENT, FEEDBACK_DISMISSED_EVENT, EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED,
+  FEEDBACK_EVENT, FEEDBACK_DISMISSED_EVENT, FEEDBACK_RATING_EVENTS, feedbackRatingEvent, EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED,
   sendActionEvent,
   type FetchLike, type TelemetryKeyStore,
 } from './telemetry-send.js';
@@ -14,6 +14,7 @@ import {
   SIGNAL_ADVISORY_FIRED, SIGNAL_OPTION_SELECTED, ACTION_SIGNAL_KINDS,
 } from './lifecycle-signals.js';
 import { _resetIdentityInFlight, KEY_INSTALLATION_ID } from './rating-identity.js';
+import { RATING_SCALE } from '../ui/surfaces/fixtures/rating.js';
 
 const T0 = 1_700_000_000_000;
 const ID = 'fixed-installation-id';
@@ -430,5 +431,61 @@ describe('contract: which kinds the CLI actually records', () => {
   it('the CLI still posts an action event under the kind as the event name', () => {
     const flat = read('src', 'telemetry', 'lifecycle-send.ts').replace(/\s+/g, ' ');
     expect(flat).toContain('return sendLifecycle(store, kind, occurredAt, { action_ts: occurredAt }, opts);');
+  });
+});
+
+/**
+ * The per-option names, pinned in BOTH directions.
+ *
+ * They are a copy — see the constant's comment for why neither derivation is
+ * available — so drift can appear on either side: the browser's own scale
+ * (which the surface renders from) or the CLI's list (which the CLI sends from).
+ * Both are checked.
+ */
+describe('per-option event names — pinned to the scale AND to the CLI', () => {
+  const cliSrc = readFileSync(join(process.cwd(), 'src', 'telemetry', 'feedback-send.ts'), 'utf8');
+
+  it('one name per row of the browser\'s own scale, and no extras', () => {
+    expect(Object.keys(FEEDBACK_RATING_EVENTS).map(Number).sort())
+      .toEqual(RATING_SCALE.map((c) => c.rating).sort());
+  });
+
+  it('⭐ each name is the scale\'s label, lowercased', () => {
+    for (const c of RATING_SCALE) {
+      expect(feedbackRatingEvent(c.rating), c.label)
+        .toBe(`feedback_rating_${c.label.toLowerCase()}`);
+    }
+  });
+
+  it('⭐ the CLI ships the identical four names', () => {
+    // Two surfaces reporting one user action must not name it two ways; that
+    // drift would not surface until someone built the dashboard.
+    for (const name of Object.values(FEEDBACK_RATING_EVENTS)) {
+      expect(cliSrc, name).toContain(`'${name}'`);
+    }
+    expect(cliSrc).toContain('export const FEEDBACK_RATING_EVENTS');
+  });
+
+  it('the four are distinct and collide with neither existing event', () => {
+    const names = Object.values(FEEDBACK_RATING_EVENTS);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain(FEEDBACK_EVENT);
+    expect(names).not.toContain(FEEDBACK_DISMISSED_EVENT);
+  });
+
+  it('a rating outside the scale has no event', () => {
+    for (const r of [0, 5, -1, 1.5, Number.NaN]) {
+      expect(feedbackRatingEvent(r), String(r)).toBeUndefined();
+    }
+  });
+
+  it('⭐ Phase 1 is naming only — the browser sends none of them yet', () => {
+    // Phase 3 brings the sender, with its own tests and its own docs. If this
+    // fails, a sender landed without them.
+    const src = readFileSync(join(process.cwd(), 'src', 'ext-browser', 'adapters', 'telemetry-send.ts'), 'utf8');
+    expect(src).not.toMatch(/export function sendRatingOption/);
+    const host = readFileSync(join(process.cwd(), 'src', 'ext-browser', 'background', 'pe-popup-host.ts'), 'utf8');
+    expect(host).not.toContain('feedbackRatingEvent');
+    expect(host).not.toContain('FEEDBACK_RATING_EVENTS');
   });
 });

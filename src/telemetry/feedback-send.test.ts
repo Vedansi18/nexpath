@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openStore, closeStore, type Store } from '../store/db.js';
 import { setConfig } from '../store/config.js';
 import { getInstallationId } from './identity.js';
-import { sendFeedback, FEEDBACK_EVENT } from './feedback-send.js';
+import {
+  FEEDBACK_EVENT,
+  FEEDBACK_DISMISSED_EVENT,
+  FEEDBACK_RATING_EVENTS,
+  feedbackRatingEvent,
+  sendFeedback,
+  sendFeedbackDismissed,
+} from './feedback-send.js';
+import { FEEDBACK_OPTIONS } from '../decision-session/feedback-popup.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { FetchLike } from './TelemetryClient.js';
 import type { PostHogSingleEnvelope } from './types.js';
 
@@ -105,5 +115,55 @@ describe('sendFeedback', () => {
 
   it('returns false on a 429 rate-limit', async () => {
     expect(await sendFeedback(store, 3, { fetch: rateLimitedFetch(cap) })).toBe(false);
+  });
+});
+
+/**
+ * The per-option event names against the popup that defines the options.
+ *
+ * The list in `feedback-send.ts` is a COPY — importing `feedback-popup.ts` from
+ * telemetry would close a cycle (it imports `DecisionSession.js`, which imports
+ * `telemetry/`). Same problem `submit-hold-budget.ts` has, same answer: keep the
+ * copy and pin it here, so a reworded label fails a test instead of silently
+ * renaming an event that dashboards are built on.
+ */
+describe('per-option event names — pinned to FEEDBACK_OPTIONS', () => {
+  it('there is exactly one name per option, and no extras', () => {
+    expect(Object.keys(FEEDBACK_RATING_EVENTS).map(Number).sort())
+      .toEqual(FEEDBACK_OPTIONS.map((o) => o.rating).sort());
+  });
+
+  it('⭐ each name is its own label, lowercased', () => {
+    for (const opt of FEEDBACK_OPTIONS) {
+      expect(feedbackRatingEvent(opt.rating), opt.label)
+        .toBe(`feedback_rating_${opt.label.toLowerCase()}`);
+    }
+  });
+
+  it('the four names are distinct, and none collides with the two existing events', () => {
+    const names = Object.values(FEEDBACK_RATING_EVENTS);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain(FEEDBACK_EVENT);
+    expect(names).not.toContain(FEEDBACK_DISMISSED_EVENT);
+  });
+
+  it('a rating outside the scale has no event', () => {
+    for (const r of [0, 5, -1, 1.5, Number.NaN]) {
+      expect(feedbackRatingEvent(r), String(r)).toBeUndefined();
+    }
+  });
+
+  it('⭐ Phase 1 is naming only — nothing sends these yet', () => {
+    // The senders arrive in Phase 2 (CLI) and Phase 3 (browser). If this starts
+    // failing, a sender landed without the phase that was meant to bring its
+    // tests and its documentation with it.
+    const src = readFileSync(join(process.cwd(), 'src', 'telemetry', 'feedback-send.ts'), 'utf8');
+    // No sender for them yet, and no envelope built from one.
+    expect(src).not.toMatch(/export (async )?function sendFeedbackRating/);
+    expect(src).not.toMatch(/event: *feedbackRatingEvent/);
+    // And nothing calls them from the stop hook.
+    const stop = readFileSync(join(process.cwd(), 'src', 'cli', 'commands', 'stop.ts'), 'utf8');
+    expect(stop).not.toContain('feedbackRatingEvent');
+    expect(stop).not.toContain('FEEDBACK_RATING_EVENTS');
   });
 });
