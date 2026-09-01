@@ -35,6 +35,14 @@ export interface StatusBarHandle {
 export interface AdvisoryFallbackDeps {
   /** Push a payload to the webview (`view-provider.publishPayload`). */
   publishPayload: (payload: DecisionSessionPayload) => void;
+  /**
+   * Record that the advisory was shown here (content-free `advisory_fired`
+   * signal), so the extension surface reports the same signal the CLI records
+   * when its own popup fires. Given the project root the advisory belongs to.
+   * Optional + defaults to a no-op; `extension.ts` wires the real fire-and-forget
+   * spawn. No prompt/option text is passed — only the project root.
+   */
+  recordAdvisoryShown?: (projectRoot: string) => void;
   /** The status-bar surface to light when an advisory is waiting. */
   statusBar: StatusBarHandle;
   /** Read the latest stored advisory for a project (defaults to the real store reader). */
@@ -120,9 +128,10 @@ export function createAdvisoryFallback(deps: AdvisoryFallbackDeps): AdvisoryFall
 
     async showAdvisory(): Promise<void> {
       if (pendingProject === null) return;
+      const project = pendingProject;
       let advisory: StoredAdvisory | null;
       try {
-        advisory = await read(pendingProject);
+        advisory = await read(project);
       } catch {
         return;
       }
@@ -132,6 +141,9 @@ export function createAdvisoryFallback(deps: AdvisoryFallbackDeps): AdvisoryFall
         return;
       }
       deps.publishPayload(toPayload(advisory));
+      // Record the shown-advisory signal ONLY after a successful publish, so the
+      // count reflects advisories the user actually saw here.
+      deps.recordAdvisoryShown?.(project);
       deps.statusBar.hide();
       pendingProject = null;
     },

@@ -585,6 +585,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const advisoryFallback: AdvisoryFallback = createAdvisoryFallback({
     publishPayload: (payload) => viewProvider?.publishPayload(payload),
+    // Record the content-free `advisory_fired` signal when the advisory is shown
+    // in the webview — the same signal the CLI records for its own popup. Fire-
+    // and-forget; `projectRoot` is already the canonicalized project the advisory
+    // belongs to (armed from `cwdForEvent`).
+    recordAdvisoryShown: (projectRoot) =>
+      void spawnRecordSignal('advisory_fired', { cwd: projectRoot }),
     statusBar: {
       show: (text, tooltip) => {
         statusBarItem.text = text;
