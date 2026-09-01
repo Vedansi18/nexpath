@@ -772,8 +772,18 @@ export function registerStopCommand(program: import('commander').Command): void 
           const body = pending.result.currentBody;
           const sections = body.sections ?? [];
           const out = process.stdout;
+          // I3 (phase 37): the floor/extras split, reported where the body is actually read.
+          // `sections:N` alone cannot answer §15.4 step 4 — a legitimate floor of 5 with 3 extras
+          // and a genuine cap breach of 4 + 4 render the same count. The boundary log carries these
+          // two fields, but the sim harness does not capture that log, so the one observation point
+          // a sim run HAS was the one place the question could not be asked.
+          const floorCount = pending.result.floorSectionCount;
+          const prunedCount = pending.result.prunedSectionCount ?? 0;
           out.write('[SIM] PE enhanced prompt — disposition:' + pending.result.disposition
             + ' sections:' + sections.length
+            + (floorCount === undefined
+              ? ''
+              : ' floor:' + floorCount + ' extras:' + (sections.length - floorCount) + ' pruned:' + prunedCount)
             + ' composer:' + (body.composerMode ?? 'unknown')
             + ' language:' + (body.effectiveLanguageState ?? 'unknown') + '\n');
           for (const [index, section] of sections.entries()) {
