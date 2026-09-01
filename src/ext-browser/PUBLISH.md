@@ -153,6 +153,24 @@ once testing is done.
   (verified by OPTIONS preflight), so an ordinary request from the worker succeeds. The install
   dialog therefore still reads **4 domains**. If a reviewer asks why an analytics host appears in the
   source but not in the permissions, that is the answer.
+- **The complete event list** (reviewers do ask for it by name). Sixteen, and no others. Every one
+  carries the same four fields — a random installation ID, `$lib`, `$lib_version`, `surface:"browser"` —
+  plus the one timestamp named beside it. **No event has a field that can hold text.**
+
+  | Event | When | Extra field |
+  |---|---|---|
+  | `nexpath_installed` | once, on the first send after install | `installed_at` |
+  | `feedback_submitted` | the user answers the rating prompt | `rating`, `feedback_at` |
+  | `feedback_rating_bad` / `_fine` / `_good` / `_excellent` | the same answer under its own name | `rating`, `feedback_at` |
+  | `feedback_dismissed` | the prompt was shown and closed unanswered | `dismissed_at` |
+  | `pe_use_current`, `pe_use_original`, `pe_apply_details`, `pe_close` | a prompt-enhancement popup button | `action_ts` |
+  | `mps_send`, `mps_cancel`, `mps_decline`, `mps_interruption`, `mps_apply_details` | a sequence-offer button | `action_ts` |
+
+  The nine `pe_*` / `mps_*` events are BUFFERED locally as they happen and leave only when the user
+  answers a rating; `feedback_dismissed` is the one event that goes out without that answer, and it
+  releases nothing that was buffered. Keep this table in step with `adapters/telemetry-send.ts` — a
+  test in `options.test.ts` fails if an event name here is not in the code, or the reverse.
+
 - **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
   a random installation ID, a 1–4 rating, and content-free action names + timestamps. Dismissing the
   prompt sends ONE line — the installation ID and a timestamp — and releases none of the buffered

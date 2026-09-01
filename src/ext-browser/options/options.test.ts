@@ -386,3 +386,54 @@ describe('the docs still describe this page accurately', () => {
     expect(readme).not.toContain('Nothing is sent to any Nexpath or third-party server');
   });
 });
+
+/**
+ * The store-disclosure event list, against the code that sends them.
+ *
+ * A list a reviewer reads is only worth having if it cannot drift, and this one
+ * has two ways to go wrong: an event ships that the table does not name, or the
+ * table names one that no longer exists. Both are checked.
+ */
+describe('the store disclosure lists exactly the events the code sends', () => {
+  const cwd = process.cwd();
+  const publish = readFileSync(join(cwd, 'src', 'ext-browser', 'PUBLISH.md'), 'utf8');
+  const sender = readFileSync(join(cwd, 'src', 'ext-browser', 'adapters', 'telemetry-send.ts'), 'utf8');
+  const buffer = readFileSync(join(cwd, 'src', 'ext-browser', 'adapters', 'lifecycle-signals.ts'), 'utf8');
+
+  /** Every event name the shipped code can put on the wire. */
+  const SENT = [
+    'nexpath_installed',
+    'feedback_submitted', 'feedback_dismissed',
+    'feedback_rating_bad', 'feedback_rating_fine', 'feedback_rating_good', 'feedback_rating_excellent',
+    'pe_use_current', 'pe_use_original', 'pe_apply_details', 'pe_close',
+    'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption', 'mps_apply_details',
+  ];
+
+  it('⭐ every event the code can send is named in the table', () => {
+    const flat = publish.replace(/\s+/g, ' ');
+    for (const name of SENT) {
+      // `_fine`-style shorthand counts: the table groups the four ratings.
+      const named = flat.includes(name) || flat.includes(name.replace('feedback_rating_', '_'));
+      expect(named, name).toBe(true);
+    }
+  });
+
+  it('⭐ and every name in the table still exists in the code', () => {
+    // The table names PROPERTIES too (`feedback_at`, `action_ts`); those are not
+    // events and are excluded rather than matched loosely.
+    const PROPERTIES = new Set(['feedback_at', 'installed_at', 'dismissed_at', 'action_ts']);
+    const inTable = [...publish.matchAll(/`(nexpath_[a-z_]+|feedback_[a-z_]+|pe_[a-z_]+|mps_[a-z_]+)`/g)]
+      .map((m) => m[1]!)
+      .filter((n) => !PROPERTIES.has(n));
+    expect(inTable.length).toBeGreaterThan(10);          // the table is actually there
+    const code = sender + buffer;
+    for (const name of new Set(inTable)) {
+      expect(code.includes(`'${name}'`), name).toBe(true);
+    }
+  });
+
+  it('the table says the sixteen are all of them', () => {
+    expect(publish).toContain('Sixteen, and no others');
+    expect(SENT).toHaveLength(16);
+  });
+});
