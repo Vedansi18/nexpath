@@ -1047,7 +1047,7 @@ async function runPromptSubmitPipeline(
   );
   log.debug('absence_flags', { new: newAbsenceFlags.length, total: mgr.current.absenceFlags.length });
 
-  // ── PE context builder + sequence-shaped fallback (mirrors auto.ts §4.6) ──────
+  // ── PE context builder + sequence-shaped fallback (mirrors auto.ts's own) ─────
   // Assemble the browser PE context from what this pipeline already computed. The
   // fallback runs ON BLOCKED EXITS for multi-intent / list-shaped prompts only, so
   // the MPS surface is reachable without an advisory trigger — exactly the CLI's
@@ -1468,7 +1468,7 @@ async function runPromptSubmitPipeline(
 }
 
 /**
- * D-2 advisory-surface switch. The CLI's PE branch REMOVED the decision-session
+ * Advisory-surface switch. The CLI's PE branch REMOVED the decision-session
  * advisory popup outright (MPS-7) — a queued advisory is consumed silently and
  * the prompt-enhancement popup is the surface the user sees. That is this
  * extension's DEFAULT. The hidden storage.local key below, set to the exact
@@ -1480,7 +1480,7 @@ const ADVISORY_LEGACY_SURFACE_KEY = 'nexpath_advisory_legacy_surface';
 
 /**
  * Response-stop dispatcher — CLI-parity popup timing (the browser's Stop hook).
- * Reads the D-2 switch and routes: default = PE-first (mirrors the CLI's PE
+ * Reads the switch and routes: default = PE-first (mirrors the CLI's PE
  * branch of stop.ts — feedback popups don't exist in the browser, PE popup
  * next, advisory surface removed); 'enabled' = the legacy advisory flow,
  * unchanged, with any pending PE row consumed silently so the two surfaces
@@ -1511,7 +1511,7 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
 }
 
 /**
- * PE-first response-stop (the D-2 default) — the browser mirror of the CLI PE
+ * PE-first response-stop (the default) — the browser mirror of the CLI PE
  * branch's Stop hook: wait out a still-running submit decision, consume any
  * queued advisory SILENTLY (MPS-7 — the advisory popup no longer exists on
  * this surface), then show the parked prompt enhancement through the engine's
@@ -1540,7 +1540,7 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
   if (!pe) {
     // PB6 fail-closed row behaviour: an active sequence row with no pending PE
     // would be the CLI's continuation moment — the browser has no continuation
-    // runtime (deferred, R-3), so it logs and does NOTHING, exactly the CLI's
+    // runtime (deferred), so it logs and does NOTHING, exactly the CLI's
     // planner-off default. Content-free: counts only.
     try {
       const seq = await getPendingSequence(projectRoot);
@@ -1665,7 +1665,7 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
 }
 
 /**
- * LEGACY response-stop handler (D-2 switch 'enabled') — the shipped advisory
+ * LEGACY response-stop handler (switch 'enabled') — the shipped advisory
  * flow, byte-for-byte. Shows the advisory that handlePromptSubmit queued for
  * this project, if any — so the popup lands AFTER the response, never
  * before/during it. Mirrors cli/commands/stop.ts (runStop): pull pending →
@@ -1759,7 +1759,7 @@ async function handleResponseStopLegacyAdvisory(projectRoot: string, tabId: numb
       const og      = JSON.parse(ogRaw) as PendingOgContext;
       const content = resolveDecisionContent(og.stage, og.flagType, og.profile ?? undefined, og.prevStage ?? undefined);
 
-      // ── CLI parity (stop.ts §1.5): natural-language detection over recent prompts,
+      // ── CLI parity (stop.ts): natural-language detection over recent prompts,
       // run post-response like the CLI. Only fires once >= LANG_DETECT_INTERVAL prompts
       // exist for this project. tinyld runs locally (no API cost). The detected code is
       // persisted so later submits pick it up (auto.ts reads the stored value), and the

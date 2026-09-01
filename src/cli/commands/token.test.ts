@@ -70,7 +70,7 @@ describe('configSetTokenAction', () => {
     ).rejects.toThrow(/Invalid Nexpath token/);
   });
 
-  it('⛔ D-6: never claims "nothing leaves your machine" — it would be untrue in Mode B', async () => {
+  it('⛔ honesty guard: never claims "nothing leaves your machine" — untrue in token mode', async () => {
     const { lines, print } = captureOutput();
     await configSetTokenAction({ output: print, passwordFn: async () => VALID_TOKEN });
     const text = lines.join('\n').toLowerCase();

@@ -83,7 +83,7 @@ const idbSaveProjectDetectedLanguage = vi.fn().mockResolvedValue(undefined);
 
 const keyStoreGetKey = vi.fn();
 const keyStoreSetKey = vi.fn().mockResolvedValue(undefined);
-// D-2 advisory-surface switch (PB4), answered at the adapter layer so individual
+// Advisory-surface switch (PB4), answered at the adapter layer so individual
 // tests' keyed getKey mockImplementations never have to know about it. null =
 // the production default (PE-first, advisory surface removed); the legacy
 // response-stop describe sets 'enabled' to exercise the preserved flow.
@@ -1061,7 +1061,7 @@ describe('service-worker.ts', () => {
     });
   });
 
-  describe('prompt-enhancement prepare wiring (PB3 — mirrors auto.ts fired path + §4.6 sequence fallback)', () => {
+  describe('prompt-enhancement prepare wiring (PB3 — mirrors auto.ts fired path + sequence fallback)', () => {
     const SEQ = 'first build the login page, then add a database, then deploy the whole thing';
     function mockKeyStorePe(apiKey: string | null, freq: string | null, role: string | null): void {
       keyStoreGetKey.mockResolvedValueOnce(apiKey).mockResolvedValueOnce(freq).mockResolvedValueOnce(role);
@@ -1278,7 +1278,7 @@ describe('service-worker.ts', () => {
 
   describe('response-stop shows the queued advisory (CLI popup-on-Stop timing)', () => {
     // These tests pin the LEGACY advisory flow, which PB4 kept byte-identical
-    // behind the D-2 switch — so they run with the switch 'enabled'. The
+    // behind the advisory-surface switch — so they run with the switch 'enabled'. The
     // PE-first default is pinned in its own describe below.
     beforeEach(() => { advisoryLegacySwitch.value = 'enabled'; });
     const P = 'https://replit.com';
@@ -1362,7 +1362,7 @@ describe('service-worker.ts', () => {
       generatedDescBases: { l1: ['rb1'], l2: ['rb2'], l3: ['rb3'] },
     } as unknown as Awaited<ReturnType<typeof generateOptionList>>;
 
-    it('detects the prompt language at STOP (stop.ts §1.5), persists it, and generates options in it', async () => {
+    it('detects the prompt language at STOP (stop.ts parity), persists it, and generates options in it', async () => {
       // CLI parity: tinyld runs over the recent-prompt window once >= LANG_DETECT_INTERVAL
       // prompts exist. Unambiguously-Spanish window → generateOptionList gets 'es', and the
       // detected code is persisted so later submits localise too (auto.ts reads it).
@@ -1597,7 +1597,7 @@ describe('service-worker.ts', () => {
     });
   });
 
-  describe('PE-first response-stop (PB4 — the D-2 default, mirrors the CLI PE branch of stop.ts)', () => {
+  describe('PE-first response-stop (PB4 — the default, mirrors the CLI PE branch of stop.ts)', () => {
     const P = 'https://bolt.new/~/p1';
     const PENDING_KEY = `nexpath_pending_advisory::${P}`;
     const OG_KEY = `nexpath_pending_advisory_og::${P}`;
@@ -1796,7 +1796,7 @@ describe('service-worker.ts', () => {
       expect(runBrowserPePopup).not.toHaveBeenCalled();
     });
 
-    it('the D-2 switch read is exact-equality: any other value stays PE-first (A9)', async () => {
+    it('the switch read is exact-equality: any other value stays PE-first (A9)', async () => {
       advisoryLegacySwitch.value = 'true'; // truthy but NOT the exact sentinel
       idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
       vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
