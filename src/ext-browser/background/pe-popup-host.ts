@@ -57,6 +57,7 @@ import { markFeedbackShown } from '../adapters/rating-cadence.js';
 import {
   flushLifecycle,
   sendRating,
+  sendRatingDismissed,
   type FetchLike,
   type TelemetryKeyStore,
 } from '../adapters/telemetry-send.js';
@@ -724,8 +725,11 @@ export async function runBrowserRatingPopup(
     // `close` (there is no "skipped" command; not answering IS closing).
     // CLI parity, `stop.ts:530`: `markFeedbackShown` runs on EITHER outcome, and
     // a dismissal sends nothing and flushes nothing.
+    // Reported, but NOT by flushing: the buffer stays for a future consent.
+    // Only the rating click releases it (§4.2).
+    const reported = await sendRatingDismissed(store, deps.fetch ? { fetch: deps.fetch } : {});
     await markFeedbackShown(store, now());
-    log.debug('rating_dismissed', { projectRoot, via: command.type });
+    log.debug('rating_dismissed', { projectRoot, via: command.type, reported });
     return { state: 'dismissed' };
   } finally {
     void deps.sendToTab({ type: 'nexpath:pe-close', projectRoot }).catch(() => { /* panel gone */ });

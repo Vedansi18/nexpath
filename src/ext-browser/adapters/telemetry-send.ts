@@ -90,6 +90,20 @@ export const DEFAULT_TIMEOUT_MS = 10_000;
 /** `feedback-send.ts:22`. */
 export const FEEDBACK_EVENT = 'feedback_submitted';
 
+/**
+ * `feedback-send.ts` — the popup was shown and closed without an answer.
+ *
+ * Without it, "asked and declined" and "never asked" are the same absence in the
+ * data, so the rating has no denominator of its own: `nexpath_installed` cannot
+ * say how often the prompt actually appeared.
+ *
+ * ⚠️ This is the ONE event that goes out without the rating click, so it is also
+ * the one that changes what the Privacy section can say. It carries an
+ * installation id and a timestamp, it never releases the buffer, and
+ * `src/ext-browser/README.md` says so in those terms.
+ */
+export const FEEDBACK_DISMISSED_EVENT = 'feedback_dismissed';
+
 /** `lifecycle-send.ts:22-24`. */
 export const EVENT_INSTALLED       = 'nexpath_installed';
 export const EVENT_ADVISORY_FIRED  = 'advisory_fired';
@@ -201,6 +215,21 @@ export function sendRating(
 ): Promise<boolean> {
   const now = opts.now ?? Date.now();
   return send(store, FEEDBACK_EVENT, now, { rating, feedback_at: now }, opts);
+}
+
+/**
+ * Report a dismissal. The rating envelope without the rating — there isn't one.
+ *
+ * Deliberately does NOT flush, and the caller must not either: releasing the
+ * buffer is what the rating CLICK consents to (§4.2), and closing the popup is
+ * the opposite of that click.
+ */
+export function sendRatingDismissed(
+  store: TelemetryKeyStore,
+  opts:  SendOptions & { now?: number } = {},
+): Promise<boolean> {
+  const now = opts.now ?? Date.now();
+  return send(store, FEEDBACK_DISMISSED_EVENT, now, { dismissed_at: now }, opts);
 }
 
 /** `lifecycle-send.ts:69` — the one-time install event. */

@@ -778,14 +778,19 @@ describe('runBrowserRatingPopup', () => {
     expect(await readSignals(store)).toEqual([]);      // pruned after their sends
   });
 
-  it('⭐ a dismissal marks it shown and sends NOTHING — CLI parity', async () => {
+  it('⭐ a dismissal reports ONLY the dismissal — no rating, no flush', async () => {
     const store = memoryStore();
     await recordSignal(store, 'pe_close', 1_699_999_000_000);
 
-    const { outcome, posts } = await run({ type: 'close' }, { store });
+    const { outcome, posts, events } = await run({ type: 'close' }, { store });
 
     expect(outcome).toEqual({ state: 'dismissed' });
-    expect(posts).toEqual([]);                          // no send AND no flush
+    // Exactly one envelope: the dismissal. Not the rating, and NOT the buffer —
+    // releasing that is what the rating click consents to (§4.2).
+    expect(events).toEqual(['feedback_dismissed']);
+    const props = posts[0]!['properties'] as Record<string, unknown>;
+    expect(Object.keys(props).sort())
+      .toEqual(['$lib', '$lib_version', 'dismissed_at', 'installation_id', 'surface']);
     expect(store.data.get('feedback_last_shown_at')).toBe('1700000000000');
     expect(await readSignals(store)).toHaveLength(1);   // the buffer is untouched
   });

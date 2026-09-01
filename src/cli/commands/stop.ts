@@ -10,7 +10,7 @@ import {
 } from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordActionSignal, type PromptActionSignalKind } from '../../store/feedback-signals.js';
-import { sendFeedback } from '../../telemetry/feedback-send.js';
+import { sendFeedback, sendFeedbackDismissed } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
@@ -202,6 +202,18 @@ export function persistPromptEnhancementSequenceContinuationCancelV1(
 export interface FeedbackDeps {
   render: FeedbackRenderFn | null;
   send:   (store: Store, rating: number) => Promise<boolean>;
+  /**
+   * Required, not optional, and deliberately so: an optional field would let a
+   * test that forgets it fall through to the REAL sender, which posts to
+   * PostHog for real — the built-in api key is a shipped default, so nothing
+   * would stop it.
+   *
+   * ⚠️ `tsconfig.json` excludes `**​/*.test.ts`, so this is NOT caught at
+   * typecheck; a test that omits it fails at RUNTIME with "fbDismissed is not a
+   * function". Loud, immediate, and in the test rather than on the wire — which
+   * is the outcome that matters.
+   */
+  sendDismissed: (store: Store) => Promise<boolean>;
 }
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
@@ -513,6 +525,7 @@ export async function runStop(
   if (isFeedbackEligible(store)) {
     const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
     const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
+    const fbDismissed = feedbackDeps ? feedbackDeps.sendDismissed : sendFeedbackDismissed;
     if (fbRender) {
       // The popup blocks for user input; don't hold the global DB lock across it (MPS-8) — release
       // before, re-acquire + reload after, so other sessions are not blocked and their concurrent
@@ -526,6 +539,16 @@ export async function runStop(
         // Flush regardless of telemetry.enabled — this explicit action is the consent.
         await flushLifecycle(store);
         await fbSend(store, result.rating);
+      } else {
+        // Shown and closed without an answer. Reported so that "asked and
+        // declined" is distinguishable from "never asked" — without it the
+        // rating has no denominator of its own.
+        //
+        // NO FLUSH HERE, and that is the whole point: releasing the buffer is
+        // what the rating CLICK consents to, and this is the opposite of that
+        // click. The dismissal goes out on its own, carrying an installation id
+        // and a timestamp.
+        await fbDismissed(store);
       }
       markFeedbackShown(store);
       logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });

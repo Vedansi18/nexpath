@@ -229,7 +229,9 @@ describe('rating popup — end to end', () => {
     }));
 
     expect(await run).toEqual({ state: 'dismissed' });
-    expect(w.posts).toEqual([]);                       // not one request
+    // One envelope, and it is the dismissal — the buffered mps_send is NOT
+    // released, because only the rating click consents to that.
+    expect(w.events()).toEqual(['feedback_dismissed']);
     expect(await readSignals(s)).toHaveLength(1);      // still there for next time
     expect(s.data.get('feedback_last_shown_at')).toBe(String(T0));  // but asked
   });

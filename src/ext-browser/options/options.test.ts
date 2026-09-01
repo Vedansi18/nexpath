@@ -369,6 +369,17 @@ describe('the docs still describe this page accurately', () => {
     expect(publish).not.toContain('and this one has none');
   });
 
+  it('⭐ the privacy policy discloses the dismissal send', () => {
+    // The dismissal is the ONE event that goes out without the rating click, so
+    // it is the one the policy must name. The README said "Dismissing the
+    // prompt sends nothing" until the event shipped — pinned so that sentence
+    // cannot come back while the send exists.
+    const flat = readme.replace(/\s+/g, ' ');
+    expect(flat).toContain('If you dismiss the prompt, one line goes out');
+    expect(flat).not.toContain('Dismissing the prompt sends nothing');
+    expect(publish.replace(/\s+/g, ' ')).toContain('Dismissing the prompt sends ONE line');
+  });
+
   it('⭐ the README does not claim nothing is sent', () => {
     // The other stale claim, kept pinned so it cannot come back.
     expect(readme).not.toContain('No telemetry');

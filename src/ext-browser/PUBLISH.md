@@ -154,10 +154,12 @@ once testing is done.
   dialog therefore still reads **4 domains**. If a reviewer asks why an analytics host appears in the
   source but not in the permissions, that is the answer.
 - **Data disclosure** — what leaves the machine, and only when the user answers the rating prompt:
-  a random installation ID, a 1–4 rating, and content-free action names + timestamps. **Never**
-  prompt text, option text, URLs or project paths. **There is a user control:** Settings → Feedback →
-  "Never ask" stops the prompt, and with it every send. Keep all of this identical to the *Privacy*
-  section of `src/ext-browser/README.md`, which is what the privacy-policy URL points at.
+  a random installation ID, a 1–4 rating, and content-free action names + timestamps. Dismissing the
+  prompt sends ONE line — the installation ID and a timestamp — and releases none of the buffered
+  action names. **Never** prompt text, option text, URLs or project paths. **There is a user
+  control:** Settings → Feedback → "Never ask" stops the prompt, and with it every send. Keep all of
+  this identical to the *Privacy* section of `src/ext-browser/README.md`, which is what the
+  privacy-policy URL points at.
 - **Privacy policy URL**, **screenshots** (1280×800), **128×128 icon** (`icons/icon128.png`).
 
 ---

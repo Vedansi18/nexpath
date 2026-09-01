@@ -5,7 +5,7 @@ import {
   buildEnvelope, sendRating, sendInstalled, sendAdvisoryFired, sendOptionSelected,
   flushLifecycle,
   POSTHOG_ENDPOINT, POSTHOG_API_KEY, POSTHOG_LIB_NAME, POSTHOG_LIB_VERSION, SURFACE,
-  FEEDBACK_EVENT, EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED,
+  FEEDBACK_EVENT, FEEDBACK_DISMISSED_EVENT, EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED,
   sendActionEvent,
   type FetchLike, type TelemetryKeyStore,
 } from './telemetry-send.js';
@@ -314,6 +314,19 @@ describe('contract with the shipped CLI telemetry (the two must not drift)', () 
   it('the $lib name and version are the CLI\'s', () => {
     expect(batcher).toContain(`export const POSTHOG_LIB_NAME    = '${POSTHOG_LIB_NAME}';`);
     expect(batcher).toContain(`export const POSTHOG_LIB_VERSION = '${POSTHOG_LIB_VERSION}';`);
+  });
+
+  it('⭐ the dismissal event is the CLI\'s, by name and by shape', () => {
+    // Agreed across three surfaces before any of them was written (plan r15).
+    // If the CLI renames it, the browser must follow in the same commit — the
+    // drift would not surface until someone built the dashboard.
+    expect(feedback).toContain(`export const FEEDBACK_DISMISSED_EVENT = '${FEEDBACK_DISMISSED_EVENT}';`);
+    expect(feedback.replace(/\s+/g, ' ')).toContain('dismissed_at: now');
+    // And the CLI must NOT flush on it — a dismissal is not consent.
+    const stop = readFileSync(join(cwd, 'src', 'cli', 'commands', 'stop.ts'), 'utf8');
+    const flat = stop.replace(/\s+/g, ' ');
+    expect(flat).toContain('await fbDismissed(store);');
+    expect(flat).not.toMatch(/await fbDismissed\(store\); *await flushLifecycle/);
   });
 
   it('the four event names are the CLI\'s', () => {
