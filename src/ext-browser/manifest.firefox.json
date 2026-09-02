@@ -62,7 +62,8 @@
       "id": "{80f4c1c7-1fb2-41d9-a4a1-7c2f4981d286}",
       "strict_min_version": "112.0",
       "data_collection_permissions": {
-        "required": ["authenticationInfo", "websiteContent", "technicalAndInteraction"]
+        "required": ["websiteContent"],
+        "optional": ["technicalAndInteraction"]
       }
     }
   },

@@ -96,6 +96,43 @@ describe('ext-browser manifests — permission surface', () => {
     expect(firefox.description).toEqual(chrome.description);
   });
 
+  // Firefox prints `data_collection_permissions.required` verbatim in its install
+  // dialog ("The developer says this extension collects: …"), so this declaration is
+  // user-facing copy with a compliance rule attached. It had no guard, and that is
+  // exactly how an invalid value reached it: `technicalAndInteraction` was added to
+  // `required`, which Mozilla's documentation forbids outright ("This data permission
+  // must be optional" / "cannot be required").
+  describe('firefox data-collection declaration', () => {
+    const declaration = () =>
+      load('firefox').browser_specific_settings.gecko.data_collection_permissions;
+
+    it('never puts technicalAndInteraction in the required list (Mozilla forbids it)', () => {
+      expect(declaration().required ?? []).not.toContain('technicalAndInteraction');
+    });
+
+    it('declares websiteContent as required — the prompt genuinely leaves the browser', () => {
+      // The extension sends the prompt (and a window of recent prompts) to the LLM
+      // route. Declaring anything narrower here would be a false declaration, which
+      // is the class of mistake that gets a listing removed rather than corrected.
+      expect(declaration().required).toContain('websiteContent');
+    });
+
+    it('does NOT declare authenticationInfo', () => {
+      // Nothing here collects credentials: the user's OpenAI key travels only to
+      // OpenAI, and the Nexpath token is a credential our own service issued being
+      // sent back to authenticate. Neither is the harvesting that Mozilla's category
+      // ("passwords, usernames, PINs, security questions") describes. If a reviewer
+      // ever rules otherwise, re-add it here — do not quietly change the behaviour
+      // instead.
+      expect(declaration().required ?? []).not.toContain('authenticationInfo');
+      expect(declaration().optional ?? []).not.toContain('authenticationInfo');
+    });
+
+    it('is a Firefox-only key — the Chrome manifest must not carry it', () => {
+      expect(JSON.stringify(load('chrome'))).not.toContain('data_collection_permissions');
+    });
+  });
+
   // Both stores reject a re-upload of a version they already hold, and reviewers read the
   // changelog against the version they are reviewing. A bumped manifest with a changelog
   // still headed by the previous release is the exact drift that costs a submission round.
