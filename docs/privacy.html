@@ -123,8 +123,10 @@
     <li>
       <strong>In token mode: Nexpath's own service.</strong> Prompt context goes to the service to be
       answered (it forwards the request to OpenAI). The service stores your account email, payment
-      records for Pro purchases, and technical usage metadata — token counts, timestamps, and which
-      model answered. <strong>PayPal</strong> processes Pro payments and never sees your prompts.
+      records for Pro purchases, technical usage metadata — token counts, timestamps, and which
+      model answered — and a recent record of the requests handled for your account, kept to
+      operate and improve the service. Recognised credentials are removed before anything is
+      written. <strong>PayPal</strong> processes Pro payments and never sees your prompts.
     </li>
     <li>
       <strong>With your own OpenAI key: no one else.</strong> ParseOS does not receive, store, sell,
@@ -169,7 +171,7 @@
   <h2>Data retention</h2>
   <ul>
     <li>With your own OpenAI key, prompt context is processed transiently to generate a suggestion and ParseOS retains nothing — we never receive it.</li>
-    <li>In token mode, the service keeps your account email, payment records, and technical usage metadata (token counts, timestamps, which model answered) — visible on your account page.</li>
+    <li>In token mode, the service keeps your account email, payment records, technical usage metadata (token counts, timestamps, which model answered) — visible on your account page — and a recent record of the requests it handled for your account, limited in number and pruned as newer ones arrive.</li>
     <li>Your key or token, settings, and recent prompt history stay in your browser until you remove the extension or clear them.</li>
   </ul>
 
