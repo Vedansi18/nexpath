@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nexpath Browser Extension — Privacy Policy</title>
-<meta name="description" content="Privacy policy for the Nexpath browser extension — an AI coding assistant for Replit, Lovable and Bolt.new. Your API key or Nexpath token and your settings stay in your browser; prompt context goes to OpenAI with your own key, or through Nexpath's own service in token mode. No telemetry, no tracking.">
+<meta name="description" content="Privacy policy for the Nexpath browser extension — an AI coding assistant for Replit, Lovable and Bolt.new. Your API key or Nexpath token and your settings stay in your browser; prompt context goes to OpenAI with your own key, or through Nexpath's own service in token mode. No tracking network, no remote code; content-free usage signals leave only if you answer the rating prompt.">
 <style>
   :root{
     --bg:#ffffff; --fg:#1a1d1f; --muted:#5b6266; --rule:#e3e6e8;
@@ -78,7 +78,9 @@
     <strong>OpenAI</strong>, under your own OpenAI account — ParseOS receives nothing. With an
     optional <strong>Nexpath token</strong> from a Nexpath account, prompt context is sent to
     <strong>Nexpath's own service</strong> instead, which forwards it to OpenAI to generate the
-    answer and meters your account credit. No telemetry and no tracking in either mode.
+    answer and meters your account credit. There is no tracking network and no remote code;
+    content-free usage signals leave your machine only if you answer the occasional rating prompt
+    (see "Usage signals and the rating prompt" below).
   </div>
 
   <h2>What Nexpath handles</h2>
@@ -130,12 +132,37 @@
     </li>
   </ul>
 
+  <h2>Usage signals and the rating prompt</h2>
+  <ul>
+    <li>
+      <strong>Usage signals stay on your machine until you choose to send them.</strong> Nexpath
+      keeps a local, content-free record of <em>which</em> popup buttons you press and <em>when</em>
+      — a fixed list of action names and timestamps. It never records prompt text, the text of an
+      option, which site you are on, or your project path.
+    </li>
+    <li>
+      <strong>The only thing that sends is the rating prompt, and only when you answer it.</strong>
+      Occasionally Nexpath asks how it is working out for you. Choosing a rating is what sends —
+      and it sends only a random installation ID (not tied to you or your machine), your 1–4
+      rating, and the timestamps above.
+    </li>
+    <li>
+      <strong>If you dismiss the prompt, one line goes out saying just that</strong> — your
+      installation ID and the time, so we can tell "asked and declined" apart from "never asked".
+      The local usage signals above stay on your machine: only answering releases those.
+    </li>
+    <li>
+      <strong>Your prompt text is never part of any of this.</strong> Prompt text goes only over
+      the two routes described above — OpenAI with your key, or the Nexpath service with your token.
+    </li>
+  </ul>
+
   <h2>What Nexpath does not do</h2>
   <ul class="never">
-    <li><strong>No telemetry, no tracking, no remote code.</strong></li>
-    <li>No analytics services, advertising, or third-party trackers of any kind.</li>
+    <li><strong>No tracking network, no ads, no remote code.</strong></li>
+    <li>No advertising or third-party tracking scripts of any kind.</li>
     <li>No selling or transferring of your data to anyone.</li>
-    <li>No use of your data for anything unrelated to generating your suggestions.</li>
+    <li>No use of your data for anything unrelated to generating your suggestions or improving Nexpath.</li>
     <li>No running on websites other than the three supported AI coding sites.</li>
   </ul>
 
