@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nexpath Browser Extension — Privacy Policy</title>
-<meta name="description" content="Privacy policy for the Nexpath browser extension — an AI coding assistant for Replit, Lovable and Bolt.new. Your API key and settings stay in your browser; prompt context goes only to OpenAI using your own key. No telemetry, no tracking.">
+<meta name="description" content="Privacy policy for the Nexpath browser extension — an AI coding assistant for Replit, Lovable and Bolt.new. Your API key or Nexpath token and your settings stay in your browser; prompt context goes to OpenAI with your own key, or through Nexpath's own service in token mode. No tracking network, no remote code; content-free usage signals leave only if you answer the rating prompt.">
 <style>
   :root{
     --bg:#ffffff; --fg:#1a1d1f; --muted:#5b6266; --rule:#e3e6e8;
@@ -57,7 +57,7 @@
 
   <header>
     <h1>Nexpath Browser Extension — Privacy Policy</h1>
-    <p class="meta">Last updated: 26 August 2026</p>
+    <p class="meta">Last updated: 1 September 2026</p>
   </header>
 
   <p class="lede">
@@ -73,10 +73,14 @@
   </p>
 
   <div class="note">
-    <strong>The short version:</strong> Nexpath has no backend server. ParseOS never receives your
-    prompts, your API key, or your settings. Your key and settings stay in your browser, and prompt
-    context is sent only to <strong>OpenAI</strong> — using <strong>your own</strong> API key, under
-    your own OpenAI account.
+    <strong>The short version:</strong> your key or token and your settings stay in your browser.
+    With <strong>your own OpenAI API key</strong> (the default), prompt context is sent only to
+    <strong>OpenAI</strong>, under your own OpenAI account — ParseOS receives nothing. With an
+    optional <strong>Nexpath token</strong> from a Nexpath account, prompt context is sent to
+    <strong>Nexpath's own service</strong> instead, which forwards it to OpenAI to generate the
+    answer and meters your account credit. There is no tracking network and no remote code;
+    content-free usage signals leave your machine only if you answer the occasional rating prompt
+    (see "Usage signals and the rating prompt" below).
   </div>
 
   <h2>What Nexpath handles</h2>
@@ -85,7 +89,7 @@
       <strong>Prompt text</strong> — the message you submit to the AI coding agent. Nexpath reads the
       prompt you send; it does not read the rest of the page, your files, or your screen.
     </li>
-    <li><strong>Your OpenAI API key</strong> — which you enter yourself on the extension's options page.</li>
+    <li><strong>Your OpenAI API key or Nexpath token</strong> — whichever you enter yourself on the extension's options page.</li>
     <li><strong>Your settings</strong> — such as suggestion frequency and your selected role.</li>
   </ul>
 
@@ -96,14 +100,16 @@
       workflow a prompt belongs to <em>on your device</em>, inside the extension.
     </li>
     <li>
-      <strong>OpenAI is called only when Nexpath evaluates whether to surface a decision session</strong>
+      <strong>The LLM is called only when Nexpath evaluates whether to surface a suggestion</strong>
       — not on every prompt, and never continuously. At that point recent prompt context is sent to
-      OpenAI using <strong>your own API key</strong>.
+      OpenAI using <strong>your own API key</strong>, or — in token mode — to
+      <strong>Nexpath's own service</strong>, which forwards it to OpenAI on your behalf and charges
+      the usage to your account credit.
     </li>
     <li>
-      <strong>Your API key and settings are stored locally in your browser</strong> (extension storage).
-      The key is never bundled and never logged. It leaves your browser only as the credential on your
-      own requests to OpenAI.
+      <strong>Your API key or token and your settings are stored locally in your browser</strong>
+      (extension storage). Neither is ever bundled or logged. The credential leaves your browser only
+      on the requests it authorises — your key to OpenAI, or your token to Nexpath's service.
     </li>
   </ul>
 
@@ -115,29 +121,63 @@
       <a href="https://openai.com/policies/privacy-policy" rel="noopener">OpenAI's privacy policy</a>.
     </li>
     <li>
-      <strong>No one else.</strong> Nexpath has no backend server. ParseOS does not receive, store,
-      sell, or share your prompts, your API key, or your settings.
+      <strong>In token mode: Nexpath's own service.</strong> Prompt context goes to the service to be
+      answered (it forwards the request to OpenAI). The service stores your account email, payment
+      records for Pro purchases, technical usage metadata — token counts, timestamps, and which
+      model answered — and a recent record of the requests handled for your account, kept to
+      operate and improve the service. Recognised credentials are removed before anything is
+      written. <strong>PayPal</strong> processes Pro payments and never sees your prompts.
+    </li>
+    <li>
+      <strong>With your own OpenAI key: no one else.</strong> ParseOS does not receive, store, sell,
+      or share your prompts, your API key, or your settings.
+    </li>
+  </ul>
+
+  <h2>Usage signals and the rating prompt</h2>
+  <ul>
+    <li>
+      <strong>Usage signals stay on your machine until you choose to send them.</strong> Nexpath
+      keeps a local, content-free record of <em>which</em> popup buttons you press and <em>when</em>
+      — a fixed list of action names and timestamps. It never records prompt text, the text of an
+      option, which site you are on, or your project path.
+    </li>
+    <li>
+      <strong>The only thing that sends is the rating prompt, and only when you answer it.</strong>
+      Occasionally Nexpath asks how it is working out for you. Choosing a rating is what sends —
+      and it sends only a random installation ID (not tied to you or your machine), your 1–4
+      rating, and the timestamps above.
+    </li>
+    <li>
+      <strong>If you dismiss the prompt, one line goes out saying just that</strong> — your
+      installation ID and the time, so we can tell "asked and declined" apart from "never asked".
+      The local usage signals above stay on your machine: only answering releases those.
+    </li>
+    <li>
+      <strong>Your prompt text is never part of any of this.</strong> Prompt text goes only over
+      the two routes described above — OpenAI with your key, or the Nexpath service with your token.
     </li>
   </ul>
 
   <h2>What Nexpath does not do</h2>
   <ul class="never">
-    <li><strong>No telemetry, no tracking, no remote code.</strong></li>
-    <li>No analytics services, advertising, or third-party trackers of any kind.</li>
+    <li><strong>No tracking network, no ads, no remote code.</strong></li>
+    <li>No advertising or third-party tracking scripts of any kind.</li>
     <li>No selling or transferring of your data to anyone.</li>
-    <li>No use of your data for anything unrelated to generating your suggestions.</li>
+    <li>No use of your data for anything unrelated to generating your suggestions or improving Nexpath.</li>
     <li>No running on websites other than the three supported AI coding sites.</li>
   </ul>
 
   <h2>Data retention</h2>
   <ul>
-    <li>Prompt context is processed transiently to generate a suggestion. ParseOS retains nothing — we never receive it.</li>
-    <li>Your key, settings, and recent prompt history stay in your browser until you remove the extension or clear them.</li>
+    <li>With your own OpenAI key, prompt context is processed transiently to generate a suggestion and ParseOS retains nothing — we never receive it.</li>
+    <li>In token mode, the service keeps your account email, payment records, technical usage metadata (token counts, timestamps, which model answered) — visible on your account page — and a recent record of the requests it handled for your account, limited in number and pruned as newer ones arrive.</li>
+    <li>Your key or token, settings, and recent prompt history stay in your browser until you remove the extension or clear them.</li>
   </ul>
 
   <h2>Your choices</h2>
   <ul>
-    <li>View, change, or delete your API key and settings at any time on the options page.</li>
+    <li>View, change, or delete your API key or Nexpath token and settings at any time on the options page.</li>
     <li>Turn Nexpath off for an individual project directly from the popup.</li>
     <li>Adjust how often suggestions appear, or switch them off entirely.</li>
     <li>Uninstalling the extension removes the data Nexpath stored locally.</li>
@@ -145,11 +185,16 @@
 
   <h2>Permissions and why they are needed</h2>
   <ul>
-    <li><strong>storage</strong> — save your API key and preferences locally.</li>
-    <li><strong>tabs</strong> — show the popup on the correct agent tab when the agent finishes responding.</li>
+    <li><strong>storage</strong> — save your API key or Nexpath token and preferences locally.</li>
+    <li><strong>tabs</strong> — show the suggestion panel on the correct agent tab, and reload an
+      already-open agent tab on install or update so the extension activates without a manual refresh.</li>
     <li>
       <strong>Site access</strong> (Replit, Lovable, Bolt.new) — Nexpath only works on
       these AI coding sites and runs nowhere else.
+    </li>
+    <li>
+      <strong>Service access</strong> (parseos.tech) — contacted only in token mode, to generate
+      your suggestion through Nexpath's own service. Never contacted when you use your own OpenAI key.
     </li>
   </ul>
 

@@ -14,7 +14,7 @@ import { readInjectedPrompt } from './advisory-store-reader.js';
  * Defines the spawn + parse contract and the error taxonomy. The chat-history
  * watcher and webview payload renderer call into this module; the Cursor /
  * Windsurf adapters supply concrete binary-path resolution. Fully built and
- * hard-frozen (dev plan §2.1) — `ipc.test.ts` locks `spawnStop`'s contract
+ * hard-frozen by the dev plan — `ipc.test.ts` locks `spawnStop`'s contract
  * including Windows crash recovery; any change here is a regression risk.
  *
  * Binary path resolution order (highest priority first):
@@ -320,6 +320,34 @@ export function spawnAuto(
     child.stdin?.end(
       JSON.stringify({ prompt, session_id: sessionId }) + '\n',
     );
+  });
+}
+
+/**
+ * Fire-and-forget: spawn `nexpath record-signal --kind <kind>` to record ONE
+ * content-free feedback signal (kind + timestamp) in the CLI-owned store — the
+ * same signal the CLI records for its own popups. Only the kind string is sent;
+ * NO prompt / body / option / additional-details text.
+ *
+ * Telemetry must NEVER disrupt the UX, so this never rejects: a missing binary,
+ * a spawn failure, or a non-zero exit are all swallowed and the promise resolves.
+ * `cwd` drives the CLI's `--project` default, exactly as in `spawnAuto`.
+ */
+export function spawnRecordSignal(kind: string, opts: IpcOptions = {}): Promise<void> {
+  return new Promise<void>((resolve) => {
+    try {
+      const bin = resolveBinaryPath(opts);
+      const args = ['record-signal', '--kind', kind];
+      if (opts.dbPath) args.push('--db', opts.dbPath);
+      const spawner = opts.spawnFn ?? spawn;
+      const safe = shellSafeSpawnTokens(bin, args);
+      const child = spawner(safe.bin, safe.args, buildSpawnOptions(opts));
+      child.on('error', () => resolve());   // missing binary / spawn failure — swallow
+      child.on('close', () => resolve());    // any exit code — swallow (fire-and-forget)
+      child.stdin?.end();                    // record-signal reads no stdin
+    } catch {
+      resolve();                             // never throw into the caller
+    }
   });
 }
 

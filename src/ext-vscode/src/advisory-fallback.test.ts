@@ -123,6 +123,35 @@ describe('createAdvisoryFallback', () => {
     expect(publishPayload).not.toHaveBeenCalled();
   });
 
+  it('showAdvisory() records advisory_fired for the project after a successful publish', async () => {
+    read.mockResolvedValue(advisory({ createdAt: 5000 }));
+    const recordAdvisoryShown = vi.fn();
+    const fb = createAdvisoryFallback({ publishPayload, statusBar, read, recordAdvisoryShown, now: () => 6000 });
+    await fb.armIfPending('/proj');
+    await fb.showAdvisory();
+    expect(publishPayload).toHaveBeenCalled();
+    expect(recordAdvisoryShown).toHaveBeenCalledWith('/proj');
+    expect(recordAdvisoryShown).toHaveBeenCalledTimes(1);
+  });
+
+  it('showAdvisory() does NOT record when nothing is pending', async () => {
+    const recordAdvisoryShown = vi.fn();
+    const fb = createAdvisoryFallback({ publishPayload, statusBar, read, recordAdvisoryShown });
+    await fb.showAdvisory();
+    expect(recordAdvisoryShown).not.toHaveBeenCalled();
+  });
+
+  it('showAdvisory() does NOT record when the advisory vanished from the store', async () => {
+    read.mockResolvedValueOnce(advisory({ createdAt: 5000 })); // arm
+    read.mockResolvedValueOnce(null);                          // gone before opening
+    const recordAdvisoryShown = vi.fn();
+    const fb = createAdvisoryFallback({ publishPayload, statusBar, read, recordAdvisoryShown, now: () => 6000 });
+    await fb.armIfPending('/proj');
+    await fb.showAdvisory();
+    expect(publishPayload).not.toHaveBeenCalled();
+    expect(recordAdvisoryShown).not.toHaveBeenCalled();
+  });
+
   it('showAdvisory() hides the status bar if the advisory vanished from the store', async () => {
     read.mockResolvedValueOnce(advisory({ createdAt: 5000 })); // arm
     read.mockResolvedValueOnce(null);                          // gone by the time we open it

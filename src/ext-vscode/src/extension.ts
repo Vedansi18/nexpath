@@ -58,7 +58,8 @@ import {
   type ChatHistoryWatcher,
 } from './chat-history-watcher.js';
 import { createChatEventHandler } from './chat-pipeline.js';
-import { spawnAuto, spawnStop } from './ipc.js';
+import { spawnAuto, spawnStop, spawnRecordSignal } from './ipc.js';
+import { peEventTypeToSignalKind } from './pe-signal-map.js';
 import { resolveWorkspaceFromDbPath, canonicalizeCwd } from './resolve-db-workspace.js';
 import { createAdvisoryFallback, type AdvisoryFallback } from './advisory-fallback.js';
 import { createAdvisoryPoller, type AdvisoryPoller } from './advisory-poller.js';
@@ -111,8 +112,8 @@ let logChannel: vscode.OutputChannel | undefined;
  * while `aichat.focusChat`/`aichat.gotochat` have ZERO occurrences on Cursor
  * 3.4.20. **That reorder was reverted**, because this constant is consumed by
  * `cursorInject` on the EXISTING, SHIPPING, UN-GATED advisory path
- * (`injectIntoChat`) — not by anything new. The hook milestone's own rule (dev
- * plan §2.1) is that *every* behavioural change sits behind the
+ * (`injectIntoChat`) — not by anything new. The hook milestone's own rule (from
+ * the dev plan) is that *every* behavioural change sits behind the
  * `NEXPATH_*_PROMPTSUBMIT_ADVISORY` switch, default off; that switch does not
  * exist yet (H2 builds it), so there was nothing to gate the change behind.
  *
@@ -479,9 +480,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.registerWebviewViewProvider(VIEW_ID, viewProvider),
   );
 
-  // P5 (VED-PE-2): PE gets its own view, never sharing state or markup with
+  // P5 (PEH-2): PE gets its own view, never sharing state or markup with
   // the DS view above.
-  // P6 (VED-PE-3): route raw webview messages into typed PE events
+  // P6 (PEH-3): route raw webview messages into typed PE events
   // (pe-events.ts) and log only their safe, redacted summary — extends the
   // P1 invariant (delivery body / feedback text is delivery-only, never
   // logged) to PE events. Routing needs the currently-published body
@@ -499,7 +500,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (!event) return;
       log(`[nexpath] PE event: ${JSON.stringify(describePeEventSafely(event))}`);
-      // P7 (VED-PE-7): gate the one event type that actually attempts
+      // Record a content-free feedback signal for this action, mirroring what the
+      // CLI records for its own popup. Fire-and-forget: never blocks the webview,
+      // never throws. Only the action's signal kind is sent — no body/details
+      // text. Attributed to the workspace project the same way the pipeline
+      // spawns resolve it (canonicalized workspace folder).
+      const signalKind = peEventTypeToSignalKind(event.eventType);
+      if (signalKind) {
+        const projectCwd = canonicalizeCwd(
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
+        );
+        void spawnRecordSignal(signalKind, { cwd: projectCwd });
+      }
+      // P7 (PEH-7): gate the one event type that actually attempts
       // delivery today. No real insertion exists yet (P8/P9) — logging the
       // gate decision here proves "delivery unreachable unless intent_ready"
       // is true in this codebase now, not just in pe-send-intent.ts's own
@@ -514,7 +527,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
         log(`[nexpath] PE send intent: ${JSON.stringify(intent)}`);
       }
-      // P9 (VED-PE-6): build the typed action request for the 4 round-trip
+      // P9 (PEH-6): build the typed action request for the 4 round-trip
       // action types and log it (redacted — never the raw edited body/details
       // text). No real response transport exists yet (R3, `G-R3` OPEN) — a
       // FRESH loop state is seeded from the currently published payload on
@@ -572,6 +585,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const advisoryFallback: AdvisoryFallback = createAdvisoryFallback({
     publishPayload: (payload) => viewProvider?.publishPayload(payload),
+    // Record the content-free `advisory_fired` signal when the advisory is shown
+    // in the webview — the same signal the CLI records for its own popup. Fire-
+    // and-forget; `projectRoot` is already the canonicalized project the advisory
+    // belongs to (armed from `cwdForEvent`).
+    recordAdvisoryShown: (projectRoot) =>
+      void spawnRecordSignal('advisory_fired', { cwd: projectRoot }),
     statusBar: {
       show: (text, tooltip) => {
         statusBarItem.text = text;
@@ -679,7 +698,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Popup selection → inject into Cascade + clear the fallback.
       onSelection: async (prompt) => {
         // H8 Finding 1: with the submit switch on, `lastInjectedPrompt` also
-        // carries the submit flow's replacement (the VED-PE-10 echo-guard write).
+        // carries the submit flow's replacement (the PEH-10 echo-guard write).
         // The submit poller delivers that one itself — bridging it here too
         // would inject it TWICE. A genuine popup selection matches neither
         // check and flows through unchanged; switch off ⇒ store is null and
@@ -728,11 +747,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       log(`[nexpath] windsurf chat-related commands (${chatish.length}): ${chatish.slice(0, 50).join(', ')}`);
     }, () => { /* getCommands unavailable — ignore */ });
 
-    // P10 (analysis §4d): the extension is not in the Windsurf hook chain
+    // P10: the extension is not in the Windsurf hook chain
     // for PE either — same root cause as the DS bridge above. Keyed on the
     // PE table only (readPendingPromptEnhancement, never advisory-store-reader.js).
     // Delivery is the verified clipboard-free chatInputInject-style path
-    // (injectPeBody wrapping injectViaCascadeAction, D-1) — never the
+    // (injectPeBody wrapping injectViaCascadeAction, clipboard-free by rule) — never the
     // clipboard-touching windsurfInject/cursorInject, same reasoning P8
     // already established. Also publishes to the PE webview so the same
     // renderer shows what was delivered if the panel happens to be open.
@@ -751,7 +770,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         executeCommand: (id, ...args) => vscode.commands.executeCommand(id, ...args),
         getCommands: (filter) => vscode.commands.getCommands(filter),
       })),
-      onPublish: (payload) => { if (payload) peViewProvider?.publishPayload(payload); },
+      onPublish: (payload) => {
+        if (!payload) return;
+        peViewProvider?.publishPayload(payload);
+        // Windsurf-poller PE-show parity: record the same content-free `pe_shown`
+        // signal the checkPeOrigin path records, so PE popups are counted on
+        // Windsurf too. The poller dedups by createdAt (its own `handledAt`), so
+        // onPublish fires once per distinct PE — no extra guard needed here.
+        // Fire-and-forget; only the kind is sent, no body text.
+        void spawnRecordSignal('pe_shown', {
+          cwd: canonicalizeCwd(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()),
+        });
+      },
       onOutcome: (outcome) => log(`[nexpath] windsurf PE poller insert outcome: ${outcome}`),
     });
     pePoller.start();
@@ -997,7 +1027,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
 
-  // Per dev plan §2.3 acceptance #2, Windsurf's chat data may also live at
+  // Per the dev plan's acceptance criteria, Windsurf's chat data may also live at
   // `~/.codeium/windsurf/` (legacy Codeium Cascade store) in addition to
   // `state.vscdb`. Watch both when host=windsurf; skip silently if the
   // cascade dir doesn't exist (fs.watch on a missing path would throw).
@@ -1076,7 +1106,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // looks up /tmp/… → no match → `stop_no_pending` → the popup never opens.
   const cwdForEvent = (event: ChatHistoryEvent): string =>
     canonicalizeCwd(resolveWorkspaceFromDbPath(event.sourcePath) ?? workspaceCwd);
-  // P8 (VED-PE-10 completion): fresh per activation, matching `watcher`.
+  // P8 (PEH-10 completion): fresh per activation, matching `watcher`.
   peInjectedRecordStore = createInjectedRecordStore();
   // OWNER RULING 2026-08-12: is a submit-time advisory switch ON for THIS host?
   // When true, the submit-time hook owns the advisory surface and the old
@@ -1117,12 +1147,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       advisoryFallback.armIfPending(cwdForEvent(event));
     },
     composeSessionId: (event) => `${cwdForEvent(event)}|${event.rawSessionId}`,
-    // P8 (VED-PE-10 completion): typed store evidence decides DS vs PE origin
+    // P8 (PEH-10 completion): typed store evidence decides DS vs PE origin
     // (pe-origin.ts, P4) — never Stop's returned text. When this turn IS
     // PE-origin, also fetch+parse the pending row (pe-store-reader.ts/P3,
     // pe-payload.ts/P5) and publish it to the PE webview for the first time —
     // this is the store-to-webview data path P5's own status text flagged as
-    // "not yet wired... P6/P8's job". Emits a visible-surface ACK (VED-PE-12)
+    // "not yet wired... P6/P8's job". Emits a visible-surface ACK (PEH-12)
     // from the REAL render outcome on both success and failure — never from
     // DS `status='shown'` (that field is never read on this path at all).
     checkPeOrigin: async (event) => {
@@ -1137,8 +1167,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           parsed = parsePromptEnhancementExtensionPayloadV1(pending.resultJson);
           if (parsed) {
             if (pending.createdAt >= peLastPublishedCreatedAt) {
+              const isNewPeShow = pending.createdAt > peLastPublishedCreatedAt;
               peLastPublishedCreatedAt = pending.createdAt;
               peViewProvider?.publishPayload(parsed);
+              // Record the content-free `pe_shown` signal once per DISTINCT popup
+              // (strictly-new createdAt), so a same-createdAt re-publish does not
+              // double-count. Fire-and-forget; only the kind is sent, no body text.
+              if (isNewPeShow) {
+                void spawnRecordSignal('pe_shown', { cwd: projectRoot });
+              }
             } else {
               log(`[nexpath] PE publish suppressed: a newer turn's payload is already visible (createdAt ${pending.createdAt} < ${peLastPublishedCreatedAt})`);
             }
@@ -1151,7 +1188,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       log(`[nexpath] PE visible-surface ACK: ${ack}`);
       return true;
     },
-    // P8 (D-1): a PE result is injected via the clipboard-free chatInputInject
+    // P8 (no-clipboard rule): a PE result is injected via the clipboard-free chatInputInject
     // FIRST — the primary path never touches the clipboard.
     //
     // CORRECTED 2026-08-11 (FIX-2, owner-approved) — this comment used to say
@@ -1194,7 +1231,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       } catch { /* best-effort — a missed origin record just means the next echo isn't caught */ }
     },
-    // P8 (VED-PE-10 completion): typed-origin-corroborated, not text-similarity
+    // P8 (PEH-10 completion): typed-origin-corroborated, not text-similarity
     // alone — see injected-record.ts's resolveOriginGuardState doc comment.
     isPeEcho: (event) =>
       peInjectedRecordStore?.resolveOriginGuardState(cwdForEvent(event), event.prompt) ===
