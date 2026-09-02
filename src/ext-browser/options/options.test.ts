@@ -233,7 +233,10 @@ describe('options.ts', () => {
       expect(html).toContain('href="https://parseos.tech/nexpath/"');
       // The wordmark and the "web" qualifier live inside ONE anchor: the whole
       // "Nexpath web" is the click target.
-      expect(html).toMatch(/<a class="footer-brand"[^>]*>Nexpath <span class="footer-web">web<\/span><\/a>/);
+      // Team lead 2026-09-02: the label is "Nexpath Website", ONE bold anchor —
+      // no muted qualifier span (its grey hover read as broken).
+      expect(html).toMatch(/<a class="footer-brand"[^>]*>Nexpath Website<\/a>/);
+      expect(html).not.toContain('footer-web');
       expect(html).not.toContain('nexpath.dev');
       // Version display removed (owner 2026-09-01) — and no glyph/icon characters.
       expect(html).not.toContain('ext-version');
