@@ -5,7 +5,11 @@ vi.mock('../../config/NexpathTokenStore.js', () => ({
   removeNexpathToken:  vi.fn(),
   readNexpathToken:    vi.fn(),
   isValidNexpathToken: (v: string) => typeof v === 'string' && v.startsWith('npk_') && v.length >= 40,
-  resolveApiBaseUrl:   vi.fn(() => 'http://localhost:8000/v1'),
+  // ⚠️ Deliberately not a real address. Nothing observes this value — `token.ts`
+  // does not call it — so a realistic-looking URL here only goes stale and reads
+  // as a second declaration of the real default, which lives in exactly one
+  // place. The one test that cares overrides it explicitly below.
+  resolveApiBaseUrl:   vi.fn(() => 'https://stub.example/v1'),
 }));
 
 import { configSetTokenAction, configRemoveTokenAction } from './token.js';

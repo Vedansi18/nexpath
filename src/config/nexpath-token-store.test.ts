@@ -265,15 +265,20 @@ describe('coexistence with an OpenAI key in the same fallback file', () => {
   });
 });
 
-// ── The API base (DEP-FP-04 does not exist yet) ─────────────────────────────────
+// ── The API base ────────────────────────────────────────────────────────────────
+//
+// 🔒 This block is the ONLY place the base-URL value is written out as a literal.
+// Every other test that touches it imports `DEFAULT_API_BASE_URL` and asserts
+// against that, so changing the address fails exactly one test — this one — for
+// exactly one reason: the value changed and the pin must be re-approved.
 
 describe('resolveApiBaseUrl', () => {
-  it('defaults to the local-development address matching the server\'s own default', () => {
+  it('defaults to the live service, the same origin the browser extension ships', () => {
     expect(resolveApiBaseUrl()).toBe(DEFAULT_API_BASE_URL);
-    expect(DEFAULT_API_BASE_URL).toBe('http://localhost:8000/v1');
+    expect(DEFAULT_API_BASE_URL).toBe('https://parseos.tech/v1');
   });
 
-  it('is overridden by NEXPATH_API_BASE_URL — this is where the real domain lands, one line, at DEP-FP-04', () => {
+  it('is overridden by NEXPATH_API_BASE_URL, so a build can be pointed at a local instance', () => {
     process.env.NEXPATH_API_BASE_URL = 'https://api.example-configured.test/v1';
     expect(resolveApiBaseUrl()).toBe('https://api.example-configured.test/v1');
   });

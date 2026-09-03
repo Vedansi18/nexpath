@@ -4,11 +4,17 @@ import { homedir } from 'node:os';
 import { config as loadDotenv } from 'dotenv';
 import { getPassword, setPassword, deletePassword } from 'cross-keychain';
 import { readNexpathToken, resolveApiBaseUrl } from './NexpathTokenStore.js';
+import { OPENAI_KEY_REGEX, isValidApiKey } from './credential-shape.js';
 
 export const KEYCHAIN_SERVICE = 'nexpath';
 export const KEYCHAIN_ACCOUNT = 'openai_api_key';
 export const FALLBACK_PATH    = join(homedir(), '.nexpath', 'config.json');
-export const API_KEY_REGEX    = /^sk-[A-Za-z0-9_-]{20,}$/;
+
+// The shape rules moved to the zero-import `credential-shape` module so the
+// browser build can share them instead of copying them. Re-exported here under
+// their established names: every existing importer of this module is unchanged,
+// and both values behave exactly as before.
+export { OPENAI_KEY_REGEX as API_KEY_REGEX, isValidApiKey };
 
 // The fifth and last resolution layer. `nexpath_token` means Mode B — no
 // OpenAI key anywhere, a Nexpath token stored instead. This is the single
@@ -19,10 +25,6 @@ export type KeySource = 'env' | 'dotenv' | 'keychain' | 'file' | 'nexpath_token'
 
 export interface ResolveOptions {
   fallbackPath?: string;
-}
-
-export function isValidApiKey(key: string): boolean {
-  return API_KEY_REGEX.test(key);
 }
 
 export async function resolveOpenAIKey(projectRoot: string, opts: ResolveOptions = {}): Promise<string | null> {

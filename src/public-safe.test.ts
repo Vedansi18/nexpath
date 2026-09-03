@@ -20,6 +20,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OWNED_FILES = [
   'src/config/NexpathTokenStore.ts',
   'src/config/ApiKeyResolver.ts',
+  'src/config/credential-shape.ts',
   'src/cli/commands/token.ts',
 ];
 
