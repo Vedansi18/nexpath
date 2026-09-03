@@ -104,7 +104,19 @@ export async function removeApiKey(opts: ResolveOptions = {}): Promise<void> {
   const fallbackPath = opts.fallbackPath ?? FALLBACK_PATH;
 
   try { await deletePassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT); } catch { /* silent */ }
-  try { await fs.unlink(fallbackPath); } catch { /* silent */ }
+  try {
+    // The fallback file may also hold a Nexpath token under a different JSON
+    // key (NexpathTokenStore's own field), so remove only our own key rather
+    // than the whole file. Unlinking it took the token with it.
+    const raw = await fs.readFile(fallbackPath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if ('openai_api_key' in parsed) {
+      delete parsed.openai_api_key;
+      await fs.writeFile(fallbackPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+    }
+  } catch {
+    /* no fallback file, or unreadable — nothing to remove */
+  }
 }
 
 function tryEnv(): string | null {
@@ -150,7 +162,21 @@ async function tryFallbackFile(fallbackPath: string): Promise<string | null> {
 
 async function writeFallbackFile(fallbackPath: string, key: string): Promise<void> {
   await fs.mkdir(dirname(fallbackPath), { recursive: true });
-  const payload = JSON.stringify({ openai_api_key: key }, null, 2);
+
+  // The fallback file is SHARED: NexpathTokenStore keeps its own token under a
+  // different JSON key in this same file. Writing `{ openai_api_key }` flat
+  // destroyed it — on any machine where the keychain is unavailable, storing a
+  // key silently removed a stored token. Merge, exactly as writeFallbackToken
+  // already does in the other direction.
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(await fs.readFile(fallbackPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    /* no existing file, or unreadable — start fresh rather than fail; a corrupt
+       file is replaced by the valid one written below. Mirrors the token side. */
+  }
+
+  const payload = JSON.stringify({ ...existing, openai_api_key: key }, null, 2);
   await fs.writeFile(fallbackPath, payload, { mode: 0o600 });
   await fs.chmod(fallbackPath, 0o600);
 }

@@ -4,6 +4,11 @@
 
 const PATTERNS: [RegExp, string][] = [
   [/sk-[A-Za-z0-9]{20,}/g, 'sk-[REDACTED]'],
+  // Nexpath tokens are url-safe base64, so the class carries `_` and `-` where
+  // the `sk-` pattern above does not. Deliberately looser than the validator
+  // (which requires a total length of 40): redaction should catch a malformed
+  // or truncated token too — the point is that it never reaches the store.
+  [/npk_[A-Za-z0-9_-]{20,}/g, 'npk_[REDACTED]'],
   [/ghp_[A-Za-z0-9]{36}/g, 'ghp_[REDACTED]'],
   [/ghu_[A-Za-z0-9]{36}/g, 'ghu_[REDACTED]'],
   [/Bearer\s+[A-Za-z0-9._\-]{10,}/g, 'Bearer [REDACTED]'],
