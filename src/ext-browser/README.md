@@ -100,7 +100,11 @@ workflow without slowing it down.
   above.
 - **If you dismiss the prompt, one line goes out saying just that** — your installation ID and the
   time, so we can tell "asked and declined" apart from "never asked". No rating, because you did not
-  give one, and the local usage signals above stay on your machine: only answering releases those.- **Your prompt text is never sold or shared.** The only places prompt text goes are the two
+  give one, and the local usage signals above stay on your machine: only answering releases those.
+- **In token mode the service keeps the usual service-side records** — your account details,
+  payment records for Pro, usage metadata shown on your account page, and routine technical
+  information associated with your account, kept to operate, secure and improve the service.
+- **Your prompt text is never sold or shared.** The only places prompt text goes are the two
   routes above — OpenAI with your key, or the Nexpath service with your token. Full policy:
   [privacy policy](https://hi0001234d.github.io/nexpath/privacy.html).
 
