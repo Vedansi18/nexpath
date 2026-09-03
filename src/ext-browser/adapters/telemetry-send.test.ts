@@ -423,9 +423,36 @@ describe('contract: which kinds the CLI actually records', () => {
     expect(callers).not.toMatch(/recordOptionSelected\(/);
   });
 
-  it('the action-kind enum is the CLI\'s, in the CLI\'s order', () => {
-    const flat = signals.replace(/\s+/g, ' ');
-    expect(flat).toContain(ACTION_SIGNAL_KINDS.map((k) => `'${k}'`).join(', '));
+  it('the action-kind enum is a SUBSET of the CLI\'s, in the CLI\'s order', () => {
+    // Was a contiguous-substring match, which only held while the two lists were
+    // identical. The CLI then inserted `pe_shown` mid-list — it and the VS Code
+    // extension emit it from a popup-shown hook the browser does not have — and a
+    // contiguous match cannot express "same names, same order, fewer of them".
+    //
+    // Subset-in-order is the contract that was always meant: every kind the
+    // browser records must exist in the CLI under the same name, and their
+    // relative order must match, so the two never drift into disagreeing about
+    // what a name means. It still fails loudly if the browser invents a kind the
+    // CLI does not have, or reorders one.
+    const cliOrder = [...signals.matchAll(/'(pe_[a-z_]+|mps_[a-z_]+)'/g)].map((m) => m[1]);
+    const cliIndex = new Map(cliOrder.map((k, i) => [k, i] as const));
+
+    const missing = ACTION_SIGNAL_KINDS.filter((k) => !cliIndex.has(k));
+    expect(missing, 'browser records kinds the CLI has never heard of').toEqual([]);
+
+    const positions = ACTION_SIGNAL_KINDS.map((k) => cliIndex.get(k)!);
+    const sorted = [...positions].sort((a, b) => a - b);
+    expect(positions, 'browser kinds are out of order versus the CLI').toEqual(sorted);
+  });
+
+  it('⭐ the browser deliberately does NOT record the CLI\'s pe_shown', () => {
+    // Not an oversight. The browser has no popup-shown hook, and adding the kind
+    // without one would put a seventeenth event into a store disclosure that
+    // promises sixteen. `pe-popup-host.ts` narrows it away at the boundary.
+    // Delete this test only in the change that adds the hook AND updates the
+    // Chrome/Firefox data disclosures together.
+    expect(signals).toContain("'pe_shown'");
+    expect(ACTION_SIGNAL_KINDS as readonly string[]).not.toContain('pe_shown');
   });
 
   it('the CLI still posts an action event under the kind as the event name', () => {
