@@ -78,27 +78,41 @@ The committed source at the tagged release reproduces the uploaded package exact
 rebuild from these steps and byte-diff the result against the upload — use `npm ci` (exact lockfile),
 not `npm install`, and match the Node version above.
 
-The Firefox manifest sets `strict_min_version` **112** and declares
-`browser_specific_settings.gecko.data_collection_permissions.required = ["authenticationInfo",
-"websiteContent", "technicalAndInteraction"]` (Mozilla's built-in data-consent) — keep these in sync
-with the store data disclosures (the API key + prompt text, and the rating telemetry).
+The Firefox manifest sets `strict_min_version` **112** and declares Mozilla's built-in
+data-consent keys as:
 
-`technicalAndInteraction` covers the rating send (installation ID, rating, timestamps). It is
-declared **required**, not `optional`, and the reason is a mechanism mismatch — not an absence of
-user control. The extension DOES have a kill switch (Settings → Feedback), but that is an extension
-setting; Mozilla's `optional` is a permission the BROWSER toggles in about:addons and the extension
-is expected to honour through `browser.permissions`. Declaring `optional` while ignoring that API
-would advertise a control the extension does not read.
+```json
+"data_collection_permissions": {
+  "required": ["websiteContent"],
+  "optional": ["technicalAndInteraction"]
+}
+```
 
-Honouring it properly is blocked by our own support range: `strict_min_version` is **112**, and
-data-collection permissions are a much later Firefox feature (140+). Across most of the range we
-ship to, the key is ignored entirely and the `browser.permissions` data-collection API is not there
-to check — so an `optional` declaration would have to fail open on those versions, which is the
-opposite of what declaring it optional promises.
+Keep these in sync with the store data disclosures and with `docs/privacy.html` — a store
+declaration narrower than what the code does is the class of mistake that gets an extension
+removed. Four tests in `manifest.test.ts` pin this shape.
 
-`required` is therefore the honest declaration: when this extension collects, it does so under its
-own setting, with no browser-level toggle involved. Revisit if `strict_min_version` ever rises past
-the versions that support the API.
+**`websiteContent` is required** because the prompt the user submits is sent to the LLM route to
+generate the suggestion. That is the extension's whole purpose, so it is not optional.
+
+**`technicalAndInteraction` is optional, not required** — it covers the rating send (installation
+ID, 1–4 rating, timestamps). Mozilla does not permit this key in the `required` list, so declaring
+it there is a submission risk rather than a stylistic choice. As an optional data permission
+Firefox shows it at install as a checkbox that is **ticked by default**, so the rating feature
+keeps working with no code change.
+
+**`authenticationInfo` is deliberately NOT declared.** No credential is collected from the user or
+transmitted to a party that did not issue it: a user-supplied OpenAI API key is stored in extension
+storage and sent only to `api.openai.com` as that request's own `Authorization` header, and a
+Nexpath token is issued by our own service and sent only back to that service to authenticate the
+user's own request. Neither is stored or transmitted anywhere else. The same wording goes in the
+reviewer-note field on both stores.
+
+> Note on the older `required`-only declaration: earlier releases declared all three keys as
+> required, on the reasoning that the extension's own Settings toggle — not a browser-level one —
+> governs the rating send, and that `strict_min_version` 112 predates the Firefox versions (140+)
+> that implement the `browser.permissions` data-collection API. That reasoning is superseded: the
+> key is not permitted in `required` at all, which settles it regardless of the support range.
 
 ⚠️ Verify the spelling against AMO at submission — an unrecognised category value is rejected there,
 not at build time.

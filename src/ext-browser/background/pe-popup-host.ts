@@ -44,7 +44,7 @@ import {
   type PromptEnhancementMpsFirstPopupModelV1,
 } from './pe-engine.js';
 import { recordPeFeedbackEvent, type PeFeedbackKeyStore } from '../adapters/pe-feedback-store.js';
-import { recordSignal } from '../adapters/lifecycle-signals.js';
+import { isActionKind, recordSignal } from '../adapters/lifecycle-signals.js';
 import {
   PE_PANEL_SCHEMA_VERSION,
   isPePanelCommandV1,
@@ -483,7 +483,16 @@ export async function runBrowserPePopup(
         // CLI parity: `prompt-enhancement-popup-host.ts:222` records this same
         // MPS kind rather than only logging it. Buffered locally; nothing is
         // sent until the user consents by rating (§4.2).
-        if (deps.feedbackStore) void recordSignal(deps.feedbackStore, signalKind, Date.now());
+        // `isActionKind` narrows to the kinds THIS extension records. The shared
+        // producer's return type also admits `pe_shown`, which the CLI and the VS
+        // Code extension emit from a popup-shown hook the browser does not have —
+        // so it can never occur here, and recording it would add a seventeenth
+        // event to a store disclosure that promises sixteen. Drop it at the
+        // boundary rather than widen the enum: revisit when the browser gains
+        // that hook AND the disclosure is updated in the same change.
+        if (deps.feedbackStore && isActionKind(signalKind)) {
+          void recordSignal(deps.feedbackStore, signalKind, Date.now());
+        }
       }
       if (offerOutcome === 'send') {
         return {
@@ -599,7 +608,10 @@ export async function runBrowserPePopup(
       // kind is a fixed UI-action enum — no prompt or option text.
       actionSignalSink: (kind, occurredAt) => {
         log.debug('pe_action_signal', { kind, occurredAt });
-        if (deps.feedbackStore) void recordSignal(deps.feedbackStore, kind, occurredAt);
+        // Same narrowing as above — see the comment at the MPS outcome sink.
+        if (deps.feedbackStore && isActionKind(kind)) {
+          void recordSignal(deps.feedbackStore, kind, occurredAt);
+        }
       },
     });
     if (suppressedUneditable) {

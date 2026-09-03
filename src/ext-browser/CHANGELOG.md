@@ -3,6 +3,23 @@
 All notable changes to the browser extension. Versions track the `version` field in
 `manifest.chrome.json` / `manifest.firefox.json`.
 
+## 0.1.54
+
+Housekeeping. Nothing changes in what the extension does or what it sends.
+
+### Changed
+- **The privacy policy has been rewritten** into a clearer, conventionally
+  structured document covering both credential modes, the rating prompt, and what
+  the Nexpath service records for your account. The policy is published at the
+  same address and is linked from both store listings.
+
+### Fixed
+- An internal signal-kind mismatch between the extension and the Nexpath CLI made
+  the type check fail. The extension records the same fixed set of content-free
+  action names as before — the list is unchanged, and one kind the CLI emits from
+  a hook this extension does not have is now filtered out explicitly rather than
+  by accident.
+
 ## 0.1.53
 
 Nexpath token support — run without an OpenAI API key.
