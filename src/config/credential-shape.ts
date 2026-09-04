@@ -35,8 +35,18 @@ export const OPENAI_KEY_REGEX = /^sk-[A-Za-z0-9_-]{20,}$/;
 /** Nexpath token prefix. */
 export const TOKEN_PREFIX = 'npk_';
 
-/** Minimum total length of a Nexpath token: the prefix plus the service's body. */
-export const TOKEN_MIN_LENGTH = 40;
+/**
+ * Minimum total length of a Nexpath token: the prefix plus the service's body.
+ *
+ * ⚠️ 24 = `npk_` + 20, which is **deliberately the browser extension's rule**
+ * (`ext-browser/adapters/llm-credentials.ts`'s `/^npk_[A-Za-z0-9_-]{20,}$/`),
+ * not a stricter one of this surface's own. A CLI that demanded more would
+ * reject a token the browser extension accepts and the service issued — the
+ * same credential working on one surface and failing on another, with the CLI
+ * calling the service's own token malformed. The two surfaces answer to the
+ * issuer, so they must answer identically.
+ */
+export const TOKEN_MIN_LENGTH = 24;
 
 /**
  * Nexpath token shape, BUILT from the two constants above rather than written

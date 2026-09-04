@@ -130,3 +130,53 @@ describe('isUsableLlmCredential — the "can we call at all" question', () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The CLI and the browser extension answer to the SAME issuer, so they must
+// accept the same set of strings. This used to be untrue: the CLI required a
+// longer token than the extension, which meant a token the extension accepted
+// and the service had issued could be refused at `nexpath install` as
+// "malformed" — the credential working on one surface and failing on another,
+// with the stricter surface calling the issuer wrong.
+//
+// ⚠️ The browser file is the reference and is NOT edited to satisfy this: it is
+// imported and read as the source of truth, so the CLI is what moves if the two
+// ever part company again.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('the token rule is identical to the browser extension`s (no drift)', () => {
+  it('accepts and rejects exactly what the extension does', async () => {
+    const { isValidNexpathTokenShape } = await import('../ext-browser/adapters/llm-credentials.js');
+
+    const cases = [
+      '',
+      'npk_',
+      'npk_short',
+      'npk_0123456789abcdefghij',                        // the extension's own minimum
+      'npk_0123456789abcdefghi',                         // one under it
+      'npk_-7zI1d-H_obJzkBkWgzA97lEWGUR_BUvMXFrz2AzgJk', // a full-length issued shape
+      TOKEN_PREFIX + 'a'.repeat(100),
+      TOKEN_PREFIX + 'a'.repeat(20) + '!',               // outside the url-safe class
+      TOKEN_PREFIX + 'a'.repeat(10) + ' ' + 'a'.repeat(20),
+      'sk-abcdefghij1234567890ABCDEFGHIJ',
+      'NPK_0123456789abcdefghij',                        // wrong case in the prefix
+    ];
+
+    for (const value of cases) {
+      expect(isValidNexpathToken(value), `disagreement on ${JSON.stringify(value)}`)
+        .toBe(isValidNexpathTokenShape(value));
+    }
+  });
+
+  it('the minimum body length is the extension`s 20, not a stricter number', () => {
+    expect(TOKEN_MIN_LENGTH - TOKEN_PREFIX.length).toBe(20);
+  });
+
+  it('the check above can actually fail — a stricter rule is caught', () => {
+    // Guards the guard: if the loop only ever compared values both rules agree
+    // on, it would pass no matter what the CLI's cutoff became.
+    const stricter = new RegExp(`^${TOKEN_PREFIX}[A-Za-z0-9_-]{36,}$`);
+    const atExtensionMinimum = 'npk_0123456789abcdefghij';
+    expect(isValidNexpathToken(atExtensionMinimum)).toBe(true);
+    expect(stricter.test(atExtensionMinimum)).toBe(false);
+  });
+});

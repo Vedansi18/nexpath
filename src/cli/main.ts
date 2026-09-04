@@ -17,7 +17,7 @@ import {
 import { runMigrations } from '../store/schema.js';
 import { logAction } from './commands/log.js';
 import { storeDeleteAction, storeEnableAction, storeDisableAction, storePruneAction } from './commands/store.js';
-import { installAction, uninstallAction } from './commands/install.js';
+import { installAction, uninstallAction, NonInteractiveTerminalError } from './commands/install.js';
 import {
   DEFAULT_PLATFORM,
   PLATFORM_VALUES,
@@ -74,10 +74,22 @@ export function createProgram(): Command {
         process.stderr.write('Run `nexpath install --help` for usage details.\n');
         process.exit(1);
       }
-      await installAction(
-        { yes: opts.yes, platform },
-        { dbPath: opts.db ?? DEFAULT_DB_PATH },
-      );
+      try {
+        await installAction(
+          { yes: opts.yes, platform },
+          { dbPath: opts.db ?? DEFAULT_DB_PATH },
+        );
+      } catch (err) {
+        // The one failure that is a usage problem rather than a fault: the
+        // prompts had no terminal to attach to. Printed as the instruction it
+        // is, instead of the raw `uv_tty_init` stack the user got before.
+        // Everything else still propagates untouched.
+        if (err instanceof NonInteractiveTerminalError) {
+          process.stderr.write(`\n${err.message}\n`);
+          process.exit(1);
+        }
+        throw err;
+      }
     });
 
   program

@@ -430,6 +430,57 @@ export function getKeychainName(platform: NodeJS.Platform = process.platform): s
  * picker uses, so the explanatory block can sit beneath the options where a
  * plain `select` would have no room for it.
  */
+/**
+ * `nexpath install` is interactive: every prompt it shows needs a real terminal
+ * to draw on and read keys from. Run with stdin or stdout redirected — a pipe,
+ * a CI step, `< /dev/null` — the prompt library cannot attach to a TTY and dies
+ * with a raw `ERR_TTY_INIT_FAILED: uv_tty_init returned EBADF` and a stack
+ * trace, which says nothing about what the user should do instead.
+ *
+ * ⚠️ This WRAPS the failure rather than predicting it. A pre-flight
+ * `process.stdin.isTTY` check would be the obvious shape, but it would decide
+ * on this code's behalf that a terminal is unusable, and any redirection combo
+ * that happens to work today would start being refused. Nothing that works now
+ * can reach this: it only re-describes a call that already threw.
+ */
+export class NonInteractiveTerminalError extends Error {
+  constructor() {
+    super(
+      [
+        'nexpath install needs an interactive terminal, but stdin or stdout is redirected.',
+        '',
+        'Run it directly in a terminal:',
+        '  nexpath install',
+        '',
+        'For an unattended install, use --yes — it stores a credential already in',
+        'the environment or keychain, and prompts for nothing:',
+        '  nexpath install --yes',
+      ].join('\n'),
+    );
+    this.name = 'NonInteractiveTerminalError';
+  }
+}
+
+/** True for the TTY-attachment failure above, and nothing else. */
+function isTtyInitFailure(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === 'ERR_TTY_INIT_FAILED';
+}
+
+/**
+ * Run an interactive prompt, translating a TTY-attachment failure into an
+ * explanation. Any other error is rethrown untouched — this must never turn a
+ * real bug into a friendly message about terminals.
+ */
+async function withInteractiveTerminal<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isTtyInitFailure(err)) throw new NonInteractiveTerminalError();
+    throw err;
+  }
+}
+
 const defaultCredentialChoicePrompt = async (): Promise<CredentialChoice | null> => {
   const descLines = buildCredentialDescriptionLines();
   const p = new SelectPrompt<{ value: string; label: string }>({
@@ -453,7 +504,7 @@ const defaultCredentialChoicePrompt = async (): Promise<CredentialChoice | null>
       return `${head}${optLines}\n${pc.cyan('│')}\n${descLines.join('\n')}\n${pc.cyan('└')}\n`;
     },
   });
-  const picked = await p.prompt();
+  const picked = await withInteractiveTerminal(() => p.prompt() as Promise<unknown>);
   if (isCancel(picked) || typeof picked !== 'string') return null;
   return picked as CredentialChoice;
 };
@@ -485,17 +536,17 @@ export interface DefaultInstallPromptDeps {
  */
 export function buildDefaultInstallPrompts(deps: DefaultInstallPromptDeps = {}): InstallPrompts {
   const envConfirmFn = deps.envConfirmFn ?? (async () => {
-    const answer = await confirm({
+    const answer = await withInteractiveTerminal(() => confirm({
       message:      'Detected existing API key in environment. Use it?',
       initialValue: true,
-    });
+    }));
     return isCancel(answer) ? null : answer === true;
   });
 
   const choiceFn = deps.choiceFn ?? defaultCredentialChoicePrompt;
 
   const credentialPasswordFn = deps.credentialPasswordFn ?? (async (message, validate) => {
-    const input = await password({ message, validate });
+    const input = await withInteractiveTerminal(() => password({ message, validate }));
     return isCancel(input) ? null : String(input);
   });
 
@@ -574,6 +625,15 @@ export async function installAction(
     dbPath = ':memory:',
     skipClipboardCheck = false,
     platformForKeychain = process.platform,
+    // ⚠️ Seams over the two credential-store functions, defaulting to the real
+    // ones so production is unchanged. They exist because `--yes` now READS the
+    // configured credential and can WRITE one, and every other test in this file
+    // reaches the credential step only through a `promptFn` stub that answers
+    // 'skip'. Without these, a `--yes` test would touch the developer's own
+    // keychain: reading it makes the result depend on whose machine runs the
+    // suite, and writing to it is not something a test may ever do.
+    keySourceFn = getKeySource,
+    storeApiKeyFn = storeApiKey,
   }: {
     isWin?:               boolean;
     paths?:               AgentPaths;
@@ -585,6 +645,8 @@ export async function installAction(
     dbPath?:              string;
     skipClipboardCheck?:  boolean;
     platformForKeychain?: NodeJS.Platform;
+    keySourceFn?:         typeof getKeySource;
+    storeApiKeyFn?:       typeof storeApiKey;
   } = {},
 ): Promise<InstallSummary | null> {
   const platform = opts.platform ?? DEFAULT_PLATFORM;
@@ -616,7 +678,7 @@ export async function installAction(
     if (!opts.yes) {
       const envKey       = process.env.OPENAI_API_KEY ?? '';
       const hasEnvKey    = envKey !== '' && isValidApiKey(envKey);
-      const storedSource = await getKeySource(process.cwd());
+      const storedSource = await keySourceFn(process.cwd());
       const hasStoredKey = !hasEnvKey && (storedSource === 'keychain' || storedSource === 'file');
       // `getKeySource` reports the token as its own layer, which is neither
       // 'keychain' nor 'file' — so before this a returning token user was
@@ -633,7 +695,7 @@ export async function installAction(
         return null;
       }
       if (result.kind === 'new_key') {
-        const stored = await storeApiKey(result.value);
+        const stored = await storeApiKeyFn(result.value);
         apiKeySource = stored.source;
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'nexpath_token') {
@@ -641,7 +703,7 @@ export async function installAction(
         apiKeySource = 'nexpath_token';
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'use_env') {
-        const stored = await storeApiKey(envKey);
+        const stored = await storeApiKeyFn(envKey);
         apiKeySource = stored.source;
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'keep_existing') {
@@ -650,7 +712,43 @@ export async function installAction(
         apiKeySource = 'skipped';
       }
     } else {
-      apiKeySource = 'skipped';
+      // `--yes` means "accept the defaults without prompting", not "pretend no
+      // credential exists". It cannot ASK for one — but it was also refusing to
+      // NOTICE one, hard-coding 'skipped' with a usable key sitting in the shell
+      // or a credential already in the keychain. A non-interactive install then
+      // finished successfully and left the machine with no credential resolved,
+      // which surfaces much later as "the popup stopped being helpful" with
+      // nothing at install time having said so.
+      //
+      // Each branch below is the non-interactive equivalent of the answer the
+      // interactive flow DEFAULTS to, and nothing else:
+      //   · a key in the environment  → the env prompt's own default is Yes, so
+      //     it is stored, exactly as answering Yes would;
+      //   · a credential already stored → "Enter to keep existing", so it is
+      //     kept and NOT overwritten;
+      //   · neither → there is no default to take, so 'skipped' as before.
+      //
+      // ⚠️ Both credential formats are handled identically here. Treating only
+      // the OpenAI key as "configured" is the same class of bug as the composer
+      // gate: a stored token is a working credential, and an install that
+      // reported 'skipped' over one would be reporting the wrong thing.
+      const envKey = process.env.OPENAI_API_KEY ?? '';
+      const keychainName = getKeychainName(platformForKeychain);
+
+      if (envKey !== '' && isValidApiKey(envKey)) {
+        const stored = await storeApiKeyFn(envKey);
+        apiKeySource = stored.source;
+        console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
+      } else {
+        const storedSource = await keySourceFn(process.cwd());
+        // 'nexpath_token' is reported as itself rather than as 'kept': the
+        // summary line renders anything that is not 'nexpath_token' as
+        // "OpenAI key (…)", so a kept token described as 'kept' would be
+        // printed back to the user as the wrong credential entirely.
+        if (storedSource === 'nexpath_token')  apiKeySource = 'nexpath_token';
+        else if (storedSource === 'none')      apiKeySource = 'skipped';
+        else                                   apiKeySource = 'kept';
+      }
     }
 
     // ── Telemetry: OFF by default, NOT prompted at install (NF Plan A) ─────────
