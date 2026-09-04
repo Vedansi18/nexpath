@@ -362,7 +362,11 @@ function formatOptionalTimestamp(value: number | null): string {
 export function registerStatusCommand(program: import('commander').Command): void {
   program
     .command('status')
-    .description('Verify MCP connections across detected agents, prompt store stats, and config summary')
+    // ⚠️ "MCP connections" STAYS. It reads as stale — that section is commented
+    // out in renderStatus — but the removal is temporary and a test pins the
+    // word deliberately, so dropping it would quietly undo that decision. The
+    // credential is added beside it because the output now leads with one.
+    .description('Verify MCP connections across detected agents, which credential is in effect, prompt store stats, and config summary')
     .option('--db <path>', 'Database path', DEFAULT_DB_PATH)
     .action(async (opts: { db: string }) => {
       const result = await runStatus({ dbPath: opts.db });
