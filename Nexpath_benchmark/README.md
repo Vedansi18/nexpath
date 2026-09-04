@@ -2,7 +2,7 @@
 
 **We did not build this benchmark.** [SWE-bench Verified](https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified)
 is a public set of 500 real GitHub bugs from well-known Python projects, checked by human engineers,
-where a fix counts only if the project's **own test suite** says so. We did not hand-pick the 40, either. We could only afford 40 of the 500. A seeded draw chose them — seed 20260902, spread across the dataset's own difficulty labels, frozen in strat40-manifest.json before the first run. Same seed, same 40, every time, so anyone can regenerate the list and check we did not go shopping for easy wins.
+where a fix counts only if the project's **own test suite** says so. We could only afford 40 of the 500. A seeded draw chose them — seed 20260902, spread across the dataset's own difficulty labels, frozen in strat40-manifest.json before the first run. Same seed, same 40, every time, so anyone can regenerate the list and check we did not go shopping for easy wins.
 
 NexPath rewrites your prompt before it reaches your coding agent, and the obvious question is
 whether that helps the agent write working code. So we ran the same agent over those 40 bugs twice
