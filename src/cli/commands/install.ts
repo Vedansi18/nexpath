@@ -458,58 +458,101 @@ const defaultCredentialChoicePrompt = async (): Promise<CredentialChoice | null>
   return picked as CredentialChoice;
 };
 
-const defaultInstallPrompts: InstallPrompts = {
-  credentialChoicePrompt: defaultCredentialChoicePrompt,
+/**
+ * The I/O the default prompt performs, as injectable functions — the same seam
+ * `config.ts` uses for its own password prompt (`passwordFn`), and for the same
+ * reason: the branch logic here is worth testing and clack is not mockable in
+ * this suite.
+ *
+ * `credentialPasswordFn` receives the validate callback rather than a plain
+ * string, so a test can call it and assert the rejection messages instead of
+ * taking the branch's word for them. `null` means the user cancelled.
+ */
+export interface DefaultInstallPromptDeps {
+  envConfirmFn?: () => Promise<boolean | null>;
+  choiceFn?:     () => Promise<CredentialChoice | null>;
+  credentialPasswordFn?: (
+    message: string,
+    validate: (value: string) => string | undefined,
+  ) => Promise<string | null>;
+  log?: (line: string) => void;
+}
 
-  // ⚠️ A method, not an arrow, so `this` resolves to whichever prompts object
-  // the caller passed — which is what makes `credentialChoicePrompt` a real
-  // seam rather than a declared one. `installAction` calls this as
-  // `promptFn.apiKeyPrompt(...)`, so a caller overriding only the choice gets
-  // its override used. Destructuring this off the object would break that.
-  async apiKeyPrompt(ctx) {
-    // R3: the environment key is offered BEFORE the choice, exactly as before —
-    // if a usable key is already in the shell there is nothing to choose.
-    if (ctx.hasEnvKey) {
-      const useEnv = await confirm({
-        message:      'Detected existing API key in environment. Use it?',
-        initialValue: true,
-      });
-      if (isCancel(useEnv)) return { kind: 'cancel' };
-      if (useEnv === true)  return { kind: 'use_env' };
-    }
-
-    const choice = await this.credentialChoicePrompt(ctx);
-    if (choice === null) return { kind: 'cancel' };
-
-    // Each branch keeps the key prompt's own shape: a masked input, "Enter to
-    // keep existing" when one is stored, and the same validate contract.
-    const hasStored = choice === 'openai_key' ? ctx.hasStoredKey : ctx.hasStoredToken;
-    const input = await password({
-      message:  credentialInputMessage(choice, ctx.keychainName, hasStored),
-      validate: (value) => {
-        if (hasStored && value === '') return undefined;
-        if (choice === 'openai_key') {
-          if (!isValidApiKey(value)) return 'Invalid OpenAI API key format (expected sk-...)';
-        } else if (!isValidNexpathToken(value)) {
-          return 'Invalid Nexpath token format (expected npk_...)';
-        }
-        return undefined;
-      },
+/**
+ * Build the default prompts. Production calls this with no arguments and gets
+ * the real clack widgets; tests pass stubs. Exported for that reason only —
+ * `installAction` still takes the whole `InstallPrompts` object as its seam.
+ */
+export function buildDefaultInstallPrompts(deps: DefaultInstallPromptDeps = {}): InstallPrompts {
+  const envConfirmFn = deps.envConfirmFn ?? (async () => {
+    const answer = await confirm({
+      message:      'Detected existing API key in environment. Use it?',
+      initialValue: true,
     });
-    if (isCancel(input)) return { kind: 'cancel' };
-    if (input === '' && hasStored) return { kind: 'keep_existing' };
-    if (input === '') return { kind: 'skip' };
+    return isCancel(answer) ? null : answer === true;
+  });
 
-    if (choice === 'nexpath_token') {
-      // R8: the resolver's order is not something the install can override, so
-      // saying it once here is the difference between a surprising outcome and
-      // an expected one.
-      if (ctx.hasStoredKey) console.log(CREDENTIAL_KEY_WINS_NOTICE);
-      return { kind: 'nexpath_token', value: String(input) };
-    }
-    return { kind: 'new_key', value: String(input) };
-  },
-};
+  const choiceFn = deps.choiceFn ?? defaultCredentialChoicePrompt;
+
+  const credentialPasswordFn = deps.credentialPasswordFn ?? (async (message, validate) => {
+    const input = await password({ message, validate });
+    return isCancel(input) ? null : String(input);
+  });
+
+  const log = deps.log ?? ((line: string) => { console.log(line); });
+
+  return {
+    credentialChoicePrompt: choiceFn,
+
+    // ⚠️ A method, not an arrow, so `this` resolves to whichever prompts object
+    // the caller passed — which is what makes `credentialChoicePrompt` a real
+    // seam rather than a declared one. `installAction` calls this as
+    // `promptFn.apiKeyPrompt(...)`, so a caller overriding only the choice gets
+    // its override used. Destructuring this off the object would break that.
+    async apiKeyPrompt(ctx) {
+      // R3: the environment key is offered BEFORE the choice, exactly as before
+      // — if a usable key is already in the shell there is nothing to choose.
+      if (ctx.hasEnvKey) {
+        const useEnv = await envConfirmFn();
+        if (useEnv === null) return { kind: 'cancel' };
+        if (useEnv === true) return { kind: 'use_env' };
+      }
+
+      const choice = await this.credentialChoicePrompt(ctx);
+      if (choice === null) return { kind: 'cancel' };
+
+      // Each branch keeps the key prompt's own shape: a masked input, "Enter to
+      // keep existing" when one is stored, and the same validate contract.
+      const hasStored = choice === 'openai_key' ? ctx.hasStoredKey : ctx.hasStoredToken;
+      const input = await credentialPasswordFn(
+        credentialInputMessage(choice, ctx.keychainName, hasStored),
+        (value) => {
+          if (hasStored && value === '') return undefined;
+          if (choice === 'openai_key') {
+            if (!isValidApiKey(value)) return 'Invalid OpenAI API key format (expected sk-...)';
+          } else if (!isValidNexpathToken(value)) {
+            return 'Invalid Nexpath token format (expected npk_...)';
+          }
+          return undefined;
+        },
+      );
+      if (input === null) return { kind: 'cancel' };
+      if (input === '' && hasStored) return { kind: 'keep_existing' };
+      if (input === '') return { kind: 'skip' };
+
+      if (choice === 'nexpath_token') {
+        // R8: the resolver's order is not something the install can override, so
+        // saying it once here is the difference between a surprising outcome and
+        // an expected one.
+        if (ctx.hasStoredKey) log(CREDENTIAL_KEY_WINS_NOTICE);
+        return { kind: 'nexpath_token', value: input };
+      }
+      return { kind: 'new_key', value: input };
+    },
+  };
+}
+
+const defaultInstallPrompts: InstallPrompts = buildDefaultInstallPrompts();
 
 export interface InstallSummary {
   apiKey:    { source: 'keychain' | 'file' | 'kept' | 'skipped' | 'nexpath_token' };
