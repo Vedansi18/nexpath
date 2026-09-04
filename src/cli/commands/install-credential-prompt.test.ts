@@ -21,8 +21,8 @@ import {
   CREDENTIAL_OPTIONS,
   CREDENTIAL_PROMPT_TITLE,
   CREDENTIAL_KEY_WINS_NOTICE,
-  CREDENTIAL_DESCRIPTION_LINES,
-  buildCredentialDescriptionLines,
+  CREDENTIAL_FOOTER_LINE,
+  buildCredentialOptionLines,
   credentialInputMessage,
 } from '../shared/credential-description.js';
 
@@ -262,28 +262,80 @@ describe('credential-description — the copy the picker renders', () => {
     expect(CREDENTIAL_OPTIONS).toHaveLength(2);
   });
 
-  it('names both options, gives each a link, and states the precedence rule', () => {
-    const text = CREDENTIAL_DESCRIPTION_LINES.join('\n');
-    expect(text).toContain('https://platform.openai.com/api-keys');
-    expect(text).toContain('https://parseos.tech/nexpath/signup');
-    expect(text).toContain('If both are set, your OpenAI key is always used.');
+  it('every option carries its own detail lines, including a link', () => {
+    for (const option of CREDENTIAL_OPTIONS) {
+      expect(option.detail.length).toBeGreaterThan(0);
+      expect(option.detail.some((line) => line.startsWith('https://'))).toBe(true);
+    }
+    expect(CREDENTIAL_OPTIONS[0].detail.join('\n')).toContain('https://platform.openai.com/api-keys');
+    expect(CREDENTIAL_OPTIONS[1].detail.join('\n')).toContain('https://parseos.tech/nexpath/signup');
+  });
+
+  it('states the precedence rule once, as a footer belonging to neither option', () => {
+    expect(CREDENTIAL_FOOTER_LINE).toBe('If both are set, your OpenAI key is always used.');
+    for (const option of CREDENTIAL_OPTIONS) {
+      expect(option.detail.join('\n')).not.toContain('always used');
+    }
   });
 
   // Colours are injectable so a spawned window can force ANSI regardless of the
-  // parent's detection. Passing identity functions asserts the STRUCTURE — one
-  // framed line per source line, every one starting on the gutter — without
-  // pinning escape codes, which would make the test about picocolors.
-  it('renders one gutter-framed line per source line', () => {
-    const identityColours = new Proxy({}, { get: () => (s: string) => s });
-    const lines = buildCredentialDescriptionLines(
-      identityColours as unknown as Parameters<typeof buildCredentialDescriptionLines>[0],
+  // parent's detection. Passing identity functions asserts the STRUCTURE
+  // without pinning escape codes, which would make the test about picocolors.
+  const rowsFor = (index: number) =>
+    buildCredentialOptionLines(
+      index,
+      new Proxy({}, { get: () => (s: string) => s }) as unknown as Parameters<
+        typeof buildCredentialOptionLines
+      >[1],
     );
-    expect(lines).toHaveLength(CREDENTIAL_DESCRIPTION_LINES.length);
-    for (const line of lines) expect(line.startsWith('│')).toBe(true);
-    // A blank source line becomes a bare bar — the spacer between the two options.
-    expect(lines.filter((l) => l === '│')).toHaveLength(
-      CREDENTIAL_DESCRIPTION_LINES.filter((l) => l === '').length,
-    );
+
+  it('frames every line on the gutter', () => {
+    for (const line of rowsFor(0)) expect(line.startsWith('│')).toBe(true);
+  });
+
+  // The point of the layout: each option's detail sits directly under THAT
+  // option, so the reader compares the two where the choice is being made
+  // rather than against a heading repeated further down the screen.
+  it('puts each option’s detail directly beneath it, indented past the bullet', () => {
+    const lines = rowsFor(0).map((l) => l.replace(/^│/, ''));
+
+    const openAiRow = lines.findIndex((l) => l.includes('OpenAI API key'));
+    const tokenRow  = lines.findIndex((l) => l.includes('Nexpath token'));
+    expect(openAiRow).toBeGreaterThanOrEqual(0);
+    expect(tokenRow).toBeGreaterThan(openAiRow);
+
+    // Everything between the two option rows is the first option's detail…
+    const between = lines.slice(openAiRow + 1, tokenRow);
+    expect(between.map((l) => l.trim())).toEqual([...CREDENTIAL_OPTIONS[0].detail]);
+    // …and it is indented further than the option row it belongs to.
+    const indent = (l: string) => l.length - l.trimStart().length;
+    for (const line of between) expect(indent(line)).toBeGreaterThan(indent(lines[openAiRow]));
+
+    // The second option's detail follows it, before the footer.
+    const footerRow = lines.findIndex((l) => l.includes(CREDENTIAL_FOOTER_LINE));
+    expect(footerRow).toBeGreaterThan(tokenRow);
+    expect(
+      lines.slice(tokenRow + 1, footerRow).filter((l) => l.trim() !== '').map((l) => l.trim()),
+    ).toEqual([...CREDENTIAL_OPTIONS[1].detail]);
+  });
+
+  it('marks the cursor row and only that row', () => {
+    const first = rowsFor(0);
+    expect(first.find((l) => l.includes('OpenAI API key'))).toContain('●');
+    expect(first.find((l) => l.includes('Nexpath token'))).toContain('○');
+
+    const second = rowsFor(1);
+    expect(second.find((l) => l.includes('OpenAI API key'))).toContain('○');
+    expect(second.find((l) => l.includes('Nexpath token'))).toContain('●');
+
+    // Moving the cursor changes the bullets and nothing else — the detail the
+    // reader is comparing must not shift or disappear underneath them.
+    const stripBullets = (lines: string[]) => lines.map((l) => l.replace(/[●○]/g, '•'));
+    expect(stripBullets(first)).toEqual(stripBullets(second));
+  });
+
+  it('shows the footer exactly once', () => {
+    expect(rowsFor(0).filter((l) => l.includes(CREDENTIAL_FOOTER_LINE))).toHaveLength(1);
   });
 
   it('credentialInputMessage covers all four states', () => {

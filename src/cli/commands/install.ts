@@ -19,7 +19,7 @@ import {
   CREDENTIAL_OPTIONS,
   CREDENTIAL_PROMPT_TITLE,
   CREDENTIAL_KEY_WINS_NOTICE,
-  buildCredentialDescriptionLines,
+  buildCredentialOptionLines,
   credentialInputMessage,
   type CredentialChoice,
 } from '../shared/credential-description.js';
@@ -482,7 +482,6 @@ async function withInteractiveTerminal<T>(run: () => Promise<T>): Promise<T> {
 }
 
 const defaultCredentialChoicePrompt = async (): Promise<CredentialChoice | null> => {
-  const descLines = buildCredentialDescriptionLines();
   const p = new SelectPrompt<{ value: string; label: string }>({
     options: CREDENTIAL_OPTIONS.map((o) => ({ value: o.value as string, label: o.label })),
     initialValue: CREDENTIAL_OPTIONS[0].value,
@@ -494,14 +493,12 @@ const defaultCredentialChoicePrompt = async (): Promise<CredentialChoice | null>
       if (this.state === 'submit' || this.state === 'cancel') {
         return `${head}${pc.gray('│')}  ${pc.dim(this.options[this.cursor].label)}`;
       }
-      const optLines = this.options
-        .map((o, i) =>
-          i === this.cursor
-            ? `${pc.cyan('│')}  ${pc.green('●')} ${o.label}`
-            : `${pc.cyan('│')}  ${pc.dim('○')} ${pc.dim(o.label)}`,
-        )
-        .join('\n');
-      return `${head}${optLines}\n${pc.cyan('│')}\n${descLines.join('\n')}\n${pc.cyan('└')}\n`;
+      // Each option is drawn with its own detail lines directly beneath it, so
+      // the reader compares the two choices where they are actually choosing
+      // rather than against a repeated heading further down the screen. The
+      // whole block comes from the copy module — the picker no longer lays out
+      // the option rows itself, which is what let the two fall out of step.
+      return `${head}${buildCredentialOptionLines(this.cursor).join('\n')}\n${pc.cyan('└')}\n`;
     },
   });
   const picked = await withInteractiveTerminal(() => p.prompt() as Promise<unknown>);
