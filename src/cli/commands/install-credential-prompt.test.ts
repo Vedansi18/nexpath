@@ -21,7 +21,8 @@ import {
   CREDENTIAL_OPTIONS,
   CREDENTIAL_PROMPT_TITLE,
   CREDENTIAL_KEY_WINS_NOTICE,
-  CREDENTIAL_FOOTER_LINE,
+  CREDENTIAL_TOKEN_HELP_LINES,
+  NEXPATH_SIGNUP_URL,
   buildCredentialOptionLines,
   credentialInputMessage,
 } from '../shared/credential-description.js';
@@ -165,20 +166,41 @@ describe('default install prompt — R3, the environment key is offered first', 
 // ── R4: the token input is the key input, with different words ───────────────
 
 describe('default install prompt — R4, the two inputs have the same shape', () => {
-  it('names the credential and the keychain, and offers "keep existing" only when one is stored', async () => {
+  it('the key input names the keychain, and offers "keep existing" only when one is stored', async () => {
     const cases = [
-      { choice: 'openai_key' as const,    stored: false, expect: `API Key (will be stored in ${KEYCHAIN}):` },
-      { choice: 'openai_key' as const,    stored: true,  expect: `API Key (Enter to keep existing key stored in ${KEYCHAIN}):` },
-      { choice: 'nexpath_token' as const, stored: false, expect: `Nexpath Token (will be stored in ${KEYCHAIN}):` },
-      { choice: 'nexpath_token' as const, stored: true,  expect: `Nexpath Token (Enter to keep existing token stored in ${KEYCHAIN}):` },
+      { stored: false, expect: `API Key (will be stored in ${KEYCHAIN}):` },
+      { stored: true,  expect: `API Key (Enter to keep existing key stored in ${KEYCHAIN}):` },
     ];
     for (const c of cases) {
-      const h = harness({ choiceFn: async () => c.choice, answer: '' });
-      await h.prompts.apiKeyPrompt(ctx(
-        c.choice === 'openai_key' ? { hasStoredKey: c.stored } : { hasStoredToken: c.stored },
-      ));
+      const h = harness({ choiceFn: async () => 'openai_key', answer: '' });
+      await h.prompts.apiKeyPrompt(ctx({ hasStoredKey: c.stored }));
       expect(h.message()).toBe(c.expect);
     }
+  });
+
+  // The token field is deliberately bare. It used to carry the key half's
+  // parenthetical, which put a long aside about a keystroke in front of a field
+  // where most people are pasting something for the first time.
+  it('the token input is just the field, stored or not', async () => {
+    for (const stored of [false, true]) {
+      const h = harness({ choiceFn: async () => 'nexpath_token', answer: '' });
+      await h.prompts.apiKeyPrompt(ctx({ hasStoredToken: stored }));
+      expect(h.message()).toBe('Nexpath Token:');
+    }
+  });
+
+  it('tells the token user where to get one, before asking for it', async () => {
+    const h = harness({ choiceFn: async () => 'nexpath_token', answer: TOKEN });
+    await h.prompts.apiKeyPrompt(ctx());
+    const shown = h.logged.join('\n');
+    expect(shown).toContain(NEXPATH_SIGNUP_URL);
+    for (const line of CREDENTIAL_TOKEN_HELP_LINES) expect(shown).toContain(line);
+  });
+
+  it('does not show that help when the OpenAI key was chosen', async () => {
+    const h = harness({ choiceFn: async () => 'openai_key', answer: KEY });
+    await h.prompts.apiKeyPrompt(ctx());
+    expect(h.logged.join('\n')).not.toContain(NEXPATH_SIGNUP_URL);
   });
 
   it('the OpenAI branch rejects anything that is not an OpenAI key', async () => {
@@ -221,10 +243,13 @@ describe('default install prompt — R8, the key-wins notice', () => {
     expect(h.logged).toContain(CREDENTIAL_KEY_WINS_NOTICE);
   });
 
+  // ⚠️ Asserts the notice's ABSENCE, not an empty log: the token branch also
+  // prints where to get a token, so "nothing was logged" would now be a test
+  // that fails for the wrong reason.
   it('is NOT printed when no key is stored', async () => {
     const h = harness({ choiceFn: async () => 'nexpath_token', answer: TOKEN });
     await h.prompts.apiKeyPrompt(ctx());
-    expect(h.logged).toEqual([]);
+    expect(h.logged).not.toContain(CREDENTIAL_KEY_WINS_NOTICE);
   });
 
   it('is NOT printed when the OpenAI key itself is the choice', async () => {
@@ -271,10 +296,10 @@ describe('credential-description — the copy the picker renders', () => {
     expect(CREDENTIAL_OPTIONS[1].detail.join('\n')).toContain('https://parseos.tech/nexpath/signup');
   });
 
-  it('states the precedence rule once, as a footer belonging to neither option', () => {
-    expect(CREDENTIAL_FOOTER_LINE).toBe('If both are set, your OpenAI key is always used.');
+  it('no option`s detail talks about precedence — that is not a chooser`s question', () => {
     for (const option of CREDENTIAL_OPTIONS) {
       expect(option.detail.join('\n')).not.toContain('always used');
+      expect(option.detail.join('\n')).not.toContain('If both are set');
     }
   });
 
@@ -311,11 +336,9 @@ describe('credential-description — the copy the picker renders', () => {
     const indent = (l: string) => l.length - l.trimStart().length;
     for (const line of between) expect(indent(line)).toBeGreaterThan(indent(lines[openAiRow]));
 
-    // The second option's detail follows it, before the footer.
-    const footerRow = lines.findIndex((l) => l.includes(CREDENTIAL_FOOTER_LINE));
-    expect(footerRow).toBeGreaterThan(tokenRow);
+    // The second option's detail follows it, and the block ends there.
     expect(
-      lines.slice(tokenRow + 1, footerRow).filter((l) => l.trim() !== '').map((l) => l.trim()),
+      lines.slice(tokenRow + 1).filter((l) => l.trim() !== '').map((l) => l.trim()),
     ).toEqual([...CREDENTIAL_OPTIONS[1].detail]);
   });
 
@@ -334,15 +357,46 @@ describe('credential-description — the copy the picker renders', () => {
     expect(stripBullets(first)).toEqual(stripBullets(second));
   });
 
-  it('shows the footer exactly once', () => {
-    expect(rowsFor(0).filter((l) => l.includes(CREDENTIAL_FOOTER_LINE))).toHaveLength(1);
+  // The picker used to close with "If both are set, your OpenAI key is always
+  // used" — true, but it answers a question nobody has while choosing ONE
+  // credential. The rule is still stated where it changes what to expect:
+  // CREDENTIAL_KEY_WINS_NOTICE, shown only when the token is picked over a
+  // stored key.
+  it('says nothing about precedence — that belongs where it applies', () => {
+    const text = rowsFor(0).join('\n');
+    expect(text).not.toContain('always used');
+    expect(text).not.toContain('If both are set');
+    expect(CREDENTIAL_KEY_WINS_NOTICE).toContain('will be used instead of this token');
+  });
+
+  it('the block is exactly the two options and their detail — nothing else', () => {
+    const body = rowsFor(0).map((l) => l.replace(/^│/, '').trim()).filter((l) => l !== '');
+    expect(body).toEqual([
+      `● ${CREDENTIAL_OPTIONS[0].label}`,
+      ...CREDENTIAL_OPTIONS[0].detail,
+      `○ ${CREDENTIAL_OPTIONS[1].label}`,
+      ...CREDENTIAL_OPTIONS[1].detail,
+    ]);
   });
 
   it('credentialInputMessage covers all four states', () => {
     expect(credentialInputMessage('openai_key', 'X', false)).toBe('API Key (will be stored in X):');
     expect(credentialInputMessage('openai_key', 'X', true)).toBe('API Key (Enter to keep existing key stored in X):');
-    expect(credentialInputMessage('nexpath_token', 'X', false)).toBe('Nexpath Token (will be stored in X):');
-    expect(credentialInputMessage('nexpath_token', 'X', true)).toBe('Nexpath Token (Enter to keep existing token stored in X):');
+    // The token half ignores both arguments by design.
+    expect(credentialInputMessage('nexpath_token', 'X', false)).toBe('Nexpath Token:');
+    expect(credentialInputMessage('nexpath_token', 'X', true)).toBe('Nexpath Token:');
+  });
+
+  it('the token help is a paragraph, not numbered steps, and names the signup URL', () => {
+    const text = CREDENTIAL_TOKEN_HELP_LINES.join(' ');
+    expect(text).toContain(NEXPATH_SIGNUP_URL);
+    expect(text.toLowerCase()).toContain('sign up');
+    expect(text).toContain('paste it');
+    // No step numbering, and every line short enough for a narrow terminal.
+    for (const line of CREDENTIAL_TOKEN_HELP_LINES) {
+      expect(line).not.toMatch(/^\s*(\d+[.)]|[-*•])\s/);
+      expect(line.length).toBeLessThanOrEqual(78);
+    }
   });
 
   it('the title says what the question is', () => {

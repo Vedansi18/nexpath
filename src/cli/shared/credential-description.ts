@@ -46,17 +46,18 @@ export type CredentialChoice = (typeof CREDENTIAL_OPTIONS)[number]['value'];
 export const CREDENTIAL_PROMPT_TITLE = 'Choose how Nexpath runs';
 
 /**
- * Closing line, shown once beneath both options. It belongs to neither of them:
- * it answers the question a reader has the moment they see two choices — what
- * happens if I end up with both — and it is the resolver's fixed order, not a
- * preference the install can offer.
- */
-export const CREDENTIAL_FOOTER_LINE = 'If both are set, your OpenAI key is always used.';
-
-/**
- * The whole choice block: every option, its detail lines indented beneath it,
- * and the footer. One function so the picker cannot render the options and the
- * copy out of step.
+ * The whole choice block: every option with its detail lines indented beneath
+ * it. One function so the picker cannot render the options and the copy out of
+ * step.
+ *
+ * ⚠️ There is deliberately no closing line about precedence here. It used to
+ * say "If both are set, your OpenAI key is always used" — true, and still true,
+ * but it answers a question almost nobody has at this point: the reader is
+ * picking ONE credential, and being told what happens when they have two is
+ * noise in front of a decision. The rule still gets stated where it actually
+ * applies — {@link CREDENTIAL_KEY_WINS_NOTICE}, shown only when someone chooses
+ * the token while a key is already stored, which is the one moment it changes
+ * what they should expect.
  *
  * `selectedIndex` marks the row the cursor is on — filled bullet and a bright
  * label, against dimmed bullets and labels for the rest. Detail lines stay gray
@@ -86,22 +87,51 @@ export function buildCredentialOptionLines(
     for (const line of option.detail) lines.push(`${bar}     ${colors.gray(line)}`);
   });
 
-  lines.push(bar);
-  lines.push(`${bar}  ${colors.gray(CREDENTIAL_FOOTER_LINE)}`);
   return lines;
 }
 
-/** Prompt message for the credential's own input, matching the key prompt's shape. */
+/** Where a Nexpath token comes from. Named once so the copy cannot drift. */
+export const NEXPATH_SIGNUP_URL = 'https://parseos.tech/nexpath/signup';
+
+/**
+ * Shown just above the token input. Someone who picks the token has, by
+ * definition, not got one yet — so the prompt has to say where it comes from,
+ * or they are staring at a masked field with nowhere to go.
+ *
+ * ⚠️ Written as a short paragraph, not numbered steps: it is three ordinary
+ * actions on one page, and numbering them makes a two-minute errand look like a
+ * procedure. Wrapped by hand so it reads the same in a narrow terminal, where
+ * one long line would fold at an arbitrary point.
+ */
+export const CREDENTIAL_TOKEN_HELP_LINES = [
+  'Sign up here — it is free and takes a minute:',
+  `  ${NEXPATH_SIGNUP_URL}`,
+  'Your token is shown on your account page once you are in. Copy it',
+  'from there and paste it below.',
+] as const;
+
+/**
+ * Prompt message for the credential's own input.
+ *
+ * ⚠️ The token half is deliberately bare. It used to carry the key half's
+ * parenthetical — "(Enter to keep existing token stored in Credential Manager)"
+ * — which is a long aside about a keystroke, in front of a field where most
+ * people are pasting something for the first time. The token's own explanation
+ * is {@link CREDENTIAL_TOKEN_HELP_LINES}, printed above the field, so the field
+ * itself stays a field.
+ *
+ * The OpenAI key half is untouched: it is the flow every existing install
+ * already knows, and this milestone does not change it.
+ */
 export function credentialInputMessage(
   choice: CredentialChoice,
   keychainName: string,
   hasStored: boolean,
 ): string {
-  const noun = choice === 'openai_key' ? 'API Key' : 'Nexpath Token';
-  const kept = choice === 'openai_key' ? 'key' : 'token';
+  if (choice === 'nexpath_token') return 'Nexpath Token:';
   return hasStored
-    ? `${noun} (Enter to keep existing ${kept} stored in ${keychainName}):`
-    : `${noun} (will be stored in ${keychainName}):`;
+    ? `API Key (Enter to keep existing key stored in ${keychainName}):`
+    : `API Key (will be stored in ${keychainName}):`;
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   CREDENTIAL_OPTIONS,
   CREDENTIAL_PROMPT_TITLE,
   CREDENTIAL_KEY_WINS_NOTICE,
+  CREDENTIAL_TOKEN_HELP_LINES,
   buildCredentialOptionLines,
   credentialInputMessage,
   type CredentialChoice,
@@ -569,9 +570,19 @@ export function buildDefaultInstallPrompts(deps: DefaultInstallPromptDeps = {}):
       const choice = await this.credentialChoicePrompt(ctx);
       if (choice === null) return { kind: 'cancel' };
 
-      // Each branch keeps the key prompt's own shape: a masked input, "Enter to
-      // keep existing" when one is stored, and the same validate contract.
+      // Each branch keeps the key prompt's own shape: a masked input and the
+      // same validate contract.
       const hasStored = choice === 'openai_key' ? ctx.hasStoredKey : ctx.hasStoredToken;
+
+      // Where the token comes from, said before the field rather than after it.
+      // The key half needs no equivalent — anyone choosing it already has an
+      // OpenAI account, and its own link is on the option they just picked.
+      if (choice === 'nexpath_token') {
+        log('');
+        for (const line of CREDENTIAL_TOKEN_HELP_LINES) log(line);
+        log('');
+      }
+
       const input = await credentialPasswordFn(
         credentialInputMessage(choice, ctx.keychainName, hasStored),
         (value) => {
