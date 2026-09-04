@@ -186,7 +186,7 @@ describe('default install prompt — R4, the two inputs have the same shape', ()
     for (const stored of [false, true]) {
       const h = harness({ choiceFn: async () => 'nexpath_token', answer: '' });
       await h.prompts.apiKeyPrompt(ctx({ hasStoredToken: stored }));
-      expect(h.message()).toBe('Nexpath Token:');
+      expect(h.message()).toBe('Paste token here:');
     }
   });
 
@@ -398,8 +398,8 @@ describe('credential-description — the copy the picker renders', () => {
     expect(credentialInputMessage('openai_key', 'X', false)).toBe('API Key (will be stored in X):');
     expect(credentialInputMessage('openai_key', 'X', true)).toBe('API Key (Enter to keep existing key stored in X):');
     // The token half ignores both arguments by design.
-    expect(credentialInputMessage('nexpath_token', 'X', false)).toBe('Nexpath Token:');
-    expect(credentialInputMessage('nexpath_token', 'X', true)).toBe('Nexpath Token:');
+    expect(credentialInputMessage('nexpath_token', 'X', false)).toBe('Paste token here:');
+    expect(credentialInputMessage('nexpath_token', 'X', true)).toBe('Paste token here:');
   });
 
   it('the framed help opens and closes on a bare gutter line', () => {

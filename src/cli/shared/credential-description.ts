@@ -104,7 +104,7 @@ export const NEXPATH_SIGNUP_URL = 'https://parseos.tech/nexpath/signup';
  * one long line would fold at an arbitrary point.
  */
 export const CREDENTIAL_TOKEN_HELP_LINES = [
-  'Sign up here — it is free and takes a minute:',
+  'Sign up here — it is free:',
   `  ${NEXPATH_SIGNUP_URL}`,
   'Your token is shown on your account page once you are',
   'in. Copy it from there and paste it below.',
@@ -150,7 +150,7 @@ export function credentialInputMessage(
   keychainName: string,
   hasStored: boolean,
 ): string {
-  if (choice === 'nexpath_token') return 'Nexpath Token:';
+  if (choice === 'nexpath_token') return 'Paste token here:';
   return hasStored
     ? `API Key (Enter to keep existing key stored in ${keychainName}):`
     : `API Key (will be stored in ${keychainName}):`;
