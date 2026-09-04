@@ -295,6 +295,21 @@ describe('removeApiKey', () => {
     await removeApiKey({ fallbackPath });
     expect(existsSync(fallbackPath)).toBe(false);
   });
+
+  // Sharing the file must not weaken the guarantee this command makes. A file
+  // that is not a JSON object holds nothing either store can read, but it may
+  // still carry the key as raw text — and reporting a removal that did not
+  // happen is worse than removing a file no store can use.
+  it.each([
+    ['unparseable text', `openai_api_key = ${VALID_KEY}`],
+    ['a JSON array',     '[1,2,3]'],
+    ['a JSON string',    JSON.stringify(`openai_api_key = ${VALID_KEY}`)],
+  ])('removes a fallback file that is %s', async (_label, contents) => {
+    writeFileSync(fallbackPath, contents, { mode: 0o600 });
+    vi.mocked(keychain.deletePassword).mockResolvedValue(undefined);
+    await removeApiKey({ fallbackPath });
+    expect(existsSync(fallbackPath)).toBe(false);
+  });
 });
 
 // ── The shared fallback file: neither credential may destroy the other ────────

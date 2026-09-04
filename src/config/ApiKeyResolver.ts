@@ -109,10 +109,23 @@ export async function removeApiKey(opts: ResolveOptions = {}): Promise<void> {
     // key (NexpathTokenStore's own field), so remove only our own key rather
     // than the whole file. Unlinking it took the token with it.
     const raw = await fs.readFile(fallbackPath, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if ('openai_api_key' in parsed) {
-      delete parsed.openai_api_key;
-      await fs.writeFile(fallbackPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
+
+    // ⚠️ Not a JSON object: no store can read a credential out of it, but it may
+    // still hold the key as raw text — and this function must never report a
+    // removal it did not perform. Remove the file, as it did before it learned
+    // to share one.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      await fs.unlink(fallbackPath);
+      return;
+    }
+
+    const fields = parsed as Record<string, unknown>;
+    if ('openai_api_key' in fields) {
+      delete fields.openai_api_key;
+      await fs.writeFile(fallbackPath, JSON.stringify(fields, null, 2), { mode: 0o600 });
     }
   } catch {
     /* no fallback file, or unreadable — nothing to remove */
