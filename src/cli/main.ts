@@ -56,7 +56,7 @@ export function createProgram(): Command {
 
   program
     .command('install')
-    .description('Interactive 3-step setup: OpenAI API key → telemetry consent → agent registration')
+    .description('Interactive setup: credential (OpenAI API key or Nexpath token) → agent registration')
     .option('-y, --yes', 'Non-interactive mode: skip the API key and telemetry prompts and auto-confirm agent registration')
     .option('--db <path>', 'Path to the SQLite database file')
     .option(

@@ -16,12 +16,25 @@ import {
 } from '../shared/config-setters.js';
 import { ROLE_OPTIONS, buildRoleDescriptionLines } from '../shared/role-description.js';
 import {
+  CREDENTIAL_OPTIONS,
+  CREDENTIAL_PROMPT_TITLE,
+  CREDENTIAL_KEY_WINS_NOTICE,
+  buildCredentialDescriptionLines,
+  credentialInputMessage,
+  type CredentialChoice,
+} from '../shared/credential-description.js';
+import {
   storeApiKey,
   removeApiKey,
   isValidApiKey,
   getKeySource,
   type KeySource,
 } from '../../config/ApiKeyResolver.js';
+import {
+  storeNexpathToken,
+  removeNexpathToken,
+  isValidNexpathToken,
+} from '../../config/NexpathTokenStore.js';
 
 // Side-effect import: registers all coding-agent adapters with the in-process
 // registry. Must precede any getAdapter() / detectAll() call in installAction below.
@@ -377,6 +390,8 @@ function readInstallRole(db: import('sql.js').Database): string {
 export type ApiKeyPromptContext = {
   hasEnvKey:    boolean;
   hasStoredKey: boolean;
+  /** A Nexpath token is already stored — the token half of `hasStoredKey`. */
+  hasStoredToken: boolean;
   keychainName: string;
 };
 
@@ -384,11 +399,21 @@ export type ApiKeyPromptResult =
   | { kind: 'use_env' }
   | { kind: 'keep_existing' }
   | { kind: 'new_key'; value: string }
+  // The second credential. There is deliberately no new "skip" variant beside
+  // it: one credential was required before and one still is; the choice is
+  // which, not whether.
+  | { kind: 'nexpath_token'; value: string }
   | { kind: 'skip' }
   | { kind: 'cancel' };
 
 export interface InstallPrompts {
   apiKeyPrompt: (ctx: ApiKeyPromptContext) => Promise<ApiKeyPromptResult>;
+  /**
+   * Which credential the user wants. Separated from the input itself so a test
+   * can drive the branch without reimplementing the prompt, exactly as
+   * `apiKeyPrompt` is injected today. Returning `null` means cancelled.
+   */
+  credentialChoicePrompt: (ctx: ApiKeyPromptContext) => Promise<CredentialChoice | null>;
 }
 
 export function getKeychainName(platform: NodeJS.Platform = process.platform): string {
@@ -400,19 +425,50 @@ export function getKeychainName(platform: NodeJS.Platform = process.platform): s
   }
 }
 
-const defaultInstallPrompts: InstallPrompts = {
-  apiKeyPrompt: async (ctx) => {
-    note(
-      [
-        'Nexpath needs an OpenAI API key to generate advisories.',
-        'Enter it once here — it will be stored securely and used',
-        'for all your projects until you run `nexpath uninstall`.',
-        '',
-        'Get a key: https://platform.openai.com/api-keys',
-      ].join('\n'),
-      'Step 1 of 2 — OpenAI API Key (required)',
-    );
+/**
+ * The credential picker. Rendered with the same custom `SelectPrompt` the role
+ * picker uses, so the explanatory block can sit beneath the options where a
+ * plain `select` would have no room for it.
+ */
+const defaultCredentialChoicePrompt = async (): Promise<CredentialChoice | null> => {
+  const descLines = buildCredentialDescriptionLines();
+  const p = new SelectPrompt<{ value: string; label: string }>({
+    options: CREDENTIAL_OPTIONS.map((o) => ({ value: o.value as string, label: o.label })),
+    initialValue: CREDENTIAL_OPTIONS[0].value,
+    render() {
+      const sym = this.state === 'submit' ? pc.green('◇')
+                : this.state === 'cancel' ? pc.red('■')
+                : pc.cyan('◆');
+      const head = `${pc.gray('│')}\n${sym}  ${pc.bold(CREDENTIAL_PROMPT_TITLE)}\n`;
+      if (this.state === 'submit' || this.state === 'cancel') {
+        return `${head}${pc.gray('│')}  ${pc.dim(this.options[this.cursor].label)}`;
+      }
+      const optLines = this.options
+        .map((o, i) =>
+          i === this.cursor
+            ? `${pc.cyan('│')}  ${pc.green('●')} ${o.label}`
+            : `${pc.cyan('│')}  ${pc.dim('○')} ${pc.dim(o.label)}`,
+        )
+        .join('\n');
+      return `${head}${optLines}\n${pc.cyan('│')}\n${descLines.join('\n')}\n${pc.cyan('└')}\n`;
+    },
+  });
+  const picked = await p.prompt();
+  if (isCancel(picked) || typeof picked !== 'string') return null;
+  return picked as CredentialChoice;
+};
 
+const defaultInstallPrompts: InstallPrompts = {
+  credentialChoicePrompt: defaultCredentialChoicePrompt,
+
+  // ⚠️ A method, not an arrow, so `this` resolves to whichever prompts object
+  // the caller passed — which is what makes `credentialChoicePrompt` a real
+  // seam rather than a declared one. `installAction` calls this as
+  // `promptFn.apiKeyPrompt(...)`, so a caller overriding only the choice gets
+  // its override used. Destructuring this off the object would break that.
+  async apiKeyPrompt(ctx) {
+    // R3: the environment key is offered BEFORE the choice, exactly as before —
+    // if a usable key is already in the shell there is nothing to choose.
     if (ctx.hasEnvKey) {
       const useEnv = await confirm({
         message:      'Detected existing API key in environment. Use it?',
@@ -421,26 +477,42 @@ const defaultInstallPrompts: InstallPrompts = {
       if (isCancel(useEnv)) return { kind: 'cancel' };
       if (useEnv === true)  return { kind: 'use_env' };
     }
-    const promptMsg = ctx.hasStoredKey
-      ? `API Key (Enter to keep existing key stored in ${ctx.keychainName}):`
-      : `API Key (will be stored in ${ctx.keychainName}):`;
+
+    const choice = await this.credentialChoicePrompt(ctx);
+    if (choice === null) return { kind: 'cancel' };
+
+    // Each branch keeps the key prompt's own shape: a masked input, "Enter to
+    // keep existing" when one is stored, and the same validate contract.
+    const hasStored = choice === 'openai_key' ? ctx.hasStoredKey : ctx.hasStoredToken;
     const input = await password({
-      message:  promptMsg,
+      message:  credentialInputMessage(choice, ctx.keychainName, hasStored),
       validate: (value) => {
-        if (ctx.hasStoredKey && value === '') return undefined;
-        if (!isValidApiKey(value)) return 'Invalid OpenAI API key format (expected sk-...)';
+        if (hasStored && value === '') return undefined;
+        if (choice === 'openai_key') {
+          if (!isValidApiKey(value)) return 'Invalid OpenAI API key format (expected sk-...)';
+        } else if (!isValidNexpathToken(value)) {
+          return 'Invalid Nexpath token format (expected npk_...)';
+        }
         return undefined;
       },
     });
     if (isCancel(input)) return { kind: 'cancel' };
-    if (input === '' && ctx.hasStoredKey) return { kind: 'keep_existing' };
+    if (input === '' && hasStored) return { kind: 'keep_existing' };
     if (input === '') return { kind: 'skip' };
+
+    if (choice === 'nexpath_token') {
+      // R8: the resolver's order is not something the install can override, so
+      // saying it once here is the difference between a surprising outcome and
+      // an expected one.
+      if (ctx.hasStoredKey) console.log(CREDENTIAL_KEY_WINS_NOTICE);
+      return { kind: 'nexpath_token', value: String(input) };
+    }
     return { kind: 'new_key', value: String(input) };
   },
 };
 
 export interface InstallSummary {
-  apiKey:    { source: 'keychain' | 'file' | 'kept' | 'skipped' };
+  apiKey:    { source: 'keychain' | 'file' | 'kept' | 'skipped' | 'nexpath_token' };
   telemetry: { enabled: boolean };
   agents:    { registered: string[]; failed: string[] };
   extras:    { clipboardInstalled: boolean; clipboardTool: string | null };
@@ -503,9 +575,14 @@ export async function installAction(
       const hasEnvKey    = envKey !== '' && isValidApiKey(envKey);
       const storedSource = await getKeySource(process.cwd());
       const hasStoredKey = !hasEnvKey && (storedSource === 'keychain' || storedSource === 'file');
+      // `getKeySource` reports the token as its own layer, which is neither
+      // 'keychain' nor 'file' — so before this a returning token user was
+      // prompted as though nothing at all were configured, and never offered
+      // the "Enter to keep existing" the key half has always had.
+      const hasStoredToken = !hasEnvKey && storedSource === 'nexpath_token';
       const keychainName = getKeychainName(platformForKeychain);
 
-      const result = await promptFn.apiKeyPrompt({ hasEnvKey, hasStoredKey, keychainName });
+      const result = await promptFn.apiKeyPrompt({ hasEnvKey, hasStoredKey, hasStoredToken, keychainName });
 
       if (result.kind === 'cancel') {
         clackCancel('Setup aborted — no changes made');
@@ -515,6 +592,10 @@ export async function installAction(
       if (result.kind === 'new_key') {
         const stored = await storeApiKey(result.value);
         apiKeySource = stored.source;
+        console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
+      } else if (result.kind === 'nexpath_token') {
+        const stored = await storeNexpathToken(result.value);
+        apiKeySource = 'nexpath_token';
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'use_env') {
         const stored = await storeApiKey(envKey);
@@ -745,7 +826,7 @@ export async function installAction(
     ? `Extras:     ${clipboardResult.toolName} installed for clipboard`
     : null;
   const summaryLines = [
-    `API key:    ${apiKeySource}`,
+    `Credential: ${apiKeySource === 'nexpath_token' ? 'Nexpath token' : `OpenAI key (${apiKeySource})`}`,
     `Telemetry:  ${telemetryEnabled ? 'enabled' : 'disabled'}`,
     `Agents:     ${registered.length > 0 ? registered.join(', ') : 'none'}`,
     failed.length > 0 ? `Failed:     ${failed.join(', ')}` : null,
@@ -1041,17 +1122,22 @@ export async function uninstallAction(
   console.log('');
   console.log('MCP registration removed from all agents.');
 
-  // ── API key cleanup ──────────────────────────────────────────────────────
+  // ── Credential cleanup ───────────────────────────────────────────────────
+  // Both are removed on the one confirmation. `removeNexpathToken` existed but
+  // had no caller here, so a token survived `nexpath uninstall` indefinitely —
+  // and `getKeySource` reports only the winning layer, so a machine holding
+  // both would answer 'keychain' and the token would never even be considered.
   const currentSource = await getKeySource(projectRoot);
   if (currentSource === 'none') {
-    console.log('No stored API key found, nothing to remove.');
+    console.log('No stored credential found, nothing to remove.');
   } else {
     const shouldRemove = yes || await apiKeyConfirmFn();
     if (shouldRemove) {
       await removeApiKey();
-      console.log(`✓ API key removed (was in ${currentSource}).`);
+      await removeNexpathToken();
+      console.log(`✓ Credential removed (was in ${currentSource}).`);
     } else {
-      console.log('- API key retained; remove later with `nexpath config remove-api-key`.');
+      console.log('- Credential retained; remove later with `nexpath config remove-api-key` or `remove-token`.');
     }
   }
 
