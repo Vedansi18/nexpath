@@ -57,7 +57,7 @@ export function createProgram(): Command {
   program
     .command('install')
     .description('Interactive setup: credential (OpenAI API key or Nexpath token) → agent registration')
-    .option('-y, --yes', 'Non-interactive mode: skip the API key and telemetry prompts and auto-confirm agent registration')
+    .option('-y, --yes', 'Non-interactive mode: skip the credential prompt and auto-confirm agent registration')
     .option('--db <path>', 'Path to the SQLite database file')
     .option(
       '--for <platform>',
@@ -81,8 +81,8 @@ export function createProgram(): Command {
 
   program
     .command('uninstall')
-    .description('Remove nexpath-serve MCP registration from all agents (and stored API key)')
-    .option('-y, --yes', 'Skip confirmation prompt for API key removal (assumes yes)')
+    .description('Remove nexpath-serve MCP registration from all agents (and the stored credential)')
+    .option('-y, --yes', 'Skip confirmation prompt for credential removal (assumes yes)')
     .action(async (opts: { yes?: boolean }) => {
       const uninstallOpts: { yes?: boolean } = {};
       if (opts.yes) uninstallOpts.yes = true;
