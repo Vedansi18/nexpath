@@ -19,7 +19,7 @@ import {
   CREDENTIAL_OPTIONS,
   CREDENTIAL_PROMPT_TITLE,
   CREDENTIAL_KEY_WINS_NOTICE,
-  CREDENTIAL_TOKEN_HELP_LINES,
+  buildCredentialTokenHelpLines,
   buildCredentialOptionLines,
   credentialInputMessage,
   type CredentialChoice,
@@ -574,13 +574,13 @@ export function buildDefaultInstallPrompts(deps: DefaultInstallPromptDeps = {}):
       // same validate contract.
       const hasStored = choice === 'openai_key' ? ctx.hasStoredKey : ctx.hasStoredToken;
 
-      // Where the token comes from, said before the field rather than after it.
-      // The key half needs no equivalent — anyone choosing it already has an
-      // OpenAI account, and its own link is on the option they just picked.
+      // Where the token comes from, said between the chosen option and the
+      // field it is about — inside the picker's own frame, so it reads as part
+      // of the question rather than as stray output. The key half needs no
+      // equivalent: anyone choosing it already has an OpenAI account, and its
+      // link is on the option they just picked.
       if (choice === 'nexpath_token') {
-        log('');
-        for (const line of CREDENTIAL_TOKEN_HELP_LINES) log(line);
-        log('');
+        for (const line of buildCredentialTokenHelpLines()) log(line);
       }
 
       const input = await credentialPasswordFn(

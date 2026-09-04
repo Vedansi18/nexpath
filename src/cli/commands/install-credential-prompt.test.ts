@@ -23,6 +23,7 @@ import {
   CREDENTIAL_KEY_WINS_NOTICE,
   CREDENTIAL_TOKEN_HELP_LINES,
   NEXPATH_SIGNUP_URL,
+  buildCredentialTokenHelpLines,
   buildCredentialOptionLines,
   credentialInputMessage,
 } from '../shared/credential-description.js';
@@ -195,6 +196,20 @@ describe('default install prompt — R4, the two inputs have the same shape', ()
     const shown = h.logged.join('\n');
     expect(shown).toContain(NEXPATH_SIGNUP_URL);
     for (const line of CREDENTIAL_TOKEN_HELP_LINES) expect(shown).toContain(line);
+  });
+
+  // It sits between the chosen option and the field it is about, so it has to
+  // be drawn on the picker's own gutter. Printed bare, it breaks the vertical
+  // rule running down the install and reads as output that escaped.
+  it('draws the help on the frame, not as loose output', async () => {
+    const h = harness({ choiceFn: async () => 'nexpath_token', answer: TOKEN });
+    await h.prompts.apiKeyPrompt(ctx());
+    expect(h.logged.length).toBeGreaterThan(0);
+    // Colour codes are stripped first: the gutter is cyan in production, and
+    // whether picocolors is active here depends on the runner's TTY detection,
+    // not on anything this test is about.
+    const bare = (line: string) => line.replace(/\[[0-9;]*m/g, '');
+    for (const line of h.logged) expect(bare(line).startsWith('│')).toBe(true);
   });
 
   it('does not show that help when the OpenAI key was chosen', async () => {
@@ -385,6 +400,19 @@ describe('credential-description — the copy the picker renders', () => {
     // The token half ignores both arguments by design.
     expect(credentialInputMessage('nexpath_token', 'X', false)).toBe('Nexpath Token:');
     expect(credentialInputMessage('nexpath_token', 'X', true)).toBe('Nexpath Token:');
+  });
+
+  it('the framed help opens and closes on a bare gutter line', () => {
+    const lines = buildCredentialTokenHelpLines(
+      new Proxy({}, { get: () => (v: string) => v }) as unknown as Parameters<
+        typeof buildCredentialTokenHelpLines
+      >[0],
+    );
+    expect(lines[0]).toBe('│');
+    expect(lines[lines.length - 1]).toBe('│');
+    expect(lines.length).toBe(CREDENTIAL_TOKEN_HELP_LINES.length + 2);
+    expect(lines.slice(1, -1).map((l) => l.replace(/^│ {2}/, '')))
+      .toEqual([...CREDENTIAL_TOKEN_HELP_LINES]);
   });
 
   it('the token help is a paragraph, not numbered steps, and names the signup URL', () => {

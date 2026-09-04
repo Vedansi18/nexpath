@@ -106,9 +106,31 @@ export const NEXPATH_SIGNUP_URL = 'https://parseos.tech/nexpath/signup';
 export const CREDENTIAL_TOKEN_HELP_LINES = [
   'Sign up here — it is free and takes a minute:',
   `  ${NEXPATH_SIGNUP_URL}`,
-  'Your token is shown on your account page once you are in. Copy it',
-  'from there and paste it below.',
+  'Your token is shown on your account page once you are',
+  'in. Copy it from there and paste it below.',
 ] as const;
+
+/**
+ * The help block as the picker's own frame draws it — gutter-framed, with a
+ * blank gutter line above and below so it sits as one paragraph between the
+ * chosen option and the input field.
+ *
+ * ⚠️ Framed rather than printed bare. These lines land between two clack
+ * widgets — the submitted choice above, the token field below — and an
+ * unframed `console.log` breaks the vertical rule running down the whole
+ * install, leaving the paragraph looking like output that escaped from
+ * somewhere else rather than part of the question being asked.
+ *
+ * ⚠️ Left uncoloured on purpose. The option details in the picker are gray
+ * because they are being skimmed and compared; this is the one thing the user
+ * must actually read and act on before they can continue.
+ */
+export function buildCredentialTokenHelpLines(
+  colors: ReturnType<typeof pc.createColors> = pc,
+): string[] {
+  const bar = colors.cyan('│');
+  return [bar, ...CREDENTIAL_TOKEN_HELP_LINES.map((line) => `${bar}  ${line}`), bar];
+}
 
 /**
  * Prompt message for the credential's own input.
