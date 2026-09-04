@@ -11,6 +11,7 @@ import {
 } from './commands/config.js';
 import {
   configSetTokenAction,
+  configRotateTokenAction,
   configRemoveTokenAction,
 } from './commands/token.js';
 import { runMigrations } from '../store/schema.js';
@@ -186,7 +187,7 @@ export function createProgram(): Command {
 
   configCmd
     .command('show-key-source')
-    .description('Print which layer is supplying the OpenAI API key (env / dotenv / keychain / file / none)')
+    .description('Print which credential is in effect (env / dotenv / keychain / file / nexpath_token / none)')
     .action(async () => {
       await configShowKeySourceAction();
     });
@@ -203,6 +204,13 @@ export function createProgram(): Command {
     .description('Prompt for a Nexpath token and store it securely (keychain → fallback file)')
     .action(async () => {
       await configSetTokenAction();
+    });
+
+  configCmd
+    .command('rotate-token')
+    .description('Replace the stored Nexpath token (errors if no token is currently stored)')
+    .action(async () => {
+      await configRotateTokenAction();
     });
 
   configCmd
