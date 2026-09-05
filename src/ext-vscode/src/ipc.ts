@@ -74,6 +74,12 @@ export interface IpcOptions {
    * Injected in tests.
    */
   recoverSelection?: (cwd: string) => Promise<string | null>;
+  /**
+   * RC70 (F-1): the occurred-at timestamp for `record-signal` (`--at`). The
+   * extension DEFERS content-free signals past the submit-hold window (so the
+   * spawn never races the popup host's store lock) and records the TRUE time.
+   */
+  at?: number;
 }
 
 export class NexpathBinaryNotFoundError extends Error {
@@ -339,12 +345,21 @@ export function spawnRecordSignal(kind: string, opts: IpcOptions = {}): Promise<
       const bin = resolveBinaryPath(opts);
       const args = ['record-signal', '--kind', kind];
       if (opts.dbPath) args.push('--db', opts.dbPath);
+      if (typeof opts.at === 'number' && Number.isFinite(opts.at)) args.push('--at', String(Math.round(opts.at)));
       const spawner = opts.spawnFn ?? spawn;
       const safe = shellSafeSpawnTokens(bin, args);
-      const child = spawner(safe.bin, safe.args, buildSpawnOptions(opts));
+      // RC69 (F-5): a fire-and-forget child must NOT get pipes nobody drains.
+      // With the default `['pipe','pipe','pipe']` this spawn never attached a
+      // stdout/stderr reader, so a child that logs more than the OS pipe buffer
+      // (NEXPATH_DEBUG=1 — the very setting testers are told to use — routes
+      // verbose logging to stderr) blocks on its own write forever, and it
+      // blocks while HOLDING the CLI store lock: the next `auto`/`stop` then
+      // pays the 8 s lock fail-open, plus a zombie process per UI action.
+      // `record-signal` reads no stdin and its output is never consumed, so
+      // 'ignore' on all three is exactly what this spawn needs and nothing more.
+      const child = spawner(safe.bin, safe.args, { ...buildSpawnOptions(opts), stdio: ['ignore', 'ignore', 'ignore'] });
       child.on('error', () => resolve());   // missing binary / spawn failure — swallow
       child.on('close', () => resolve());    // any exit code — swallow (fire-and-forget)
-      child.stdin?.end();                    // record-signal reads no stdin
     } catch {
       resolve();                             // never throw into the caller
     }
