@@ -141,6 +141,10 @@ nexpath --version
 ```
 
 Setup notes:
+- **Install asks how Nexpath should run — one credential, two ways to give it:** your own
+  **OpenAI API key** ([get one](https://platform.openai.com/api-keys)), or a **Nexpath token**
+  from a free account at [parseos.tech/nexpath](https://parseos.tech/nexpath/) if you would
+  rather not create an OpenAI account. If both are configured, your OpenAI key is the one used.
 - During install you pick your project role (what kind of work you do) so Nexpath tailors its guidance to how you build.
 - Nexpath's core is Prompt Enhancement (PE), with Multi-Prompt Sequence (MPS) and Prompt Enhancement Feedback (PEF) — these work automatically as you code.
 
@@ -181,10 +185,10 @@ prepare relevant guidance leave your machine.
 
 - **Automatic secret redaction** — API keys (`sk-*`, `ghp_*`, `ghu_*`), bearer tokens, and
   PEM blocks are automatically stripped from prompts before storage.
-- **Install-time consent** — During `nexpath install`, telemetry is a separate consent step
-  (defaults to enabled). Local prompt capture and remote telemetry are independent — disable
-  either anytime via `nexpath store disable`(if you do this, nothing will work) or
-  `nexpath config set telemetry.enabled false`.
+- **Telemetry is off unless you turn it on** — install does not ask and does not enable it;
+  it starts off and stays off until you run `nexpath config set telemetry.enabled true`.
+  Local prompt capture and remote telemetry are independent — disable capture anytime via
+  `nexpath store disable` (if you do this, nothing will work).
 
 ### Deleting Stored Prompts
 
