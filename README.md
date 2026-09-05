@@ -45,6 +45,41 @@ Built during AI Hackfest 2026 by MLH.
 
 ---
 
+##  Benchmarked on SWE-bench Verified
+
+Prompt quality is easy to demonstrate and hard to prove. To check whether Nexpath actually changes
+what a coding agent produces, we ran it against a public benchmark where the answer is graded by
+each project's own test suite — not by a person, and not by another model.
+
+**Setup:** Claude Code (`sonnet`) attempted 40 tasks from SWE-bench Verified twice — once on its
+own, once with the Nexpath-reviewed prompt. The task, starting commit, container, model, time
+limit, and tools were identical in both runs. The prompt is the only thing that changed. Grading
+used the official SWE-bench harness.
+
+| | Claude Code | Claude Code + Nexpath |
+|---|---|---|
+| Tasks solved | 27/40 (67.5%) | **29/40 (72.5%)** |
+| Issue's own tests pass | 27/40 (67.5%) | 29/40 (72.5%) |
+| Ran the project's tests before submitting | 38/40 (95.0%) | 39/40 (97.5%) |
+
+**Paired outcomes:** solved by both — 27 · solved only with Nexpath — **2** · solved only without
+Nexpath — **0** · solved by neither — 11
+
+### Full results
+
+Every number above traces to a file below. The full benchmark report (Nexpath_benchmark/README.md) has the method, the two tasks Nexpath won, and the eleven neither run could solve. These are the raw files behind it — all 40 tasks, both runs, and the list we locked before the first run.
+
+| | |
+|---|---|
+| Complete report | [Benchmark report](Nexpath_benchmark/README.md) |
+| Every task, both runs | [`final_per_task.csv`](Nexpath_benchmark/final_per_task.csv) |
+| All measurements | [`final_summary.json`](Nexpath_benchmark/final_summary.json) |
+| Task list and settings, locked before the run | [`strat40-manifest.json`](Nexpath_benchmark/strat40-manifest.json) |
+| Prompt checks run before starting | [`preflight-strat40.json`](Nexpath_benchmark/preflight-strat40.json) |
+| Raw data for the confirmation-line test | [before](Nexpath_benchmark/gate-experiment-BEFORE-fix.jsonl) · [after](Nexpath_benchmark/gate-experiment-AFTER-fix.jsonl) |
+
+---
+
 ## How Nexpath Reduces Risk
 
 ### Fewer Silent Bugs and Missed Checks
@@ -76,14 +111,14 @@ The core interaction keeps your request and the added workflow guidance together
 
 Nexpath CLI is built for prompt capture across AI coding agents.
 
-| Agent | Status in v0.1.4 |
+| Agent | Status in v0.1.5 |
 |-------|-----------------|
-| **Claude Code** | Fully supported — end-to-end tested |
-| **Cursor** | Not yet supported — end-to-end testing planned for v0.1.5 |
-| **Windsurf** | Not yet supported — end-to-end testing planned for v0.1.5 |
-| **Replit** | Not yet supported — end-to-end testing planned for v0.1.5 |
-| **Lovable** | Not yet supported — end-to-end testing planned for v0.1.5 |
-| **Bolt.new** | Not yet supported — end-to-end testing planned for v0.1.5 |
+| [**Claude Code**](#add-nexpath-to-your-development-workflow--installation) | Fully supported — end-to-end tested |
+| [**Cursor**](https://marketplace.visualstudio.com/items?itemName=nexpath.nexpath-vscode) | Fully supported — end-to-end tested |
+| [**Windsurf**](https://marketplace.visualstudio.com/items?itemName=nexpath.nexpath-vscode) | Fully supported — end-to-end tested |
+| [**Replit**](https://chromewebstore.google.com/search/nexpath) | Fully supported — end-to-end tested |
+| [**Lovable**](https://chromewebstore.google.com/search/nexpath) | Fully supported — end-to-end tested |
+| [**Bolt.new**](https://chromewebstore.google.com/search/nexpath) | Fully supported — end-to-end tested |
 
 ---
 
@@ -99,13 +134,16 @@ npm link
 
 # Register with your coding agent and verify
 nexpath install
-nexpath install --yes      # or accept defaults without prompts
 
 # Verify
 nexpath --version
 ```
 
 Setup notes:
+- **Install asks how Nexpath should run — one credential, two ways to give it:** your own
+  **OpenAI API key** ([get one](https://platform.openai.com/api-keys)), or a **Nexpath token**
+  from a free account at [parseos.tech/nexpath](https://parseos.tech/nexpath/) if you would
+  rather not create an OpenAI account. If both are configured, your OpenAI key is the one used.
 - During install you pick your project role (what kind of work you do) so Nexpath tailors its guidance to how you build.
 - Nexpath's core is Prompt Enhancement (PE), with Multi-Prompt Sequence (MPS) and Prompt Enhancement Feedback (PEF) — these work automatically as you code.
 
@@ -146,10 +184,10 @@ prepare relevant guidance leave your machine.
 
 - **Automatic secret redaction** — API keys (`sk-*`, `ghp_*`, `ghu_*`), bearer tokens, and
   PEM blocks are automatically stripped from prompts before storage.
-- **Install-time consent** — During `nexpath install`, telemetry is a separate consent step
-  (defaults to enabled). Local prompt capture and remote telemetry are independent — disable
-  either anytime via `nexpath store disable`(if you do this, nothing will work) or
-  `nexpath config set telemetry.enabled false`.
+- **Telemetry is off unless you turn it on** — install does not ask and does not enable it;
+  it starts off and stays off until you run `nexpath config set telemetry.enabled true`.
+  Local prompt capture and remote telemetry are independent — disable capture anytime via
+  `nexpath store disable` (if you do this, nothing will work).
 
 ### Deleting Stored Prompts
 
