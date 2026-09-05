@@ -714,3 +714,93 @@ describe('⭐ RC64 — duplicate windsurf invocations (global + workspace both e
     expect(handle).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * ⭐ RC67 — Windsurf hold expiry is LOGGED with the budget split. Before this the
+ * Windsurf hook wrote NOTHING when the hold expired (Cursor at least logged
+ * decider_timed_out) — the tester diagnosed the 76 s expiries from a MISSING line.
+ * Logging only; the decision and the exit code are unchanged (pinned below).
+ */
+describe('⭐ RC67 — windsurf hold expiry logged with the budget split', () => {
+  const GATE_ENV = { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' };
+  const PAYLOAD = JSON.stringify({ trajectory_id: 't-rc67', tool_info: { user_prompt: 'hello world' } });
+  const noDup = () => ({ duplicate: false, key_kind: 'none' as const });
+  const collect = () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    const logEvent = vi.fn((_l: string, name: string, data?: Record<string, unknown>) => { events.push({ name, data: data ?? {} }); });
+    return { events, logEvent, find: (n: string) => events.filter((e) => e.name === n) };
+  };
+  // Gated pre_user_prompt segments, in order: stdin → echo check → auto wait → decider.
+  const holdThatExpiresAt = (expireOnCall: number) => {
+    let call = 0;
+    return {
+      remaining: () => 0, expired: () => call >= expireOnCall,
+      run: async <T>(work: () => Promise<T>) => {
+        call += 1;
+        if (call >= expireOnCall) return { timedOut: true as const };
+        return { timedOut: false as const, value: await work() };
+      },
+    };
+  };
+  const base = (over: Record<string, unknown>) => ({
+    env: { ...GATE_ENV }, readStdin: async () => PAYLOAD, checkDuplicateInvocation: noDup,
+    checkReplacementEcho: async () => false, handle: async () => ({ child: null } as never),
+    waitForChild: async () => {}, raisePopup: () => {}, ...over,
+  });
+
+  it('⭐ decider timeout ⇒ windsurf_hook_hold_expired{segment:decider} + hold_split{decider_timed_out} and exit 0 (fail-open)', async () => {
+    const c = collect(); const exits: number[] = [];
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, base({
+      logEvent: c.logEvent, holdBudget: holdThatExpiresAt(4),
+      decidePromptSubmit: async () => 'block' as const, exit: (code: number) => { exits.push(code); },
+    }) as never);
+    const exp = c.find('windsurf_hook_hold_expired');
+    expect(exp).toHaveLength(1);
+    expect(exp[0]!.data.segment).toBe('decider');
+    expect(typeof exp[0]!.data.auto_ms).toBe('number');
+    expect(typeof exp[0]!.data.decider_ms).toBe('number');
+    const split = c.find('windsurf_hook_hold_split');
+    expect(split).toHaveLength(1);
+    expect(split[0]!.data).toMatchObject({ decision: 'allow', decider_timed_out: true });
+    expect(exits).toEqual([0]);
+  });
+
+  it('⭐ auto-wait timeout ⇒ windsurf_hook_hold_expired{segment:auto}, no split (no decision ran), exit 0', async () => {
+    const c = collect(); const exits: number[] = []; const decide = vi.fn(async () => 'block' as const);
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, base({
+      logEvent: c.logEvent, holdBudget: holdThatExpiresAt(3), decidePromptSubmit: decide,
+      exit: (code: number) => { exits.push(code); },
+    }) as never);
+    const exp = c.find('windsurf_hook_hold_expired');
+    expect(exp).toHaveLength(1);
+    expect(exp[0]!.data.segment).toBe('auto');
+    expect(exp[0]!.data.decider_ms).toBeNull();
+    expect(c.find('windsurf_hook_hold_split')).toHaveLength(0);
+    expect(decide).not.toHaveBeenCalled();
+    expect(exits).toEqual([0]);
+  });
+
+  it('a normal block run ⇒ hold_split{decision:block} with numeric fields, NO hold_expired, exit 2', async () => {
+    const c = collect(); const exits: number[] = [];
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, base({
+      logEvent: c.logEvent, decidePromptSubmit: async () => 'block' as const,
+      exit: (code: number) => { exits.push(code); },
+    }) as never);
+    expect(c.find('windsurf_hook_hold_expired')).toHaveLength(0);
+    const split = c.find('windsurf_hook_hold_split');
+    expect(split).toHaveLength(1);
+    expect(split[0]!.data.decision).toBe('block');
+    expect(typeof split[0]!.data.auto_ms).toBe('number');
+    expect(typeof split[0]!.data.decider_ms).toBe('number');
+    expect(typeof split[0]!.data.remaining_after_auto_ms).toBe('number');
+    expect(exits).toEqual([2]);
+  });
+
+  it('⭐ switch OFF ⇒ the sink is never called (old flow byte-identical)', async () => {
+    const c = collect();
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, base({
+      env: {}, logEvent: c.logEvent, exit: () => {},
+    }) as never);
+    expect(c.logEvent).not.toHaveBeenCalled();
+  });
+});

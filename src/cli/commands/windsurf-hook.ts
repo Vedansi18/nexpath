@@ -494,6 +494,12 @@ export interface WindsurfHookActionDeps {
   /** RC64 seam: duplicate-invocation check (duplicate ⇒ exit 0, do nothing). */
   checkDuplicateInvocation?: typeof isDuplicateWindsurfInvocation;
   /**
+   * RC67 seam: structured log sink for the hold-expiry instrumentation
+   * (`windsurf_hook_hold_expired` / `windsurf_hook_hold_split`). Defaults to
+   * the real logger; injected in tests so the budget split can be pinned.
+   */
+  logEvent?: typeof log;
+  /**
    * Bound on the POST-leg stdin read. Separate from `stdinTimeoutMs` (the PRE
    * leg, which holds the user's prompt and must stay tight): nothing is held on
    * the post-response leg, and the payload carries the full response text, which
@@ -581,6 +587,17 @@ export async function runWindsurfHookAction(
   const env = deps.env ?? process.env;
   const readStdin = deps.readStdin ?? defaultReadStdin;
   const stdinTimeoutMs = deps.stdinTimeoutMs ?? 2_000;
+  // RC67 (tester report 2026-09-03: "popup dies before the user can act").
+  // The hold used to expire with NO log line at all — the diagnosis had to be
+  // reconstructed from a MISSING `submit_stop_decider_done`. Every gated turn
+  // now reports the budget split (auto_ms / decider_ms / remaining after auto),
+  // and every expiry names the segment that was running. Logging only: never
+  // changes a decision, never runs on the switch-OFF path.
+  const logEvent: typeof log = (level, name, data) => {
+    try { (deps.logEvent ?? log)(level, name, data); } catch { /* logging must never break the hook */ }
+  };
+  let autoMs: number | null = null;
+  let remainingAfterAutoMs: number | null = null;
   // Holds the stdin buffer when the gated path consumed it, so `handle` can replay
   // it instead of reading an already-drained pipe. Null ⇒ nothing was read.
   let preReadRaw: string | null = null;
@@ -827,6 +844,7 @@ export async function runWindsurfHookAction(
     // Call shape is IDENTICAL to before when nothing was pre-read, so the
     // switch-off path passes exactly two arguments as it always has. Only the
     // gated path adds the replay dep.
+    const autoStartedAt = Date.now();
     const result = preReadRaw === null
       ? await handle(event, opts)
       : await handle(event, opts, { readStdin: async () => preReadRaw as string });
@@ -845,7 +863,15 @@ export async function runWindsurfHookAction(
     // shared budget rather than awaitChild's own 600s default.
     if (hold) {
       const waited = await hold.run(() => waitForChild(result.child));
+      autoMs = Date.now() - autoStartedAt;
+      remainingAfterAutoMs = hold.remaining();
       if (waited.timedOut) {
+        // RC67: the FIRST log line the expiry path ever had. `auto` ate the
+        // whole hold (LLM classification + PE generation) — the popup never
+        // opened. See F-14 (classifier retries / 45 s composer timeout).
+        logEvent('warn', 'windsurf_hook_hold_expired', {
+          segment: 'auto', auto_ms: autoMs, decider_ms: null, remaining_ms: 0,
+        });
         // Fail-open (A3): release the prompt unmodified. Do NOT decide - the
         // classification this turn depends on never landed.
         //
@@ -879,14 +905,31 @@ export async function runWindsurfHookAction(
       // The popup waits for a HUMAN, so this segment is inherently unbounded and
       // is the plan's "no decision before the hold expires" failure mode. It gets
       // only what the earlier segments left.
+      const deciderStartedAt = Date.now();
       const decided = hold
         ? await hold.run(() => decidePromptSubmit(event, opts, pendingPromptText))
         : { timedOut: false, value: await decidePromptSubmit(event, opts, pendingPromptText).catch(() => 'allow' as const) };
+      const deciderMs = Date.now() - deciderStartedAt;
       if (decided.timedOut) {
+        // RC67: name the expiry. Before this the only evidence a popup had been
+        // killed was a MISSING `submit_stop_decider_done` line.
+        logEvent('warn', 'windsurf_hook_hold_expired', {
+          segment: 'decider', auto_ms: autoMs, decider_ms: deciderMs, remaining_ms: 0,
+        });
         // Hold exhausted while stop's popup waited — reap it so no popup
         // process outlives the hook (mirrors the auto orphan-kill above).
         killProcessTree(stopChildRef.current); // RC62: take the popup terminal too
       }
+      // RC67: the budget split on EVERY gated turn — how much of the hold auto
+      // consumed and how long the popup had — so a slow turn is readable from
+      // one line instead of subtracting timestamps across four.
+      logEvent('info', 'windsurf_hook_hold_split', {
+        decision: !decided.timedOut && decided.value === 'block' ? 'block' : 'allow',
+        decider_timed_out: decided.timedOut === true,
+        auto_ms: autoMs,
+        decider_ms: deciderMs,
+        remaining_after_auto_ms: remainingAfterAutoMs,
+      });
       // `!decided.timedOut` is likewise redundant today (a timed-out run yields
       // no value, so `value === 'block'` is already false) and equally kept as an
       // explicit statement of the rule: a timeout is never a decision.

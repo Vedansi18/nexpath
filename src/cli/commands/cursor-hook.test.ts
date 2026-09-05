@@ -465,6 +465,7 @@ describe('file logging — a silent hook can never hide again', () => {
       'cursor_hook_gate',
       'cursor_hook_auto',
       'cursor_hook_decision',
+      'cursor_hook_hold_split', // RC67: the budget split rides every gated run
       'cursor_hook_response',
     ]);
   });
@@ -715,5 +716,88 @@ describe('⭐ RC50 — duplicate invocation short-circuits', () => {
     const h = harness({ decide, checkDuplicateInvocation: () => false });
     await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
     expect(decide).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * ⭐ RC67 — hold expiry is LOGGED with the budget split (tester report
+ * 2026-09-03: the popup's death could only be inferred from a MISSING
+ * `submit_stop_decider_done`). New event names only; nothing decides differently.
+ */
+describe('⭐ RC67 — hold expiry logged with the budget split (cursor)', () => {
+  function fakeBudget(totalMs = 60_000) {
+    let t = 0;
+    const timers: Array<{ at: number; fn: () => void }> = [];
+    const budget = createHoldBudget({
+      totalMs, now: () => t,
+      setTimeoutFn: (fn, ms) => { const e = { at: t + ms, fn }; timers.push(e); return e; },
+      clearTimeoutFn: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+    });
+    return { budget, advance(ms: number) { t += ms; for (const e of [...timers]) if (e.at <= t) { timers.splice(timers.indexOf(e), 1); e.fn(); } } };
+  }
+  const collect = () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    const logEvent = vi.fn((_l: string, name: string, data?: Record<string, unknown>) => { events.push({ name, data: data ?? {} }); });
+    return { events, logEvent, find: (n: string) => events.filter((e) => e.name === n) };
+  };
+
+  it('⭐ decider timeout ⇒ cursor_hook_hold_expired{segment:decider} with numeric auto_ms/decider_ms, then hold_split(decider_timed_out)', async () => {
+    const f = fakeBudget();
+    const c = collect();
+    const h = harness({ logEvent: c.logEvent, holdBudget: f.budget,
+      decide: () => new Promise((r) => { f.advance(60_000); setTimeout(() => r('block'), 0); }) });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    const exp = c.find('cursor_hook_hold_expired');
+    expect(exp).toHaveLength(1);
+    expect(exp[0]!.data.segment).toBe('decider');
+    expect(typeof exp[0]!.data.auto_ms).toBe('number');
+    expect(typeof exp[0]!.data.decider_ms).toBe('number');
+    expect(exp[0]!.data.remaining_ms).toBe(0);
+    const split = c.find('cursor_hook_hold_split');
+    expect(split).toHaveLength(1);
+    expect(split[0]!.data).toMatchObject({ decision: 'allow', decider_timed_out: true });
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true }); // still fail-open
+  });
+
+  it('⭐ auto-await timeout ⇒ cursor_hook_hold_expired{segment:auto}, no decision, no split', async () => {
+    const c = collect();
+    let call = 0;
+    const fakeHold = {
+      remaining: () => 0, expired: () => call > 1,
+      run: async <T>(work: () => Promise<T>) => {
+        call += 1;
+        if (call === 1) return { timedOut: false as const, value: await work() }; // stdin
+        if (call === 2) return { timedOut: false as const, value: await work() }; // echo check
+        return { timedOut: true as const };                                        // auto await → expired
+      },
+    };
+    const h = harness({ logEvent: c.logEvent, holdBudget: fakeHold as never,
+      spawnAutoFn: () => ({ kill: () => {} }) as never, waitForChild: async () => {}, decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    const exp = c.find('cursor_hook_hold_expired');
+    expect(exp.map((e) => e.data.segment)).toEqual(['auto', 'decider']); // auto expired; the refused decider segment is reported too
+    expect(exp[0]!.data.decider_ms).toBeNull();
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('a normal block run ⇒ hold_split{decision:block} with numeric auto_ms & decider_ms and NO hold_expired', async () => {
+    const c = collect();
+    const h = harness({ logEvent: c.logEvent, decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(c.find('cursor_hook_hold_expired')).toHaveLength(0);
+    const split = c.find('cursor_hook_hold_split');
+    expect(split).toHaveLength(1);
+    expect(split[0]!.data.decision).toBe('block');
+    expect(split[0]!.data.decider_timed_out).toBe(false);
+    expect(typeof split[0]!.data.auto_ms).toBe('number');
+    expect(typeof split[0]!.data.decider_ms).toBe('number');
+    expect(typeof split[0]!.data.remaining_after_auto_ms).toBe('number');
+  });
+
+  it('⭐ switch OFF ⇒ no hold_* events (old flow byte-identical)', async () => {
+    const c = collect();
+    const h = harness({ logEvent: c.logEvent, env: { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '0' } });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(c.events.filter((e) => e.name.startsWith('cursor_hook_hold_')).length).toBe(0);
   });
 });

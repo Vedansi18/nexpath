@@ -421,10 +421,21 @@ export async function runCursorHookAction(
       if (isEcho) {
         logEvent('info', 'cursor_hook_echo_skip', { prompt_len: promptText.length });
       } else {
+      // RC67: budget-split instrumentation (see windsurf-hook.ts). New event
+      // names only — the existing `cursor_hook_auto` / `cursor_hook_decision`
+      // payloads are untouched.
+      let autoMs: number | null = null;
+      let remainingAfterAutoMs: number | null = null;
       if (promptText.trim() !== '') {
+        const autoStartedAt = Date.now();
         const child = spawnAutoFn(promptText, { cwd: payload?.projectRoot ?? process.cwd() });
         const waited = await hold.run(() => waitForChild(child));
+        autoMs = Date.now() - autoStartedAt;
+        remainingAfterAutoMs = hold.remaining();
         if (waited.timedOut) {
+          logEvent('warn', 'cursor_hook_hold_expired', {
+            segment: 'auto', auto_ms: autoMs, decider_ms: null, remaining_ms: 0,
+          });
           // Hold exhausted before auto finished: do NOT decide (the signal never
           // landed) and never leave an orphan (R2 — Cursor won't reap it).
           killProcessTree(child); // RC62: take the popup terminal too
@@ -441,8 +452,13 @@ export async function runCursorHookAction(
       (deps.raisePopup ?? bringPopupToFront)();
       // Draws from what the stdin read + auto classification left. A timeout is
       // never a decision: it continues, so the original prompt is released (A3).
+      const deciderStartedAt = Date.now();
       const decided = await hold.run(() => decide(payload));
+      const deciderMs = Date.now() - deciderStartedAt;
       if (decided.timedOut) {
+        logEvent('warn', 'cursor_hook_hold_expired', {
+          segment: 'decider', auto_ms: autoMs, decider_ms: deciderMs, remaining_ms: 0,
+        });
         // Hold exhausted while the popup waited: fail open AND reap the stop
         // child — Cursor never reaps timed-out hooks (R2), and stop's popups
         // wait on the user with no bound of their own.
@@ -452,6 +468,13 @@ export async function runCursorHookAction(
       logEvent('info', 'cursor_hook_decision', {
         decision,
         decider_timed_out: decided.timedOut === true,
+      });
+      logEvent('info', 'cursor_hook_hold_split', {
+        decision,
+        decider_timed_out: decided.timedOut === true,
+        auto_ms: autoMs,
+        decider_ms: deciderMs,
+        remaining_after_auto_ms: remainingAfterAutoMs,
       });
       } // end non-echo path
     }
