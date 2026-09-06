@@ -1044,7 +1044,13 @@ export async function runAuto(
   // The field is always cleared (match or no match) so a cancelled injection cannot
   // leave stale state that silently skips the next genuine user prompt.
   {
-    const guardMgr = SessionStateManager.load(store, input.projectRoot);
+    // ⛔ `endPreviousSession: false` — this manager is a throwaway used only to read and clear
+    // the injected-prompt field, and it is discarded at the end of this block. Closing the
+    // ended session here would do it a SECOND time a few lines later, when the real manager
+    // loads: two maturity graduation observations and two boundary records for one boundary.
+    // The state this returns is unchanged by the flag; only the closing side effects are left
+    // to the real load below.
+    const guardMgr = SessionStateManager.load(store, input.projectRoot, Date.now(), { endPreviousSession: false });
     const injectedText = guardMgr.current.lastInjectedPrompt ?? null;
     if (injectedText !== null) {
       guardMgr.clearInjectedPrompt(store);
@@ -1245,6 +1251,29 @@ export async function runAuto(
   mgr.processPrompt(store, input.promptText, classification, Date.now(),
     freqConfig.minStageChangeConfidence, streamBOverrides);
   logger.debug('after_process', { stage: mgr.current.currentStage, stageConfidence: mgr.current.stageConfidence });
+
+  // A degraded classification is the local keyword/TF-IDF guess, produced because the
+  // model was unreachable — and `processPrompt` above persists whatever stage it
+  // proposes. When that guess MOVES the stage, the move outlives the outage: the
+  // credential is fixed, the model returns, and the session is still sitting where a
+  // keyword left it, shaping every later prompt.
+  //
+  // ⚠️ CHANGES NOTHING. It reports a move that already happened, from two values that
+  // already exist either side of the call above. It exists because the move was
+  // previously unreadable: `stage_classified` reports `degraded`, `after_process`
+  // reports the resulting stage, and nothing tied the first to the second — a reader had
+  // to hold both lines together and know the confidence gate to infer it.
+  //
+  // `warn` rather than `debug` so it is visible at the default level: the next occurrence
+  // should be one grep, not a reconstruction.
+  if (stageResult.degraded && prevStage !== mgr.current.currentStage) {
+    logger.warn('stage_changed_by_degraded_classifier', {
+      projectRoot: input.projectRoot,
+      from:        prevStage,
+      to:          mgr.current.currentStage,
+      confidence:  classification.confidence,
+    });
+  }
 
   // Corroborate practice claims against the agent's ACTUAL behaviour: read the
   // transcript entries appended since the previous hook and credit verified
