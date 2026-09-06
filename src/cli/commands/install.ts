@@ -8,6 +8,7 @@ import pc from 'picocolors';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { isConfigSet, setConfig, getConfig } from '../../store/config.js';
 import { setInstalledAtIfMissing } from '../../store/feedback-signals.js';
+import { expireSessionsForCredentialChange } from '../../store/session-reset.js';
 import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 import {
   VALID_ROLES,
@@ -679,6 +680,11 @@ export async function installAction(
   setInstalledAtIfMissing(store);
 
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
+  // Whether a credential was actually WRITTEN this run. `apiKeySource` cannot answer that:
+  // 'kept' and a `--yes` run that found an existing credential both leave it set to something
+  // truthy while nothing changed, and ending a live session because the user re-ran install
+  // without touching their key would cost them their history for no reason.
+  let credentialStored = false;
   let telemetryEnabled = false;
 
   try {
@@ -705,14 +711,17 @@ export async function installAction(
       if (result.kind === 'new_key') {
         const stored = await storeApiKeyFn(result.value);
         apiKeySource = stored.source;
+        credentialStored = true;
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'nexpath_token') {
         const stored = await storeNexpathToken(result.value);
         apiKeySource = 'nexpath_token';
+        credentialStored = true;
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'use_env') {
         const stored = await storeApiKeyFn(envKey);
         apiKeySource = stored.source;
+        credentialStored = true;
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else if (result.kind === 'keep_existing') {
         apiKeySource = 'kept';
@@ -746,6 +755,7 @@ export async function installAction(
       if (envKey !== '' && isValidApiKey(envKey)) {
         const stored = await storeApiKeyFn(envKey);
         apiKeySource = stored.source;
+        credentialStored = true;
         console.log(`✓ Stored in ${stored.source === 'keychain' ? keychainName : 'fallback file (~/.nexpath/config.json)'}`);
       } else {
         const storedSource = await keySourceFn(process.cwd());
@@ -756,6 +766,22 @@ export async function installAction(
         if (storedSource === 'nexpath_token')  apiKeySource = 'nexpath_token';
         else if (storedSource === 'none')      apiKeySource = 'skipped';
         else                                   apiKeySource = 'kept';
+      }
+    }
+
+    // A credential was written, so the session that ran under the previous one is over —
+    // the same reason `config set-api-key` ends it. Only when something was actually stored:
+    // a re-run that keeps an existing key changes nothing and must not cost the user their
+    // accumulated session.
+    //
+    // ⛔ Best-effort, like every other side task on this path. `store` is already open here,
+    // so this is one statement — but a failure must not abort an install that has already
+    // saved the credential.
+    if (credentialStored) {
+      try {
+        expireSessionsForCredentialChange(store);
+      } catch {
+        /* hygiene only — never fail the install over it */
       }
     }
 

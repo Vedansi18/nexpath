@@ -1,5 +1,5 @@
 import { password, confirm, isCancel } from '@clack/prompts';
-import { openStore, closeStore, DEFAULT_DB_PATH, getConfig, setConfig, deleteConfig } from '../../store/index.js';
+import { openStore, closeStore, DEFAULT_DB_PATH, getConfig, setConfig, deleteConfig, expireSessionsForCredentialChange } from '../../store/index.js';
 import { ENV_PROBE_ENABLED_KEY, purgeAllEnvFacts } from '../../store/env-facts.js';
 import {
   ConfigValidationError,
@@ -101,6 +101,29 @@ export interface ConfigApiKeyOpts {
 
 const defaultPrint = (line: string): void => { console.log(line); };
 
+/**
+ * End every live session, because the credential just changed.
+ *
+ * ⛔ SWALLOWS ITS OWN FAILURE, deliberately. Storing or removing a credential is what the user
+ * asked for; clearing the session is hygiene that rides along. If the store cannot be opened —
+ * a concurrent hook holding the lock is the realistic case — the credential still saved, and
+ * saying otherwise would be a lie about the thing the user actually cares about. The next
+ * thirty idle minutes end the session anyway.
+ */
+async function expireSessionsBestEffort(dbPath: string = DEFAULT_DB_PATH): Promise<void> {
+  let store: Awaited<ReturnType<typeof openStore>> | null = null;
+  try {
+    store = await openStore(dbPath);
+    expireSessionsForCredentialChange(store);
+  } catch {
+    /* hygiene only — never fail the credential command over it */
+  } finally {
+    if (store) {
+      try { closeStore(store); } catch { /* ignore */ }
+    }
+  }
+}
+
 export async function configSetApiKeyAction(opts: ConfigApiKeyOpts = {}): Promise<void> {
   const print       = opts.output      ?? defaultPrint;
   const passwordFn  = opts.passwordFn  ?? defaultApiKeyPasswordFn;
@@ -111,6 +134,15 @@ export async function configSetApiKeyAction(opts: ConfigApiKeyOpts = {}): Promis
   }
   const result = await storeApiKey(key);
   print(`✓ API key stored in ${result.source}`);
+
+  // The credential just changed, so the session that ran under the old one is over. Ending it
+  // here is what stops a stage the local classifier wrote during an outage from outliving the
+  // credential that caused it — replacing the key does not reconsider the session on its own.
+  //
+  // ⛔ BEST-EFFORT, and that is the whole point of the wrapper: storing the credential is the
+  // user's intent, clearing a session is hygiene. A locked database must not turn a saved key
+  // into a failed command.
+  await expireSessionsBestEffort();
 }
 
 export async function configRotateApiKeyAction(opts: ConfigApiKeyOpts = {}): Promise<void> {
@@ -150,6 +182,10 @@ export async function configRotateApiKeyAction(opts: ConfigApiKeyOpts = {}): Pro
   }
   const result = await storeApiKey(key);
   print(`✓ API key rotated; new key stored in ${result.source} (was in ${currentSource})`);
+
+  // Same reason as `set-api-key` above: the credential changed, so the session that ran under
+  // the old one is over. Best-effort — a locked database must not fail the command.
+  await expireSessionsBestEffort();
 }
 
 export async function configShowKeySourceAction(opts: ConfigApiKeyOpts = {}): Promise<void> {
@@ -178,4 +214,8 @@ export async function configRemoveApiKeyAction(opts: ConfigApiKeyOpts = {}): Pro
   } else {
     print(`✓ API key removed (was in ${sourceBefore}).`);
   }
+
+  // Removal is a credential change too — arguably the sharpest one, since what follows
+  // runs with no key at all and every classification degrades. Best-effort, as above.
+  await expireSessionsBestEffort();
 }
