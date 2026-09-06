@@ -56,7 +56,12 @@ export function readLastProviderFailure(logPath: string = LOG_PATH): LastProvide
   // Last match wins — the log is append-only, so the last occurrence is the most recent.
   const lines = raw.split('\n');
   for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
+    // `logger.ts` writes LF, and `appendFileSync` does not translate it on Windows — so a CR
+    // should never be here. Stripped anyway because the regex below is anchored, and the way
+    // it fails on a stray CR is to report NO failure at all: a diagnostic that silently says
+    // "nothing wrong" is worse than one that is missing, and this whole line exists to end
+    // exactly that kind of silence.
+    const line = lines[i]?.replace(/\r$/, '');
     if (!line) continue;
 
     // Positional, not `includes`: the name has to sit in the EVENT slot. A line that merely

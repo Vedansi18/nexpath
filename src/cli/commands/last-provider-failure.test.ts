@@ -97,6 +97,23 @@ describe('readLastProviderFailure', () => {
     expect(readLastProviderFailure(logPath)).toEqual({ at: '2026-09-06T10:00:00.000Z', status: 402 });
   });
 
+  it('reads a CRLF line — an anchored regex fails SILENTLY on a stray CR', () => {
+    // `logger.ts` writes LF and Node does not translate it, so this should not occur. Pinned
+    // because the failure mode is the one this feature exists to remove: the reader returned
+    // null for a line that plainly carried a failure, i.e. it reported "nothing wrong".
+    writeFileSync(logPath, LINE('2026-09-06T10:40:03.246Z', '{"status":401,"code":"invalid_api_key"}') + '\r\n');
+    expect(readLastProviderFailure(logPath)).toEqual({
+      at: '2026-09-06T10:40:03.246Z',
+      status: 401,
+      code: 'invalid_api_key',
+    });
+  });
+
+  it('reads a CRLF line that carries no payload', () => {
+    writeFileSync(logPath, LINE('2026-09-06T10:40:03.246Z') + '\r\n');
+    expect(readLastProviderFailure(logPath)).toEqual({ at: '2026-09-06T10:40:03.246Z' });
+  });
+
   it('never throws — an unreadable path yields null', () => {
     // A directory, not a file: readFileSync throws EISDIR.
     expect(() => readLastProviderFailure(dir)).not.toThrow();
