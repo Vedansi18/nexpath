@@ -26,13 +26,23 @@ export interface LastProviderFailure {
 /** The event the emitting site writes (`auto.ts`, the classifier's `onProviderError`). */
 export const PROVIDER_FAILURE_EVENT = 'stage_classifier_provider_error';
 
+/** `[<iso>] [<LEVEL>] [<command>] <event> <payload?>` — the shape `logger.ts` writes. */
+const LINE_SHAPE = /^\[([^\]]+)\] \[[^\]]+\] \[[^\]]+\] (\S+)(?: (.*))?$/;
+
 /**
  * Read the last provider failure out of the log, or `null` when there is none.
  *
  * Never throws: an unreadable, absent or malformed log yields `null`, because a diagnostic
  * that can break `nexpath status` is worse than one that is missing.
  *
- * Line shape (`logger.ts`): `[<iso>] [<LEVEL>] [<command>] <event> <json?>`
+ * Line shape (`logger.ts`): `[<iso>] [<LEVEL>] [<command>] <event> <json?>` — matched
+ * POSITIONALLY, so an unrelated event whose payload happens to quote this event's name (a
+ * reason code, a diagnostic string) cannot be mistaken for a provider failure.
+ *
+ * ⚠️ Reads the CURRENT log only. `logger.ts` rotates at 5 MB to `nexpath.log.1`, so a failure
+ * that has rotated away is not reported. Deliberate: a credential still being refused re-logs
+ * on the very next prompt, so the blind window closes by itself — and a failure old enough to
+ * have rotated is not the one a reader is asking about.
  */
 export function readLastProviderFailure(logPath: string = LOG_PATH): LastProviderFailure | null {
   let raw: string;
@@ -47,19 +57,22 @@ export function readLastProviderFailure(logPath: string = LOG_PATH): LastProvide
   const lines = raw.split('\n');
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
-    if (!line || !line.includes(PROVIDER_FAILURE_EVENT)) continue;
+    if (!line) continue;
 
-    const at = /^\[([^\]]+)\]/.exec(line)?.[1];
-    if (!at) continue;
+    // Positional, not `includes`: the name has to sit in the EVENT slot. A line that merely
+    // quotes it inside its payload is a different event and is not a provider failure.
+    const parts = LINE_SHAPE.exec(line);
+    if (!parts || parts[2] !== PROVIDER_FAILURE_EVENT) continue;
 
-    // The payload is the remainder after the event name. A line without one is still a
-    // failure worth reporting — the timestamp alone answers "when did guidance go quiet".
-    const payloadStart = line.indexOf('{', line.indexOf(PROVIDER_FAILURE_EVENT));
-    if (payloadStart === -1) return { at };
+    const at = parts[1]!;
+    // A line with no payload is still a failure worth reporting — the timestamp alone answers
+    // "when did guidance go quiet".
+    const payload = parts[3];
+    if (payload === undefined || payload === '') return { at };
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(line.slice(payloadStart));
+      parsed = JSON.parse(payload);
     } catch {
       return { at };
     }

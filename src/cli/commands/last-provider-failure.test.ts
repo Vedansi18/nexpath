@@ -77,6 +77,26 @@ describe('readLastProviderFailure', () => {
     expect(readLastProviderFailure(logPath)).toEqual({ at: '2026-09-06T10:40:03.246Z' });
   });
 
+  it('ignores a line that only QUOTES the event name in its payload', () => {
+    // Reason codes and diagnostic strings are free text; one of them naming this event
+    // must not be read as a provider failure. The name has to sit in the event slot.
+    const quoting = '[2026-09-06T11:00:00.000Z] [WARN ] [auto] some_other_event '
+      + JSON.stringify({ reasonCodes: [PROVIDER_FAILURE_EVENT] });
+    writeFileSync(logPath, quoting + '\n');
+    expect(readLastProviderFailure(logPath)).toBeNull();
+  });
+
+  it('still reads the real event when a quoting line sits after it', () => {
+    const quoting = '[2026-09-06T11:00:00.000Z] [WARN ] [auto] some_other_event '
+      + JSON.stringify({ reasonCodes: [PROVIDER_FAILURE_EVENT] });
+    writeFileSync(logPath, [
+      LINE('2026-09-06T10:00:00.000Z', '{"status":402}'),
+      quoting,
+      '',
+    ].join('\n'));
+    expect(readLastProviderFailure(logPath)).toEqual({ at: '2026-09-06T10:00:00.000Z', status: 402 });
+  });
+
   it('never throws — an unreadable path yields null', () => {
     // A directory, not a file: readFileSync throws EISDIR.
     expect(() => readLastProviderFailure(dir)).not.toThrow();
