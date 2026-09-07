@@ -181,6 +181,13 @@ import { spawnRecordSignal, spawnCredentialStatus } from './ipc.js';
 // installer glue — CLI staging probes, spawnSync — once a test yields to the event loop.
 // Earlier pins never yielded, so it never fired; the notice pins do. Stub only the two
 // entry points activate() calls; everything else in the module stays real.
+// Hermetic on Windows: activate() pre-warms the win32 keystroke path (RC65) by spawning a real
+// PowerShell compile — 4-7 s and a Defender scan per activation on a Windows test host. Only that
+// export is stubbed; everything else in the module stays real.
+vi.mock('./submit-clipboard-delivery.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./submit-clipboard-delivery.js')>();
+  return { ...mod, warmWin32KeystrokePath: vi.fn(() => false) };
+});
 vi.mock('./installer/vscode-glue.js', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./installer/vscode-glue.js')>();
   return { ...mod, offerSetupIfNeeded: vi.fn(async () => {}), runSetupCommand: vi.fn(async () => 'done') };

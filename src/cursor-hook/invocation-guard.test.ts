@@ -22,9 +22,9 @@ function memFs() {
         if (files.has(p)) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
         files.add(p); mtimes.set(p, now);
       },
-      readdirFn: () => [...files].map((p) => p.split('/').pop()!),
+      readdirFn: () => [...files].map((p) => p.split(/[\\/]/).pop()!), // either separator (Windows joins with backslashes)
       mtimeMsFn: (p: string) => mtimes.get(p) ?? [...mtimes.values()][0] ?? now,
-      removeFn: (p: string) => { for (const f of [...files]) if (f.endsWith(p.split('/').pop()!)) { files.delete(f); mtimes.delete(f); } },
+      removeFn: (p: string) => { const base = p.split(/[\\/]/).pop()!; for (const f of [...files]) if (f.endsWith(base)) { files.delete(f); mtimes.delete(f); } },
     }),
   };
 }
