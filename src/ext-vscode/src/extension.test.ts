@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // vi.hoisted lets the mocks declared here be referenced from the vi.mock
@@ -1708,5 +1710,22 @@ describe('fresh-install reset wiring', () => {
     expect(arg.nexpathHome.replace(/\\/g, '/')).toMatch(/\/\.nexpath$/);
     expect(typeof arg.clearKey).toBe('function');
     expect((arg as { host?: string }).host).toBe('cursor');
+  });
+});
+
+/** ⭐ RC73 — activation wires the window target through every raise and keystroke call. */
+describe('RC73 window targeting is wired, not just available', () => {
+  it('⭐ every raise passes a windowTarget, and the win32 titles are workspace-qualified', () => {
+    const src = readFileSync(fileURLToPath(new URL('./extension.ts', import.meta.url)), 'utf8');
+    const raises = src.match(/raise(?:AppWindow|WindsurfWindow)\(/g) ?? [];
+    const targeted = src.match(/windowTarget: editorWindowTarget\(\)/g) ?? [];
+    expect(raises.length).toBeGreaterThanOrEqual(7);
+    expect(targeted.length).toBe(raises.length);
+    // win32 and macOS targeting is deliberately NOT changed by RC73 — no report, and no
+    // machine here to run them on. These stay exactly as the RC47/F-9 rounds left them.
+    expect((src.match(/win32Titles: \[vscode\.env\.appName/g) ?? []).length).toBe(4);
+    expect(src).not.toContain('qualifiedTitle');
+    expect(src).toContain('function editorWindowTarget(): EditorWindowTarget');
+    expect(src).toContain('appName: vscode.env.appName, workspaceName: vscode.workspace.name');
   });
 });

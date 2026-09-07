@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { pasteKeystroke, raiseWindsurfWindow, raiseAppWindow } from './windsurf-autopaste.js';
+import { pasteKeystroke, raiseWindsurfWindow, raiseAppWindow, WINDOW_RAISE_SETTLE_MS, WINDOW_RAISE_CONFIRM_ATTEMPTS } from './windsurf-autopaste.js';
 
 const deps = (over = {}) => {
   const calls: Array<[string, string[]]> = [];
@@ -156,5 +156,162 @@ describe('⭐ RC72 — pasteKeystroke uses the cached win32 helper', () => {
     pasteKeystroke({ platform: 'win32', env: {}, win32Titles: ['Devin'], run: (_c, a) => { calls.push(a); return true; } });
     expect(calls[1]!.join(' ').startsWith('-NoProfile -Command Add-Type ')).toBe(true);
     expect(calls[1]!.join(' ')).not.toContain('$nxDll');
+  });
+});
+
+/**
+ * ⭐ RC73 — the raise names ONE window instead of a WM_CLASS.
+ *
+ * Live root cause (Ubuntu/Cursor, 2026-09-07): with `"nexpath - Cursor"` and `"Cursor"`
+ * both open, `wmctrl -x -a cursor` always took the first, so the delivery pasted into a
+ * chat the user was not looking at. With a windowTarget the raise resolves the id itself.
+ */
+describe('⭐ RC73 — targeted window raise', () => {
+  const LIVE = [
+      '0x03800004  0 cursor.Cursor         emptyops nexpath - Cursor',
+      '0x05c00004  0 windsurf.Windsurf     emptyops nexpath - Windsurf',
+      '0x0380002f  0 cursor.Cursor         emptyops Cursor',
+    ].join('\n');
+  function harness(over: Record<string, unknown> = {}) {
+    const calls: string[][] = [];
+    return {
+      calls,
+      deps: {
+        platform: 'linux' as NodeJS.Platform,
+        env: { DISPLAY: ':0' },
+        hasCommand: () => true,
+        run: (c: string, a: string[]) => { calls.push([c, ...a]); return true; },
+        runCapture: (c: string, a: string[]) =>
+          c === 'wmctrl' && a[0] === '-lx' ? LIVE
+          : c === 'xdotool' ? 'Cursor'
+          : null,
+        settle: () => {},
+        ...over,
+      },
+    };
+  }
+
+  it('⭐ a folder-less Cursor host raises ITS OWN window id, not the first of the class', () => {
+    const h = harness();
+    expect(raiseAppWindow(['cursor'], { ...h.deps, windowTarget: { appName: 'Cursor' } })).toBe(true);
+    expect(h.calls).toEqual([['wmctrl', '-lx'].slice(0, 0).concat(['wmctrl', '-i', '-a', '0x0380002f'])]);
+    expect(h.calls.some((c) => c.includes('-x'))).toBe(false); // the class raise never ran
+  });
+
+  it('⭐ a project host raises the project window', () => {
+    const h = harness({ runCapture: (c: string, a: string[]) => (c === 'wmctrl' && a[0] === '-lx' ? LIVE : 'nexpath - Cursor') });
+    expect(raiseAppWindow(['cursor'], { ...h.deps, windowTarget: { appName: 'Cursor', workspaceName: 'nexpath' } })).toBe(true);
+    expect(h.calls[0]).toEqual(['wmctrl', '-i', '-a', '0x03800004']);
+  });
+
+  it('⭐ Windsurf/Devin hosts resolve their own window by the same rule', () => {
+    const h = harness({ runCapture: (c: string, a: string[]) => (c === 'wmctrl' && a[0] === '-lx' ? LIVE : 'nexpath - Windsurf') });
+    expect(raiseAppWindow(['devin', 'windsurf'], { ...h.deps, windowTarget: { appName: 'Windsurf', workspaceName: 'nexpath' } })).toBe(true);
+    expect(h.calls[0]).toEqual(['wmctrl', '-i', '-a', '0x05c00004']);
+  });
+
+  it('⭐ ONE editor window ⇒ one raise and no waiting — the ordinary case costs what it always did', () => {
+    const calls: string[][] = []; let settles = 0;
+    const ok = raiseAppWindow(['cursor'], {
+      platform: 'linux', env: { DISPLAY: ':0' }, hasCommand: () => true,
+      run: (c, a) => { calls.push([c, ...a]); return true; },
+      runCapture: (c, a) => (c === 'wmctrl' && a[0] === '-lx'
+        ? '0x03800004  0 cursor.Cursor         emptyops nexpath - Cursor'
+        : 'nexpath - Cursor'),
+      settle: () => { settles += 1; },
+      windowTarget: { appName: 'Cursor', workspaceName: 'nexpath' },
+    });
+    expect(ok).toBe(true);
+    expect(calls).toEqual([['wmctrl', '-i', '-a', '0x03800004']]); // one call, like the class raise
+    expect(settles).toBe(0);                                       // and no confirmation wait
+  });
+
+  it('⭐ NO windowTarget ⇒ the pre-RC73 class raise, byte-identical (regression pin)', () => {
+    const h = harness();
+    expect(raiseAppWindow(['cursor'], h.deps)).toBe(true);
+    expect(h.calls).toEqual([['wmctrl', '-x', '-a', 'cursor']]);
+  });
+
+  it('falls back to the class raise when the listing is unusable or names no window of ours', () => {
+    for (const listing of [null, '', 'garbage']) {
+      const h = harness({ runCapture: (c: string, a: string[]) => (c === 'wmctrl' && a[0] === '-lx' ? listing : 'x') });
+      expect(raiseAppWindow(['cursor'], { ...h.deps, windowTarget: { appName: 'Cursor' } })).toBe(true);
+      expect(h.calls).toEqual([['wmctrl', '-x', '-a', 'cursor']]);
+    }
+    const other = harness();
+    expect(raiseAppWindow(['cursor'], { ...other.deps, windowTarget: { appName: 'Zed' } })).toBe(true);
+    expect(other.calls).toEqual([['wmctrl', '-x', '-a', 'cursor']]);
+  });
+
+  it('a window id that will not activate moves on to the next candidate', () => {
+    const tried: string[] = [];
+    const h = harness({
+      run: (c: string, a: string[]) => { tried.push(a.join(' ')); return !a.includes('0x0380002f'); },
+      runCapture: (c: string, a: string[]) =>
+        c === 'wmctrl' && a[0] === '-lx'
+          ? ['0x03800004  0 cursor.Cursor         emptyops nexpath - Cursor',
+             '0x05c00004  0 windsurf.Windsurf     emptyops nexpath - Windsurf',
+             '0x0380002f  0 cursor.Cursor         emptyops Cursor'].join('\n')
+          : 'nexpath - Cursor',
+    });
+    expect(raiseAppWindow(['cursor'], { ...h.deps, windowTarget: { appName: 'Cursor' } })).toBe(true);
+    expect(tried).toEqual(['-i -a 0x0380002f', '-i -a 0x03800004']);
+  });
+
+  it('settles before verifying (wmctrl returns before the WM switches — measured live)', () => {
+    const order: string[] = [];
+    const h = harness({
+      settle: (ms: number) => order.push(`settle:${ms}`),
+      runCapture: (c: string, a: string[]) => { order.push(`capture:${c}`); return c === 'wmctrl' && a[0] === '-lx' ? LIVE : 'Cursor'; },
+      run: (c: string, a: string[]) => { order.push(`run:${a.join(' ')}`); return true; },
+    });
+    raiseAppWindow(['cursor'], { ...h.deps, windowTarget: { appName: 'Cursor' } });
+    expect(order).toEqual(['capture:wmctrl', 'run:-i -a 0x0380002f', `settle:${WINDOW_RAISE_SETTLE_MS}`, 'capture:xdotool']);
+    expect(WINDOW_RAISE_SETTLE_MS * WINDOW_RAISE_CONFIRM_ATTEMPTS).toBeGreaterThanOrEqual(500);
+  });
+
+  it('non-linux is untouched: macOS still activates the app, win32 still refuses', () => {
+    const macCalls: string[][] = [];
+    expect(raiseAppWindow(['cursor'], {
+      platform: 'darwin', env: {}, hasCommand: () => true,
+      run: (c, a) => { macCalls.push([c, ...a]); return true; },
+      windowTarget: { appName: 'Cursor', workspaceName: 'nexpath' },
+    })).toBe(true);
+    expect(macCalls[0]![0]).toBe('osascript');
+    expect(raiseAppWindow(['cursor'], { platform: 'win32', windowTarget: { appName: 'Cursor' } })).toBe(false);
+  });
+});
+
+/** ⭐ RC73 — the live-caught defect: a slow window manager must never redirect the raise. */
+describe('⭐ RC73 — a slow window manager never causes a DIFFERENT window to be raised', () => {
+  const LIVE = [
+    '0x03800004  0 cursor.Cursor         emptyops nexpath - Cursor',
+    '0x0380002f  0 cursor.Cursor         emptyops Cursor',
+  ].join('\n');
+  it('⭐ xdotool keeps reporting the previously-active window: we retry the SAME id, never the other one', () => {
+    const raised: string[] = [];
+    let settles = 0;
+    const ok = raiseAppWindow(['cursor'], {
+      platform: 'linux', env: { DISPLAY: ':0' }, hasCommand: () => true,
+      run: (_c, a) => { if (a[0] === '-i') raised.push(a[2]!); return true; },
+      // Never switches — the window manager is busy, as measured on the live box.
+      runCapture: (c, a) => (c === 'wmctrl' && a[0] === '-lx' ? LIVE : 'nexpath - Cursor'),
+      settle: () => { settles += 1; },
+      windowTarget: { appName: 'Cursor' },
+    });
+    expect(ok).toBe(true);
+    expect(raised).toEqual(['0x0380002f']);                 // only the intended window
+    expect(raised).not.toContain('0x03800004');
+    expect(settles).toBe(WINDOW_RAISE_CONFIRM_ATTEMPTS);    // waited, then gave up waiting — not switching targets
+  });
+  it('confirmation stops as soon as the intended window is reported active', () => {
+    let settles = 0; let reads = 0;
+    raiseAppWindow(['cursor'], {
+      platform: 'linux', env: { DISPLAY: ':0' }, hasCommand: () => true, run: () => true,
+      runCapture: (c, a) => { if (c === 'wmctrl' && a[0] === '-lx') return LIVE; reads += 1; return reads >= 2 ? 'Cursor' : 'some terminal'; },
+      settle: () => { settles += 1; },
+      windowTarget: { appName: 'Cursor' },
+    });
+    expect(settles).toBe(2);
   });
 });

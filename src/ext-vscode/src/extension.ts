@@ -70,6 +70,7 @@ import { createAdvisoryFallback, type AdvisoryFallback } from './advisory-fallba
 import { createAdvisoryPoller, type AdvisoryPoller } from './advisory-poller.js';
 import { readLatestAdvisoryMeta, readInjectedPrompt } from './advisory-store-reader.js';
 import { raiseWindsurfWindow, raiseAppWindow, pasteKeystroke } from './windsurf-autopaste.js';
+import type { EditorWindowTarget } from './editor-window-target.js';
 import {
   injectViaCascadeAction,
   SEND_CHAT_ACTION_COMMAND,
@@ -203,6 +204,24 @@ function fingerprint(value: string): string {
  * regression. When the E2E lands, Windsurf can adopt this and the duplication
  * goes away.
  */
+/**
+ * RC73 — WHICH window of this editor the delivery must aim at.
+ *
+ * ⚠ LIVE ROOT CAUSE (owner report, Ubuntu/Cursor, 2026-09-07). With two Cursor windows
+ * open, `wmctrl -lx` showed `"nexpath - Cursor"` and `"Cursor"`; the raise was by WM_CLASS,
+ * which activates the FIRST match — always `"nexpath - Cursor"`. The window whose extension
+ * host had claimed the decision was the OTHER one, so it focused its own composer while the
+ * OS focus sat on the project window, and the Ctrl+V + Enter went into a chat the user was
+ * not looking at ("old cursor opened automatically … i did not see any inject back").
+ *
+ * `env.appName` + `workspace.name` name this host's own window in the WM listing, so the
+ * raise can activate that one window id. A folder-less window (the one in the report) is
+ * titled exactly the app name, which is why it must be passed even when undefined.
+ */
+function editorWindowTarget(): EditorWindowTarget {
+  return { appName: vscode.env.appName, workspaceName: vscode.workspace.name };
+}
+
 function buildSubmitAdvisory(
   host: 'windsurf' | 'cursor',
   enabled: boolean,
@@ -228,10 +247,10 @@ function buildSubmitAdvisory(
     writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
     // Reuse the shipped raiser — Linux/X11 only by design; elsewhere it returns
     // false and the paste still proceeds.
-    focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host]),
+    focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host], { windowTarget: editorWindowTarget() }),
     pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, host === 'cursor' ? 'Cursor' : 'Devin', 'Windsurf'] }),
     // RC11: Enter only when THIS editor is focused (one raise retry inside).
-    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host]), appName: vscode.env.appName, submitLog: log }),
+    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, submitLog: log }),
     log,
   });
   return createSubmitAdvisoryForHost({
@@ -449,7 +468,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // FALLBACK — older builds without `sendChatActionMessage`: clipboard + focus
     // the panel (same `openChatPanel` action when present) + simulate paste.
     await vscode.env.clipboard.writeText(text); // for the paste AND as the last-ditch fallback
-    raiseWindsurfWindow();
+    raiseWindsurfWindow({ windowTarget: editorWindowTarget() });
     await new Promise((r) => setTimeout(r, 150));
     let focused = false;
     try {
@@ -489,7 +508,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const t0 = Date.now();
     await vscode.env.clipboard.writeText(text);
     const tClip = Date.now();
-    raiseAppWindow('cursor');
+    raiseAppWindow('cursor', { windowTarget: editorWindowTarget() });
     await new Promise((r) => setTimeout(r, 150));
     let focused = false;
     let focusedVia = '';
@@ -894,11 +913,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
         // Reuse the shipped raiser — Linux/X11 only by design; on other OSes it
         // returns false and the paste still proceeds (see the module's notes).
-        focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf']),
+        focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }),
         pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] }),
         // RC11: Enter only when Windsurf itself is focused — a blind Enter
         // pressed the Welcome view's "Start session" and closed the chat.
-        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf']), appName: vscode.env.appName, submitLog: log }),
+        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, submitLog: log }),
         log: (m) => log(m),
       });
 
@@ -975,7 +994,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // "1 queued message" that only a further Enter sends — tap once.
           if (outcome === 'delivered' && host === 'windsurf') {
             scheduleWindsurfQueueFlush(
-              () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf']), appName: vscode.env.appName, submitLog: log }),
+              () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, submitLog: log }),
               log,
             );
           }
