@@ -36,6 +36,15 @@ export const NEXPATH_TOKEN_KEY = 'nexpath_token';
 export const NEXPATH_BASE_URL_KEY = 'nexpath_api_base_url';
 
 /**
+ * Epoch-ms of the most recent `402 insufficient_credit` from the Nexpath
+ * service, or absent. Written by the fetch adapter the moment the service
+ * refuses a call for lack of credit; cleared by the settings page when a probe
+ * shows credit again. It exists so the settings page can say *why* Nexpath
+ * went quiet — the pipeline itself stays fail-open and never surfaces the 402.
+ */
+export const NEXPATH_CREDIT_EXHAUSTED_AT_KEY = 'nexpath_credit_exhausted_at';
+
+/**
  * The Nexpath service the token authenticates against. This is the public
  * production origin (it is already printed in this extension's manifests and
  * on the service's own website — not a secret), so a user who pastes a token
