@@ -2,7 +2,10 @@ import * as vscode from 'vscode';
 
 /** Injected by esbuild at build time (RC24). `unknown` when built outside git. */
 declare const __NEXPATH_BUILD__: string;
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { consumeUninstallTombstone } from './fresh-install.js';
 import { createHash } from 'node:crypto';
 import { toSafeErrorRecord } from './diagnostics.js';
 import { CONSENT_KEY, showOnboardingIfNeeded } from './onboarding.js';
@@ -280,6 +283,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   //    first thing to check when a host shows up as vscode-generic unexpectedly.
   const host = detectHost();
   log(`[nexpath] host=${host} (appName=${JSON.stringify(vscode.env.appName)}, uriScheme=${JSON.stringify(vscode.env.uriScheme)})`);
+  // Uninstall-UX layer 2: if this editor uninstalled us earlier, the vscode:uninstall
+  // hook left a tombstone — clear the setup/consent mementos (globalState survives an
+  // uninstall) so Allow + Setup run again like a first install. Fail-quiet.
+  try {
+    await consumeUninstallTombstone({
+      extensionPath: context.extensionPath,
+      host,
+      nexpathHome: join(homedir(), '.nexpath'),
+      exists: (p) => existsSync(p),
+      remove: (p) => rmSync(p, { force: true }),
+      clearKey: (key) => context.globalState.update(key, undefined),
+      log,
+    });
+  } catch (err) {
+    log(`[nexpath] fresh-install check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // RC35: persist the GUI session env for the CLI popup host — Windsurf strips
   // it from hook spawns (measured 2026-08-21); the decider fills only MISSING

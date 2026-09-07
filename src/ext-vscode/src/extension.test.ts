@@ -34,6 +34,7 @@ const {
   mockArmIfPending,
   mockStartDelivererHeartbeat,
   mockHeartbeatStop,
+  mockConsumeTombstone,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -69,6 +70,7 @@ const {
   // RC70: the deliverer heartbeat is mocked so activate() never writes to the developer's real ~/.nexpath.
   mockHeartbeatStop: vi.fn(),
   mockStartDelivererHeartbeat: vi.fn(() => ({ beat: vi.fn(), stop: mockHeartbeatStop })),
+  mockConsumeTombstone: vi.fn(async () => ({ reset: false, editor: 'cursor' })),
 }));
 
 vi.mock('vscode', () => ({
@@ -188,6 +190,9 @@ vi.mock('./submit-clipboard-delivery.js', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./submit-clipboard-delivery.js')>();
   return { ...mod, warmWin32KeystrokePath: vi.fn(() => false) };
 });
+// Uninstall-UX layer 2: the activation reset reads ~/.nexpath for a tombstone; stub it so no
+// pin touches the developer's real home, and pin the wiring below.
+vi.mock('./fresh-install.js', () => ({ consumeUninstallTombstone: mockConsumeTombstone }));
 vi.mock('./installer/vscode-glue.js', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./installer/vscode-glue.js')>();
   return { ...mod, offerSetupIfNeeded: vi.fn(async () => {}), runSetupCommand: vi.fn(async () => 'done') };
@@ -1685,5 +1690,23 @@ describe('no-credential notice wiring', () => {
     await activate(ctx as never);
     await new Promise((r) => setTimeout(r, 30));
     expect(notices()).toHaveLength(0);
+  });
+});
+
+/** Uninstall-UX layer 2 — activation consumes the uninstall tombstone before anything reads the mementos. */
+describe('fresh-install reset wiring', () => {
+  it('⭐ runs first thing in activate with the extension path, the home nexpath dir and a memento-clearing port', async () => {
+    mockConsumeTombstone.mockClear();
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    const ctx = makeCtx(true) as unknown as Record<string, unknown>;
+    ctx.extensionPath = '/home/u/.cursor/extensions/nexpath.nexpath-vscode-0.1.36-linux-x64';
+    await activate(ctx as never);
+    expect(mockConsumeTombstone).toHaveBeenCalledTimes(1);
+    const arg = mockConsumeTombstone.mock.calls[0]![0] as { extensionPath: string; nexpathHome: string; clearKey: (k: string) => unknown };
+    expect(arg.extensionPath).toBe('/home/u/.cursor/extensions/nexpath.nexpath-vscode-0.1.36-linux-x64');
+    expect(arg.nexpathHome.replace(/\\/g, '/')).toMatch(/\/\.nexpath$/);
+    expect(typeof arg.clearKey).toBe('function');
+    expect((arg as { host?: string }).host).toBe('cursor');
   });
 });
