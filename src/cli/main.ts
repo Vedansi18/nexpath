@@ -29,6 +29,8 @@ import { envAction } from './commands/env.js';
 import { registerAutoCommand } from './commands/auto.js';
 import { registerStopCommand } from './commands/stop.js';
 import { registerRecordSignalCommand } from './commands/record-signal.js';
+import { registerSubmitExpiryConsumeCommand } from './commands/submit-expiry-consumer.js';
+import { registerCredentialStatusCommand } from './commands/credential-status.js';
 import { registerWindsurfHookCommand } from './commands/windsurf-hook.js';
 import { registerCursorHookCommand } from './commands/cursor-hook.js';
 import { registerOptimizeCommand } from './commands/optimize.js';
@@ -116,6 +118,8 @@ export function createProgram(): Command {
   registerAutoCommand(program);
   registerStopCommand(program);
   registerRecordSignalCommand(program);
+  registerSubmitExpiryConsumeCommand(program);
+  registerCredentialStatusCommand(program);
   registerWindsurfHookCommand(program);
   registerCursorHookCommand(program);
 

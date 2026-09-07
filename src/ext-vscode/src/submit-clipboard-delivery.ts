@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { darwinAppCandidates, darwinEditorIsFrontmost } from './darwin-focus.js';
 
 /**
  * Clipboard-fallback delivery for the submit-time advisory (hook milestone H3).
@@ -147,6 +148,8 @@ export interface SubmitKeystrokeDeps {
   appName?: string;
   /** RC47: diagnostic sink for the win32 submit path (which titles failed, what held the foreground). */
   submitLog?: (message: string) => void;
+  /** F-9 seam: capture runner for the darwin frontmost read (defaults to a bounded spawnSync). */
+  runCapture?: (cmd: string, args: string[]) => string | null;
 }
 
 
@@ -263,7 +266,17 @@ export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
 } = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
-  if (platform !== 'linux') return true; // no check possible; prior behaviour
+  // F-9 (2026-09-07): macOS gets the same "Enter only when the editor is in
+  // front" rule Linux has had since RC11 — the frontmost process name via
+  // System Events, live appName first (RC47 rule). Unreadable ⇒ false: a
+  // keystroke we cannot target must not fire; the caller reports
+  // `submit_failed` and the one-time Accessibility hint (RC16/F-3) explains.
+  if (platform === 'darwin') {
+    return darwinEditorIsFrontmost(darwinAppCandidates(deps.appName, host), {
+      runCapture: deps.runCapture ?? defaultRunCapture,
+    });
+  }
+  if (platform !== 'linux') return true; // win32: RC49 targets inside its own script
   if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
   const has = deps.hasCommand ?? defaultHasCommand;
   const runCapture = deps.runCapture ?? defaultRunCapture;
@@ -305,6 +318,30 @@ export function isDarwinAccessibilityDenial(err: string | null): boolean {
 
 /** RC52: win32 keystroke-script spawn ceiling — cold Add-Type measured >8 s; warm ~0.8 s. */
 export const WIN32_KEYSTROKE_TIMEOUT_MS = 20_000;
+
+/**
+ * RC70 (F-3): the one-time "press Enter yourself" hint for a `submit_failed`
+ * outcome, per platform — pure, so it can be pinned without a vscode host.
+ * Returns null when no hint applies (any other outcome, or linux, where the
+ * RC59 gate names its own reason in the log). Wording is the RC16/RC47 text the
+ * Windsurf branch has shipped since 2026-08-15/22.
+ */
+export function submitFailedHint(
+  outcome: string,
+  platform: NodeJS.Platform,
+  darwinError: string | null,
+): string | null {
+  if (outcome !== 'submit_failed') return null;
+  if (platform === 'win32') {
+    return 'Nexpath: your refined prompt is in the chat input — press Enter to send it. (Auto-send could not focus the editor window this time.)';
+  }
+  if (platform === 'darwin') {
+    return isDarwinAccessibilityDenial(darwinError)
+      ? 'Nexpath: your refined prompt is in the chat — press Enter to send it. To enable auto-send, grant Accessibility to this editor: System Settings → Privacy & Security → Accessibility.'
+      : 'Nexpath: your refined prompt is in the chat — press Enter to send it. Auto-send could not simulate the keystroke on this Mac (check System Settings → Privacy & Security → Accessibility).';
+  }
+  return null;
+}
 
 /**
  * RC65: the user32 Add-Type prelude, extracted so the activation pre-warm
@@ -422,7 +459,7 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   // button and closed the user's chat.
   if (deps.host) {
     const isEditorFocused = deps.isEditorFocused ?? focusedWindowIsEditor;
-    const focusDeps = { platform, env, appName: deps.appName };
+    const focusDeps = { platform, env, appName: deps.appName, runCapture: deps.runCapture };
     if (!isEditorFocused(deps.host, focusDeps)) {
       deps.focusEditor?.();
       if (!isEditorFocused(deps.host, focusDeps)) {

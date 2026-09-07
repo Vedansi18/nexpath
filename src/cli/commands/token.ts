@@ -5,6 +5,11 @@ import {
   readNexpathToken,
   isValidNexpathToken,
 } from '../../config/NexpathTokenStore.js';
+import {
+  resetSessionsAfterCredentialChange,
+  SESSION_RESET_DONE_LINE,
+  sessionResetSkippedLine,
+} from './credential-session-reset.js';
 
 // Mirrors config.ts's API-key command shape exactly.
 
@@ -36,6 +41,18 @@ export interface ConfigTokenOpts {
   passwordFn?:  TokenPasswordFn;
   confirmFn?:   TokenConfirmFn;
   output?:      (line: string) => void;
+  /** Injected in tests; defaults to the real machine-global session reset. */
+  resetSessionsFn?: typeof resetSessionsAfterCredentialChange;
+}
+
+/**
+ * Credential-change session reset (handoff 2026-09-06): runs AFTER the
+ * credential is saved, best-effort — a locked store must never make a saved
+ * credential look like a failed command. Prints one line either way.
+ */
+async function resetSessionsAfterChange(opts: ConfigTokenOpts, print: (line: string) => void): Promise<void> {
+  const result = await (opts.resetSessionsFn ?? resetSessionsAfterCredentialChange)();
+  print(result.ok ? SESSION_RESET_DONE_LINE : sessionResetSkippedLine(result.error ?? 'unknown'));
 }
 
 const defaultPrint = (line: string): void => { console.log(line); };
@@ -56,6 +73,7 @@ export async function configSetTokenAction(opts: ConfigTokenOpts = {}): Promise<
 
   const result = await storeNexpathToken(token);
   print(`✓ Nexpath token stored in ${result.source}`);
+  await resetSessionsAfterChange(opts, print);
 }
 
 export async function configRotateTokenAction(opts: ConfigTokenOpts = {}): Promise<void> {
@@ -89,6 +107,8 @@ export async function configRotateTokenAction(opts: ConfigTokenOpts = {}): Promi
 
   const result = await storeNexpathToken(token);
   print(`✓ Nexpath token rotated; new token stored in ${result.source}`);
+  // A rotation is a credential change too — the same rule applies.
+  await resetSessionsAfterChange(opts, print);
 }
 
 export async function configRemoveTokenAction(opts: ConfigTokenOpts = {}): Promise<void> {
@@ -102,6 +122,8 @@ export async function configRemoveTokenAction(opts: ConfigTokenOpts = {}): Promi
   await removeNexpathToken();
   if (hadToken) {
     print('✓ Nexpath token removed.');
+    // Only a real removal is a credential change; "nothing was stored" changes nothing.
+    await resetSessionsAfterChange(opts, print);
   } else {
     print('No Nexpath token was stored.');
   }
