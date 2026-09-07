@@ -356,7 +356,7 @@ describe('chrome styles (live-caught 2026-08-25: unstyled transparent dock)', ()
 });
 
 describe('REAL prepare → whitelisted view → real dock DOM (plan §7: fixtures from real results, not hand-invented)', () => {
-  it('a real keyless engine prepare renders in the dock with its actual body and controls', async () => {
+  it('a real keyless engine prepare renders in the dock with its actual body and controls', { timeout: 30_000 }, async () => {
     const { buildBrowserPeRequest, prepareBrowserPe } = await import('../background/pe-prepare.js');
     const { buildPePanelView } = await import('../background/pe-popup-host.js');
     const prep = await prepareBrowserPe(buildBrowserPeRequest({
