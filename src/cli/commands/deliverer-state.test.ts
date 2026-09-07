@@ -5,7 +5,7 @@ import { readDelivererState, DELIVERER_HEARTBEAT_STALE_MS } from './deliverer-st
 const beat = (host: string, pid: number, at: number, armed: boolean, reason?: string) =>
   JSON.stringify({ schemaVersion: 1, host, pid, at, armed, ...(reason ? { reason } : {}) });
 function dir(files: Record<string, string>, now = 100_000) {
-  return { dir: '/h/.nexpath', now: () => now, readdirFn: () => Object.keys(files), readFileFn: (p: string) => files[p.split('/').pop()!] ?? (() => { throw new Error('ENOENT'); })() };
+  return { dir: '/h/.nexpath', now: () => now, readdirFn: () => Object.keys(files), readFileFn: (p: string) => files[p.split(/[\\/]/).pop()!] ?? (() => { throw new Error('ENOENT'); })() }; // either separator
 }
 
 describe('⭐ RC70 — readDelivererState', () => {
