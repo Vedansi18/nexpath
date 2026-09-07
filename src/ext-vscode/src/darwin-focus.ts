@@ -64,6 +64,59 @@ export function buildDarwinActivateScript(candidates: readonly string[]): string
 }
 
 /** AppleScript: the name of the frontmost application process. */
+/**
+ * RC74 (macOS) — raise ONE window of the editor, not just the application.
+ *
+ * `buildDarwinActivateScript` fronts the PROCESS, so on a Mac with two editor windows open
+ * macOS restores whichever window that app last had in front — the same wrong-window defect
+ * measured on Linux, where the class raise always took the first window and the paste and
+ * Enter landed in a chat the user was not watching.
+ *
+ * Unlike Linux and Windows we do not need the app name in the title: the search is already
+ * scoped to this editor's process, so the workspace name alone identifies the window. Every
+ * step is guarded by `exists`, and the script `error`s when no window matches, which the
+ * caller reads as "front the application instead" — i.e. exactly today's behaviour.
+ *
+ * ⚠ NOT EXECUTED ON macOS by the author. Written so that any failure is inert.
+ */
+export function buildDarwinActivateWindowScript(
+  candidates: readonly string[],
+  windowNeedle: string,
+): string {
+  const list = candidates.map(quote).join(', ');
+  return [
+    'tell application "System Events"',
+    `  repeat with n in {${list}}`,
+    '    if exists (first application process whose name is (n as text)) then',
+    '      set p to first application process whose name is (n as text)',
+    `      if exists (first window of p whose name contains ${quote(windowNeedle)}) then`,
+    `        perform action "AXRaise" of (first window of p whose name contains ${quote(windowNeedle)})`,
+    '        set frontmost of p to true',
+    '        return (n as text)',
+    '      end if',
+    '    end if',
+    '  end repeat',
+    'end tell',
+    'error "nexpath: no editor window matching this workspace"',
+  ].join('\n');
+}
+
+/**
+ * Raise this host's own window when we can name it, otherwise front the application exactly
+ * as the shipped path does. True when either step reported success.
+ */
+export function activateDarwinAppWindow(
+  candidates: readonly string[],
+  windowNeedle: string | undefined,
+  deps: DarwinFocusDeps = {},
+): boolean {
+  if (candidates.length === 0) return false;
+  const run = deps.run ?? defaultRun;
+  const needle = windowNeedle?.trim();
+  if (needle && run('osascript', ['-e', buildDarwinActivateWindowScript(candidates, needle)])) return true;
+  return activateDarwinApp(candidates, deps);
+}
+
 export const DARWIN_FRONTMOST_SCRIPT =
   'tell application "System Events" to get name of first application process whose frontmost is true';
 

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { darwinAppCandidates, darwinEditorIsFrontmost } from './darwin-focus.js';
+import type { EditorWindowTarget } from './editor-window-target.js';
 
 /**
  * Clipboard-fallback delivery for the submit-time advisory (hook milestone H3).
@@ -147,6 +148,12 @@ export interface SubmitKeystrokeDeps {
    * names; the app's own reported name is the one string that tracks reality.
    */
   appName?: string;
+  /**
+   * RC74: `env.appName` + `workspace.name` — identifies THIS window so win32 can focus it
+   * by handle instead of letting AppActivate pick any window of the app. Absent ⇒ the
+   * RC49/RC60 script, byte-identical.
+   */
+  windowTarget?: EditorWindowTarget;
   /** RC47: diagnostic sink for the win32 submit path (which titles failed, what held the foreground). */
   submitLog?: (message: string) => void;
   /** F-9 seam: capture runner for the darwin frontmost read (defaults to a bounded spawnSync). */
@@ -351,7 +358,15 @@ export function submitFailedHint(
  * compile — a different source would warm nothing).
  */
 export const WIN32_USER32_CSHARP =
-  '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);';
+  '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();' +
+  '[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' +
+  // RC74: enumerate top-level windows and focus ONE of them. `FindWindowEx` with a null
+  // parent walks the top-level list, which avoids the `EnumWindows` callback delegate —
+  // a scriptblock-to-delegate cast is the kind of thing that behaves differently across
+  // PowerShell versions, and this script has to run on Windows PowerShell 5.1.
+  '[DllImport("user32.dll",CharSet=CharSet.Auto)]public static extern System.IntPtr FindWindowEx(System.IntPtr p,System.IntPtr c,string cls,string win);' +
+  '[DllImport("user32.dll")]public static extern bool SetForegroundWindow(System.IntPtr h);' +
+  '[DllImport("user32.dll")]public static extern bool IsWindowVisible(System.IntPtr h);';
 export const WIN32_USER32_ADDTYPE = `Add-Type '${WIN32_USER32_CSHARP}' -Name U -Namespace W;`;
 
 /**
@@ -483,10 +498,70 @@ export function warmWin32KeystrokePath(
  * and there the lock permits it more often, because the user has interacted
  * recently. On final failure, print the foreground title and exit 1.
  */
+/**
+ * RC74 (Windows) — the same wrong-window defect the Linux raise had, measured there:
+ * `AppActivate('Cursor')` matches a window title by prefix, so with two editor windows
+ * open it hands back an arbitrary one, and the foreground check below accepts ANY window
+ * of the application. Both let the paste and the Enter land in a chat the user is not
+ * looking at.
+ *
+ * This block runs first: walk the top-level windows, score each title exactly as
+ * `editor-window-target.ts` scores them on Linux (same tiers, same rules), and focus the
+ * best match by handle. On success `$ok` is set and the existing candidate matching and
+ * AppActivate rounds are skipped; on ANY failure — no workspace name, no window scored,
+ * `SetForegroundWindow` refused by the foreground lock — it falls through to exactly the
+ * RC49/RC60 behaviour that ships today.
+ *
+ * ⚠ NOT EXECUTED ON WINDOWS by the author. The generated script is parse-checked and its
+ * scoring half is executed under PowerShell; the P/Invoke half is not.
+ */
+export function buildWin32WindowTargetBlock(target: EditorWindowTarget): string {
+  const app = String(target.appName ?? '').trim();
+  if (!app) return '';
+  const q = (v: string): string => `'${v.replace(/'/g, "''")}'`;
+  const ws = String(target.workspaceName ?? '').trim();
+  return (
+    `function nxScore($t,$app,$ws){` +
+    `if([string]::IsNullOrEmpty($t) -or [string]::IsNullOrEmpty($app)){return 0};` +
+    `if(-not ($t -eq $app -or $t.EndsWith(' - '+$app) -or $t.EndsWith($app))){return 0};` +
+    `if($ws){` +
+    `if($t -eq ($ws+' - '+$app)){return 100};` +
+    `if($t.EndsWith(' - '+$ws+' - '+$app)){return 90};` +
+    `if($t.Contains(' - '+$ws+' - ')){return 80};` +
+    `if($t.StartsWith($ws+' - ')){return 75};` +
+    `if($t.Contains($ws)){return 30}` +
+    `}else{` +
+    `if($t -eq $app){return 100};` +
+    `if($t.EndsWith(' - '+$app) -and (($t -split ' - ').Count -eq 2)){return 60}` +
+    `};` +
+    `return 10};` +
+    `$nxApp=${q(app)};$nxWs=${q(ws)};$nxBest=[IntPtr]::Zero;$nxTop=0;` +
+    `$nxH=[W.U]::FindWindowEx([IntPtr]::Zero,[IntPtr]::Zero,$null,$null);` +
+    `while($nxH -ne [IntPtr]::Zero){` +
+    `if([W.U]::IsWindowVisible($nxH)){` +
+    `$nxB=New-Object System.Text.StringBuilder 512;[void][W.U]::GetWindowText($nxH,$nxB,512);` +
+    `$nxS=nxScore ($nxB.ToString()) $nxApp $nxWs;` +
+    `if($nxS -gt $nxTop){$nxTop=$nxS;$nxBest=$nxH}};` +
+    `$nxH=[W.U]::FindWindowEx([IntPtr]::Zero,$nxH,$null,$null)};` +
+    `if($nxBest -ne [IntPtr]::Zero){` +
+    `if([W.U]::GetForegroundWindow() -eq $nxBest){$ok=$true}` +
+    `else{[void][W.U]::SetForegroundWindow($nxBest);Start-Sleep -Milliseconds 150;` +
+    `if([W.U]::GetForegroundWindow() -eq $nxBest){$ok=$true}}};` +
+    `Write-Output ("NXWIN=" + $nxTop);`
+  );
+}
+
+/** Which window tier the win32 script matched (see buildWin32WindowTargetBlock); -1 when absent. */
+export function parseWin32WindowScore(stdout: string | null | undefined): number {
+  const line = (stdout ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('NXWIN='));
+  const n = Number(line?.slice('NXWIN='.length));
+  return Number.isFinite(n) ? n : -1;
+}
+
 export function buildWin32KeystrokeScript(
   titles: readonly string[],
   sendKeys: string,
-  opts: { helperDll?: string | null } = {},
+  opts: { helperDll?: string | null; target?: EditorWindowTarget } = {},
 ): string {
   const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
   return (
@@ -494,6 +569,8 @@ export function buildWin32KeystrokeScript(
     `$w=New-Object -ComObject WScript.Shell;` +
     `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
     `$ok=$false;` +
+    // RC74: focus THIS window first; everything below is the untouched fallback.
+    (opts.target ? buildWin32WindowTargetBlock(opts.target) : '') +
     // RC60 (Windows/Devin staging tester, 2026-08-24): this Devin build titles
     // windows "<folder> - Devin - <session title>" — the app name sits MID-title,
     // so suffix-only matching refused a foreground window that WAS the editor
@@ -589,7 +666,7 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // exact/prefix/suffix — "Devin Next" misses the bare product names).
       const titles = [...new Set([deps.appName?.trim(), ...hostTitles].filter((t): t is string => !!t))];
       // RC49: foreground-first — see buildWin32KeystrokeScript.
-      const ps = buildWin32KeystrokeScript(titles, '{ENTER}', { helperDll: win32HelperAssemblyPath(env) });
+      const ps = buildWin32KeystrokeScript(titles, '{ENTER}', { helperDll: win32HelperAssemblyPath(env), target: deps.windowTarget });
       if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
       const t0 = Date.now();
       // RC52 (Windows tester 2026-08-24): the FIRST submit of a session took
@@ -601,7 +678,7 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
         stdio: ['ignore', 'pipe', 'ignore'], timeout: WIN32_KEYSTROKE_TIMEOUT_MS, encoding: 'utf8',
       });
       // RC72: name the helper path and the wall time — the Windows tester's log answers "was it the compile?" from one line.
-      deps.submitLog?.(`[nexpath] submit-win32: keystroke script ${Date.now() - t0} ms (helper=${parseWin32HelperMode(res.stdout)}, status=${res.status ?? 'null'})`);
+      deps.submitLog?.(`[nexpath] submit-win32: keystroke script ${Date.now() - t0} ms (helper=${parseWin32HelperMode(res.stdout)}, window=${parseWin32WindowScore(res.stdout)}, status=${res.status ?? 'null'})`);
       if (res.status === 0) return true;
       const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
       // RC52: name HOW it failed — status null + SIGTERM is the timeout kill,
