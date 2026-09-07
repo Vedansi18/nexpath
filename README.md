@@ -113,12 +113,12 @@ Nexpath CLI is built for prompt capture across AI coding agents.
 
 | Agent | Status in v0.1.5 |
 |-------|-----------------|
-| **Claude Code** | Fully supported — end-to-end tested |
-| **Cursor** | Fully supported — end-to-end tested |
-| **Windsurf** | Fully supported — end-to-end tested |
-| **Replit** | Fully supported — end-to-end tested |
-| **Lovable** | Fully supported — end-to-end tested |
-| **Bolt.new** | Fully supported — end-to-end tested |
+| [**Claude Code**](#add-nexpath-to-your-development-workflow--installation) | Fully supported — end-to-end tested |
+| [**Cursor**](https://marketplace.visualstudio.com/items?itemName=nexpath.nexpath-vscode) | Fully supported — end-to-end tested |
+| [**Windsurf**](https://marketplace.visualstudio.com/items?itemName=nexpath.nexpath-vscode) | Fully supported — end-to-end tested |
+| [**Replit**](https://chromewebstore.google.com/search/nexpath) | Fully supported — end-to-end tested |
+| [**Lovable**](https://chromewebstore.google.com/search/nexpath) | Fully supported — end-to-end tested |
+| [**Bolt.new**](https://chromewebstore.google.com/search/nexpath) | Fully supported — end-to-end tested |
 
 ---
 
@@ -134,7 +134,6 @@ npm link
 
 # Register with your coding agent and verify
 nexpath install
-nexpath install --yes      # or accept defaults without prompts
 
 # Verify
 nexpath --version
@@ -203,6 +202,13 @@ nexpath store delete -y
 ---
 
 ## Troubleshooting
+
+### No Popup, Or A Suggestion That Looks Wrong?
+
+Run `nexpath status`. It reports which credential is in effect and the last LLM call that
+failed — for example a key that has run out of credit, been revoked, or been replaced. When a
+call fails Nexpath falls back to local detection and goes quiet, which looks like nothing
+happening rather than like an error.
 
 ### Where Is My API Key Stored?
 
