@@ -1,4 +1,8 @@
 import { password, confirm, isCancel } from '@clack/prompts';
+import {
+  NonInteractiveTerminalError,
+  withInteractiveTerminal,
+} from './interactive-terminal.js';
 import { openStore, closeStore, DEFAULT_DB_PATH, getConfig, setConfig, deleteConfig, expireSessionsForCredentialChange } from '../../store/index.js';
 import { ENV_PROBE_ENABLED_KEY, purgeAllEnvFacts } from '../../store/env-facts.js';
 import {
@@ -72,23 +76,56 @@ export async function configUnsetAction(key: string, dbPath = DEFAULT_DB_PATH): 
 export type ApiKeyPasswordFn = () => Promise<string | null>;
 export type ApiKeyConfirmFn  = () => Promise<boolean>;
 
-const defaultApiKeyPasswordFn: ApiKeyPasswordFn = async () => {
-  const input = await password({
-    message:  'OpenAI API Key:',
-    validate: (value) => {
-      if (!isValidApiKey(value)) return 'Invalid OpenAI API key format (expected sk-...)';
-      return undefined;
-    },
-  });
+/**
+ * What to say when there is no terminal to prompt on.
+ *
+ * These commands exist to WRITE a credential, so `--yes` is not an answer the way it is for
+ * `install` — there is nothing to fall back to. The honest advice is that the resolver reads the
+ * environment first, so a caller that cannot prompt does not need this command at all.
+ */
+const apiKeyTtyAdvice = (command: string): string => [
+  `nexpath config ${command} needs an interactive terminal, but stdin or stdout is redirected.`,
+  '',
+  'Run it directly in a terminal:',
+  `  nexpath config ${command}`,
+  '',
+  'If you cannot use a terminal, you do not need this command: nexpath reads',
+  'OPENAI_API_KEY from the environment or a project .env before it looks at the',
+  'keychain or the stored file. Setting it there is enough.',
+].join('\n');
+
+// Named per command, because the advice tells the user what to re-run and naming the wrong
+// command is worse than naming none.
+const makeApiKeyPasswordFn = (command: string): ApiKeyPasswordFn => async () => {
+  // ⛔ @clack needs a real TTY and dies with a raw ERR_TTY_INIT_FAILED stack before any of our code
+  // runs. `install` has wrapped this since 2026-09-04; these commands did not, and the shape they
+  // were copied into (token.ts) inherited the gap. Only the TTY failure is translated — every other
+  // error is rethrown untouched, so a real bug never becomes a friendly message about terminals.
+  const input = await withInteractiveTerminal(
+    () => password({
+      message:  'OpenAI API Key:',
+      validate: (value) => {
+        if (!isValidApiKey(value)) return 'Invalid OpenAI API key format (expected sk-...)';
+        return undefined;
+      },
+    }) as Promise<unknown>,
+    () => new NonInteractiveTerminalError(apiKeyTtyAdvice(command)),
+  );
   if (isCancel(input)) return null;
   return String(input);
 };
 
+const defaultApiKeyPasswordFn = makeApiKeyPasswordFn('set-api-key');
+const rotateApiKeyPasswordFn  = makeApiKeyPasswordFn('rotate-api-key');
+
 const defaultRotateConfirmFn: ApiKeyConfirmFn = async () => {
-  const answer = await confirm({
-    message:      'Overwrite the existing API key?',
-    initialValue: false,
-  });
+  const answer = await withInteractiveTerminal(
+    () => confirm({
+      message:      'Overwrite the existing API key?',
+      initialValue: false,
+    }) as Promise<unknown>,
+    () => new NonInteractiveTerminalError(apiKeyTtyAdvice('rotate-api-key')),
+  );
   return !isCancel(answer) && answer === true;
 };
 
@@ -147,7 +184,7 @@ export async function configSetApiKeyAction(opts: ConfigApiKeyOpts = {}): Promis
 
 export async function configRotateApiKeyAction(opts: ConfigApiKeyOpts = {}): Promise<void> {
   const print       = opts.output      ?? defaultPrint;
-  const passwordFn  = opts.passwordFn  ?? defaultApiKeyPasswordFn;
+  const passwordFn  = opts.passwordFn  ?? rotateApiKeyPasswordFn;
   const confirmFn   = opts.confirmFn   ?? defaultRotateConfirmFn;
   const projectRoot = opts.projectRoot ?? process.cwd();
 

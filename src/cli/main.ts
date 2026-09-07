@@ -47,6 +47,30 @@ import {
 } from './commands/telemetry-sync.js';
 import { contentTemplateCreateAction, contentTemplateValidateAction } from './commands/content-template.js';
 
+/**
+ * Print a missing-terminal failure as the instruction it is, instead of the raw `uv_tty_init` stack.
+ *
+ * The `install` action has done this inline since 2026-09-04. The credential-writing commands under
+ * `config` prompt through the same library and did NOT, so `nexpath config set-api-key < /dev/null`
+ * printed a stack — and, worse, still exited 0, so a script could read it as success.
+ *
+ * ⚠️ Only `NonInteractiveTerminalError` is caught. Everything else propagates untouched, so this
+ * never converts a real fault into a friendly message about terminals.
+ */
+async function runInteractiveCommand(run: () => Promise<void>): Promise<void> {
+  try {
+    await run();
+  } catch (err) {
+    if (err instanceof NonInteractiveTerminalError) {
+      process.stderr.write(`
+${err.message}
+`);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
 export function createProgram(): Command {
   const program = new Command();
 
@@ -191,14 +215,14 @@ export function createProgram(): Command {
     .command('set-api-key')
     .description('Prompt for an OpenAI API key and store it securely (keychain → fallback file)')
     .action(async () => {
-      await configSetApiKeyAction();
+      await runInteractiveCommand(() => configSetApiKeyAction());
     });
 
   configCmd
     .command('rotate-api-key')
     .description('Replace the stored OpenAI API key (errors if no key is currently stored)')
     .action(async () => {
-      await configRotateApiKeyAction();
+      await runInteractiveCommand(() => configRotateApiKeyAction());
     });
 
   configCmd
