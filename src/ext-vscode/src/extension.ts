@@ -24,7 +24,8 @@ import { createInjectedRecordStore } from './injected-record.js';
 import { injectPeBody, injectPeBodyWithFallback, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
 import { createPePoller, type PePoller } from './pe-poller.js';
 import { createSubmitHookPoller, type SubmitHookPoller } from './submit-hook-poller.js';
-import { createSubmitClipboardDelivery, submitKeystroke, lastDarwinSubmitError, isDarwinAccessibilityDenial, scheduleWindsurfQueueFlush, warmWin32KeystrokePath } from './submit-clipboard-delivery.js';
+import { createSubmitClipboardDelivery, submitKeystroke, lastDarwinSubmitError, isDarwinAccessibilityDenial, scheduleWindsurfQueueFlush, warmWin32KeystrokePath, submitFailedHint } from './submit-clipboard-delivery.js';
+import { startDelivererHeartbeat, type DelivererHeartbeat } from './deliverer-heartbeat.js';
 import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
@@ -58,7 +59,8 @@ import {
   type ChatHistoryWatcher,
 } from './chat-history-watcher.js';
 import { createChatEventHandler } from './chat-pipeline.js';
-import { spawnAuto, spawnStop, spawnRecordSignal } from './ipc.js';
+import { spawnAuto, spawnStop, spawnRecordSignal, spawnCredentialStatus } from './ipc.js';
+import { maybeShowCredentialNotice, CREDENTIAL_NOTICE_KEY } from './credential-notice.js';
 import { peEventTypeToSignalKind } from './pe-signal-map.js';
 import { resolveWorkspaceFromDbPath, canonicalizeCwd } from './resolve-db-workspace.js';
 import { createAdvisoryFallback, type AdvisoryFallback } from './advisory-fallback.js';
@@ -140,6 +142,18 @@ export const CURSOR_CHAT_FOCUS_COMMANDS_V1: readonly string[] = [
 ];
 
 let submitPoller: SubmitHookPoller | undefined;
+/** RC70 (F-4): the deliverer heartbeat the CLI decider reads before it blocks. */
+let delivererHeartbeat: DelivererHeartbeat | undefined;
+/**
+ * RC70 (F-1): while the submit surface is active, content-free signals are
+ * deferred by the hold budget's own cap (MAX_HOLD_BUDGET_MS = 90 s). The CLI
+ * popup host holds the store lock for the whole human wait, and every other
+ * opener deletes that lock after 30 s and proceeds (measured, Experiment B2,
+ * 2026-09-05) — the host's close-write then reverts them. The `pe_shown` spawn
+ * fired exactly inside that window (the watcher captures the held prompt while
+ * the popup is open). Deferred signals carry their TRUE time via `--at`.
+ */
+export const SUBMIT_FLOW_SIGNAL_DEFER_MS = 90_000;
 let peLastPublishedCreatedAt = -Infinity;
 /** PE-scoped typed-origin echo guard (P8). Fresh per activation, matching `watcher`. */
 let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefined;
@@ -203,6 +217,8 @@ function buildSubmitAdvisory(
    * this milestone.
    */
   injectDirect: (text: string) => Promise<boolean>,
+  /** RC70 (F-3): delivery-outcome sink (outcome log + platform hints), as the Windsurf branch has. */
+  onOutcome?: (outcome: string) => void,
 ): SubmitHookPoller | null {
   if (!enabled) return null;
   const delivery = createSubmitClipboardDelivery({
@@ -234,6 +250,7 @@ function buildSubmitAdvisory(
     log,
     deliver: (text, d) => deliverSubmitReplacement(text, d as never) as never,
     onTiming: (t) => log(`[nexpath] submit handoff: ${JSON.stringify(t)}`),
+    onOutcome,
   });
 }
 
@@ -307,6 +324,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log(`[nexpath] submit-time advisory NOT armed (${h}): ${reason}`);
   };
 
+  // ── RC70 (F-4): deliverer heartbeat — REGARDLESS of consent ──────────────
+  // The CLI hook cancels a prompt on `block` and relies on this extension's
+  // poller to inject the replacement. Until now nothing told the hook whether
+  // that poller existed: a user who declined the chat-watch consent (setup runs
+  // regardless; the consent gate below returns BEFORE the poller arms) had a
+  // blocking hook with no deliverer — "Use enhanced" cancelled the prompt for
+  // nothing. The heartbeat says, every 10 s, whether THIS window delivers for
+  // this host and why not; the decider reads it before it blocks. Started here,
+  // above the consent gate, on purpose.
+  if (host === 'cursor' || host === 'windsurf') {
+    delivererHeartbeat?.stop('reactivated');
+    delivererHeartbeat = startDelivererHeartbeat({
+      host,
+      isArmed: () => submitSurface.active,
+      reason: () => submitSurface.active
+        ? 'armed'
+        : context.globalState.get<boolean>(CONSENT_KEY) !== true
+          ? 'consent_not_granted'
+          : (lastGateReason ?? 'not_armed_yet'),
+    });
+    context.subscriptions.push({ dispose: () => { delivererHeartbeat?.stop('disposed'); delivererHeartbeat = undefined; } });
+  }
+  // ── RC70 (F-1): one place every content-free signal goes through ─────────
+  // Old flow (surface inactive): spawned immediately, exactly as before.
+  const recordSignal = (kind: string, cwd: string): void => {
+    if (!submitSurface.active) { void spawnRecordSignal(kind, { cwd }); return; }
+    const at = Date.now();
+    const t = setTimeout(() => { void spawnRecordSignal(kind, { cwd, at }); }, SUBMIT_FLOW_SIGNAL_DEFER_MS);
+    if (typeof (t as { unref?: () => void }).unref === 'function') (t as unknown as { unref: () => void }).unref();
+  };
+
   // 1b. CLI auto-installer (additive). The extension drives the nexpath CLI via
   //     IPC; if the user installed only this extension (no manual CLI), nothing
   //     would work. Register the manual "Set up CLI" command, and — deferred so
@@ -327,6 +375,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       .then(() => { armSubmitFlowLate?.('post-setup-offer'); })
       .catch((err) =>
         log(`[nexpath] CLI setup offer failed: ${err instanceof Error ? err.message : String(err)}`),
+      )
+      // No-credential notice (2026-09-07): after the setup offer has had its
+      // turn, ask the CLI which credential layer resolves and say so ONCE if
+      // none does — the state in which every submit-time turn silently does
+      // nothing. Fail-quiet: no CLI / no answer ⇒ no notice.
+      .then(() => maybeShowCredentialNotice({
+        queryStatus: () => spawnCredentialStatus({ cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd() }),
+        show: (message) => { void vscode.window.showInformationMessage(message); },
+        getLastShownAt: () => context.globalState.get<number>(CREDENTIAL_NOTICE_KEY),
+        setLastShownAt: (at) => context.globalState.update(CREDENTIAL_NOTICE_KEY, at),
+        log,
+      }))
+      .catch((err) =>
+        log(`[nexpath] credential check failed: ${err instanceof Error ? err.message : String(err)}`),
       );
   }, 0);
   // RC15: bounded re-check — covers `nexpath install` run manually in a
@@ -510,7 +572,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const projectCwd = canonicalizeCwd(
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
         );
-        void spawnRecordSignal(signalKind, { cwd: projectCwd });
+        recordSignal(signalKind, projectCwd);
       }
       // P7 (PEH-7): gate the one event type that actually attempts
       // delivery today. No real insertion exists yet (P8/P9) — logging the
@@ -589,8 +651,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // in the webview — the same signal the CLI records for its own popup. Fire-
     // and-forget; `projectRoot` is already the canonicalized project the advisory
     // belongs to (armed from `cwdForEvent`).
-    recordAdvisoryShown: (projectRoot) =>
-      void spawnRecordSignal('advisory_fired', { cwd: projectRoot }),
+    recordAdvisoryShown: (projectRoot) => recordSignal('advisory_fired', projectRoot),
     statusBar: {
       show: (text, tooltip) => {
         statusBarItem.text = text;
@@ -778,9 +839,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Windsurf too. The poller dedups by createdAt (its own `handledAt`), so
         // onPublish fires once per distinct PE — no extra guard needed here.
         // Fire-and-forget; only the kind is sent, no body text.
-        void spawnRecordSignal('pe_shown', {
-          cwd: canonicalizeCwd(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()),
-        });
+        recordSignal('pe_shown', canonicalizeCwd(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()));
       },
       onOutcome: (outcome) => log(`[nexpath] windsurf PE poller insert outcome: ${outcome}`),
     });
@@ -964,7 +1023,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       submitFlowArmed = true;
       submitSurface.active = true;
-      submitPoller = buildSubmitAdvisory('cursor', true, croots, log, cursorInject) ?? undefined;
+      // RC70 (F-3): the outcome sink Cursor never had — the outcome log line and
+      // the one-time RC16 (darwin Accessibility) / RC47 (win32 focus) hints,
+      // same flags as the Windsurf branch. No queue flush: Cursor has no queue.
+      const onCursorOutcome = (outcome: string): void => {
+        log(`[nexpath] submit delivery outcome: ${outcome}`);
+        if (outcome !== 'submit_failed') return;
+        if (process.platform === 'win32' && win32SubmitHintShown) return;
+        if (process.platform === 'darwin' && darwinSubmitHintShown) return;
+        const hint = submitFailedHint(outcome, process.platform, lastDarwinSubmitError);
+        if (!hint) return;
+        if (process.platform === 'win32') win32SubmitHintShown = true;
+        if (process.platform === 'darwin') {
+          darwinSubmitHintShown = true;
+          log(`[nexpath] darwin submit keystroke failed${lastDarwinSubmitError ? ` (${lastDarwinSubmitError})` : ''}`);
+        }
+        void vscode.window.showWarningMessage(hint);
+      };
+      submitPoller = buildSubmitAdvisory('cursor', true, croots, log, cursorInject, onCursorOutcome) ?? undefined;
       if (!submitPoller) return false;
       submitPoller.start();
       context.subscriptions.push({ dispose: () => submitPoller?.stop() });
@@ -1174,7 +1250,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               // (strictly-new createdAt), so a same-createdAt re-publish does not
               // double-count. Fire-and-forget; only the kind is sent, no body text.
               if (isNewPeShow) {
-                void spawnRecordSignal('pe_shown', { cwd: projectRoot });
+                recordSignal('pe_shown', projectRoot);
               }
             } else {
               log(`[nexpath] PE publish suppressed: a newer turn's payload is already visible (createdAt ${pending.createdAt} < ${peLastPublishedCreatedAt})`);
@@ -1322,6 +1398,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   log('[nexpath] extension deactivated');
+  // RC70 (F-4): a final not-armed beat — the decider must not block on a window that is going away.
+  delivererHeartbeat?.stop('deactivated');
+  delivererHeartbeat = undefined;
   watcher?.stop();
   watcher = undefined;
   advisoryPoller?.stop();

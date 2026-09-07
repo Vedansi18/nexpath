@@ -61,9 +61,15 @@ describe('raiseWindsurfWindow', () => {
     expect(d.calls[0]).toEqual(['wmctrl', ['-x', '-a', 'windsurf']]);
   });
 
-  it('non-Linux → no-op false', () => {
-    expect(raiseWindsurfWindow(deps({ platform: 'darwin' as NodeJS.Platform }))).toBe(false);
-    expect(raiseWindsurfWindow(deps({ platform: 'win32' as NodeJS.Platform }))).toBe(false);
+  it('⭐ F-9: macOS activates the running editor process through System Events; win32 stays a no-op', () => {
+    const mac = deps({ platform: 'darwin' as NodeJS.Platform });
+    expect(raiseWindsurfWindow(mac)).toBe(true);
+    expect(mac.calls[0][0]).toBe('osascript');
+    expect(mac.calls[0][1].join(' ')).toContain('first application process whose name is');
+    expect(mac.calls[0][1].join(' ')).toContain('{"windsurf"}');
+    const win = deps({ platform: 'win32' as NodeJS.Platform });
+    expect(raiseWindsurfWindow(win)).toBe(false);
+    expect(win.calls).toHaveLength(0);
   });
 
   it('Linux without a display → false', () => {
@@ -88,8 +94,12 @@ describe('raiseAppWindow (generalised — used for Cursor inject)', () => {
     expect(d.calls[0]).toEqual(['xdotool', ['search', '--class', 'cursor', 'windowactivate', '--sync']]);
   });
 
-  it('non-Linux → no-op false', () => {
-    expect(raiseAppWindow('cursor', deps({ platform: 'darwin' as NodeJS.Platform }))).toBe(false);
+  it('⭐ F-9: macOS tries every candidate in order (live appName first) via one activation script; win32 no-op', () => {
+    const mac = deps({ platform: 'darwin' as NodeJS.Platform });
+    expect(raiseAppWindow(['cursor rebrand', 'cursor'], mac)).toBe(true);
+    expect(mac.calls[0][0]).toBe('osascript');
+    expect(mac.calls[0][1].join(' ')).toContain('{"cursor rebrand", "cursor"}');
+    expect(raiseAppWindow('cursor', deps({ platform: 'win32' as NodeJS.Platform }))).toBe(false);
   });
 });
 
