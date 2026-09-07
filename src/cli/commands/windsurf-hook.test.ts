@@ -15,8 +15,7 @@ import {
   runWindsurfHookAction,
   isReplacementEcho,
   isDuplicateWindsurfInvocation,
-  WINDSURF_BLOCK_CARD_MESSAGE,
-} from './windsurf-hook.js';
+  WINDSURF_BLOCK_CARD_MESSAGE, readInjectedPromptSnapshot } from './windsurf-hook.js';
 import {
   WINDSURF_INVOCATION_DIRNAME,
   WINDSURF_FALLBACK_WINDOW_MS,
@@ -943,5 +942,38 @@ describe('⭐ RC71 — windsurf expiry consume + 6.1 floor', () => {
     expect(offEnv.NEXPATH_HOLD_REMAINING_MS).toBeUndefined();
     expect(offEnv.NEXPATH_AGENT).toBe('windsurf'); // the pre-existing line still runs on the old flow
     expect(consumer).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⭐ Double-close (Bhavnesh finding 2026-09-06): the echo check must READ the
+ * session, never close it. SessionStateManager.load() folds maturity at the
+ * 30-minute boundary even for a read-only caller; auto then folds it again.
+ */
+describe('⭐ double-close — isReplacementEcho reads the session without closing it', () => {
+  const BODY = 'a genuinely long injected replacement prompt body used by the double-close pins for containment';
+  const storeWith = (stateJson: string | null) => {
+    const run = vi.fn();
+    const exec = vi.fn((_sql: string, _params: unknown[]) => (stateJson === null ? [] : [{ values: [[stateJson]] }]));
+    return { store: { db: { exec, run } } as never, run, exec };
+  };
+  const state = (over: Record<string, unknown>) => JSON.stringify({ sessionId: 's1', promptCount: 3, lastPromptAt: Date.now(), lastInjectedPrompt: BODY, ...over });
+
+  it('⭐ default reader: the persisted lastInjectedPrompt is read and NOTHING is written (no fold, no save)', async () => {
+    const { store, run, exec } = storeWith(state({}));
+    await expect(isReplacementEcho('/proj', BODY, { openStore: async () => store, closeStore: () => {} })).resolves.toBe(true);
+    expect(exec).toHaveBeenCalledWith('SELECT state_json FROM session_states WHERE project_root = ?', ['/proj']);
+    expect(run).not.toHaveBeenCalled();
+  });
+  it('past the 30-minute gap the session counts as over — same answer load() gave (fresh session, no injected prompt)', () => {
+    const { store } = storeWith(state({ lastPromptAt: Date.now() - 30 * 60 * 1000 }));
+    expect(readInjectedPromptSnapshot(store, '/proj').current.lastInjectedPrompt).toBeNull();
+    const live = storeWith(state({ lastPromptAt: Date.now() - 30 * 60 * 1000 + 5_000 }));
+    expect(readInjectedPromptSnapshot(live.store, '/proj').current.lastInjectedPrompt).toBe(BODY);
+  });
+  it('no row / corrupt JSON / non-string field ⇒ null, never a throw', () => {
+    expect(readInjectedPromptSnapshot(storeWith(null).store, '/proj').current.lastInjectedPrompt).toBeNull();
+    expect(readInjectedPromptSnapshot(storeWith('{not json').store, '/proj').current.lastInjectedPrompt).toBeNull();
+    expect(readInjectedPromptSnapshot(storeWith(state({ lastInjectedPrompt: 42 })).store, '/proj').current.lastInjectedPrompt).toBeNull();
   });
 });

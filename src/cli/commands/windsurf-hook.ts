@@ -51,6 +51,8 @@ import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
 // `harshil480` 15) — it is called here, never modified.
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
+// The boundary constant only — read for the read-only echo snapshot below (consume-only).
+import { SESSION_GAP_MS } from '../../classifier/SessionStateManager.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
@@ -404,6 +406,45 @@ export function isDuplicateWindsurfInvocation(
   };
 }
 
+/**
+ * Read-only view of the persisted session for the echo check.
+ *
+ * Double-close (Bhavnesh finding 2026-09-06, measured with a spy on
+ * updateProjectMaturity): this check used `SessionStateManager.load()`, which
+ * — for a caller that reads ONE field and persists nothing — still folds the
+ * ended session's maturity when it crosses the 30-minute gap. The `auto` the
+ * hook spawns next then folds the same boundary again: two graduation
+ * observations for one boundary, where GRADUATION_STABILITY is three. Live on
+ * ordinary Cursor and Windsurf use, not behind the switch.
+ *
+ * This reads the row directly and persists NOTHING. The boundary rule is the
+ * one `load()` applies (`now - lastPromptAt < SESSION_GAP_MS`): past the gap
+ * the session is over and a fresh one has no injected prompt, so the echo
+ * answer is identical to before — only the side effect is gone.
+ *
+ * Follow-up: once `SessionStateManager.load()` gains `endPreviousSession`
+ * (Bhavnesh e39fa867, pending Hiren's sign-off), this can become
+ * `load(store, root, now, { endPreviousSession: false })` — the owner's API.
+ */
+export function readInjectedPromptSnapshot(
+  store: unknown,
+  projectRoot: string,
+  now: number = Date.now(),
+): { current: { lastInjectedPrompt: string | null } } {
+  const none = { current: { lastInjectedPrompt: null } };
+  const db = (store as { db: { exec: (sql: string, params: unknown[]) => Array<{ values: unknown[][] }> } }).db;
+  const rows = db.exec('SELECT state_json FROM session_states WHERE project_root = ?', [projectRoot]);
+  const raw = rows[0]?.values[0]?.[0];
+  if (typeof raw !== 'string') return none;
+  try {
+    const s = JSON.parse(raw) as { lastPromptAt?: unknown; lastInjectedPrompt?: unknown };
+    if (typeof s.lastPromptAt === 'number' && now - s.lastPromptAt >= SESSION_GAP_MS) return none;
+    return { current: { lastInjectedPrompt: typeof s.lastInjectedPrompt === 'string' ? s.lastInjectedPrompt : null } };
+  } catch {
+    return none;
+  }
+}
+
 export async function isReplacementEcho(
   projectRoot: string | undefined,
   promptText: string,
@@ -416,8 +457,8 @@ export async function isReplacementEcho(
   if (!projectRoot || promptText.trim() === '') return false;
   const openStoreFn = ports.openStore ?? openStore;
   const closeStoreFn = ports.closeStore ?? closeStore;
-  const loadState = ports.loadState
-    ?? ((s: unknown, p: string) => SessionStateManager.load(s as never, p));
+  // NOT SessionStateManager.load() — see readInjectedPromptSnapshot (double-close).
+  const loadState = ports.loadState ?? readInjectedPromptSnapshot;
   let store: unknown = null;
   try {
     store = await openStoreFn(undefined as never);
