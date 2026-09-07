@@ -23,6 +23,7 @@ import {
   scheduleWindsurfQueueFlush,
   warmWin32KeystrokePath,
   WIN32_USER32_ADDTYPE,
+  submitFailedHint,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -643,5 +644,19 @@ describe('⭐ RC65 — warmWin32KeystrokePath', () => {
     expect(warmWin32KeystrokePath(() => {}, {
       platform: 'win32', spawnFn: () => { throw new Error('EPERM'); },
     })).toBe(false);
+  });
+});
+
+/** ⭐ RC70 (F-3) — the one-time "press Enter yourself" hint, pure and per platform (Cursor never had it). */
+describe('⭐ RC70 — submitFailedHint', () => {
+  it('win32 ⇒ the RC47 focus hint; darwin ⇒ RC16 Accessibility wording when the error says so, generic otherwise', () => {
+    expect(submitFailedHint('submit_failed', 'win32', null)).toContain('could not focus the editor window');
+    expect(submitFailedHint('submit_failed', 'darwin', 'not allowed assistive access')).toContain('grant Accessibility');
+    expect(submitFailedHint('submit_failed', 'darwin', null)).toContain('could not simulate the keystroke on this Mac');
+  });
+  it('linux ⇒ null (the RC59 gate names its own reason); any other outcome ⇒ null', () => {
+    expect(submitFailedHint('submit_failed', 'linux', null)).toBeNull();
+    expect(submitFailedHint('delivered', 'win32', null)).toBeNull();
+    expect(submitFailedHint('inject_failed', 'darwin', null)).toBeNull();
   });
 });

@@ -307,6 +307,30 @@ export function isDarwinAccessibilityDenial(err: string | null): boolean {
 export const WIN32_KEYSTROKE_TIMEOUT_MS = 20_000;
 
 /**
+ * RC70 (F-3): the one-time "press Enter yourself" hint for a `submit_failed`
+ * outcome, per platform — pure, so it can be pinned without a vscode host.
+ * Returns null when no hint applies (any other outcome, or linux, where the
+ * RC59 gate names its own reason in the log). Wording is the RC16/RC47 text the
+ * Windsurf branch has shipped since 2026-08-15/22.
+ */
+export function submitFailedHint(
+  outcome: string,
+  platform: NodeJS.Platform,
+  darwinError: string | null,
+): string | null {
+  if (outcome !== 'submit_failed') return null;
+  if (platform === 'win32') {
+    return 'Nexpath: your refined prompt is in the chat input — press Enter to send it. (Auto-send could not focus the editor window this time.)';
+  }
+  if (platform === 'darwin') {
+    return isDarwinAccessibilityDenial(darwinError)
+      ? 'Nexpath: your refined prompt is in the chat — press Enter to send it. To enable auto-send, grant Accessibility to this editor: System Settings → Privacy & Security → Accessibility.'
+      : 'Nexpath: your refined prompt is in the chat — press Enter to send it. Auto-send could not simulate the keystroke on this Mac (check System Settings → Privacy & Security → Accessibility).';
+  }
+  return null;
+}
+
+/**
  * RC65: the user32 Add-Type prelude, extracted so the activation pre-warm
  * compiles the BYTE-IDENTICAL C# source the real keystroke scripts use (the
  * cold cost being warmed is csc/.NET/Defender machine caches keyed off this
