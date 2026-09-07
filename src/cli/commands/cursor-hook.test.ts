@@ -6,6 +6,12 @@
  * Windsurf exit-2 convention here would silently fail to block.
  */
 import { describe, it, expect, vi, afterAll } from 'vitest';
+vi.mock('./submit-expiry-consumer.js', async (importOriginal) => {
+  // RC71 hermetic: the real spawner would launch a detached `node <argv[1]> submit-expiry-consume`
+  // from inside the test runner. The constant is kept real; only the spawn is stubbed.
+  const mod = await importOriginal<typeof import('./submit-expiry-consumer.js')>();
+  return { ...mod, spawnExpiryConsumer: vi.fn(() => ({ spawned: true, pid: 4242 })) };
+});
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +21,7 @@ import {
   rehydrateGuiEnvFromParent, GUI_ENV_KEYS,
 } from './cursor-hook.js';
 import { createHoldBudget } from './submit-hold-budget.js';
+import { SUBMIT_POPUP_MIN_REMAINING_MS } from './submit-expiry-consumer.js';
 
 const PAYLOAD = JSON.stringify({
   prompt: 'hello',
@@ -799,5 +806,126 @@ describe('⭐ RC67 — hold expiry logged with the budget split (cursor)', () =>
     const h = harness({ logEvent: c.logEvent, env: { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '0' } });
     await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
     expect(c.events.filter((e) => e.name.startsWith('cursor_hook_hold_')).length).toBe(0);
+  });
+});
+
+/**
+ * ⭐ RC71 — expiry consume (tester §4b fix 1) + the 6.1 floor, Cursor side.
+ * Mirrors the Windsurf pins; Cursor answers `continue:true` on every one of these.
+ */
+describe('⭐ RC71 — cursor expiry consume + 6.1 floor', () => {
+  function fakeBudget(totalMs = 60_000) {
+    let t = 0;
+    const timers: Array<{ at: number; fn: () => void }> = [];
+    const budget = createHoldBudget({
+      totalMs, now: () => t,
+      setTimeoutFn: (fn, ms) => { const e = { at: t + ms, fn }; timers.push(e); return e; },
+      clearTimeoutFn: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+    });
+    return { budget, advance(ms: number) { t += ms; for (const e of [...timers]) if (e.at <= t) { timers.splice(timers.indexOf(e), 1); e.fn(); } } };
+  }
+  const collect = () => {
+    const events: Array<{ level: string; name: string; data: Record<string, unknown> }> = [];
+    const logEvent = vi.fn((level: string, name: string, data?: Record<string, unknown>) => { events.push({ level, name, data: data ?? {} }); });
+    return { events, logEvent, find: (n: string) => events.filter((e) => e.name === n) };
+  };
+  // Segments in order: stdin → echo check → auto wait → decider.
+  const holdWith = (remainingAfterAuto: number) => ({
+    remaining: () => remainingAfterAuto, expired: () => false,
+    run: async <T>(work: () => Promise<T>) => ({ timedOut: false as const, value: await work() }),
+  });
+  const fakeChild = () => ({ kill: () => {} }) as never;
+
+  it('⭐ decider expiry ⇒ consumer spawned once {reason:decider_expired, project=/proj}, continue:true', async () => {
+    const f = fakeBudget(); const c = collect();
+    const consumer = vi.fn(() => ({ spawned: true, pid: 77 }));
+    const t0 = Date.now();
+    const h = harness({ logEvent: c.logEvent, holdBudget: f.budget, spawnExpiryConsumer: consumer,
+      spawnAutoFn: fakeChild, waitForChild: async () => {},
+      decide: () => new Promise((r) => { f.advance(60_000); setTimeout(() => r('block'), 0); }) });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(consumer).toHaveBeenCalledTimes(1);
+    const arg = consumer.mock.calls[0]![0] as unknown as { projectRoot: string; before: number; reason: string };
+    expect(arg).toMatchObject({ reason: 'decider_expired', projectRoot: '/proj' });
+    expect(arg.before).toBeGreaterThanOrEqual(t0);
+    expect(c.find('cursor_hook_expiry_consume')).toEqual([{ level: 'info', name: 'cursor_hook_expiry_consume',
+      data: { reason: 'decider_expired', spawned: true, pid: 77, error: null } }]);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('⭐ auto expiry ⇒ consumer ONCE {reason:auto_expired} — the refused decider segment does not consume again', async () => {
+    const consumer = vi.fn(() => ({ spawned: true, pid: 1 })); const decide = vi.fn(async () => 'block' as const);
+    let call = 0;
+    const fakeHold = {
+      remaining: () => 0, expired: () => call > 1,
+      run: async <T>(work: () => Promise<T>) => {
+        call += 1;
+        if (call <= 2) return { timedOut: false as const, value: await work() }; // stdin, echo check
+        return { timedOut: true as const };                                       // auto → expired; decider refused
+      },
+    };
+    const h = harness({ logEvent: () => {}, holdBudget: fakeHold as never, spawnExpiryConsumer: consumer,
+      spawnAutoFn: fakeChild, waitForChild: async () => {}, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(consumer).toHaveBeenCalledTimes(1);
+    expect((consumer.mock.calls[0]![0] as unknown as { reason: string }).reason).toBe('auto_expired');
+    expect(decide).not.toHaveBeenCalled();
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('⭐ below the floor after auto ⇒ hold_floor logged, decider SKIPPED, consumer {below_floor}, decision allow, split decider_ms null', async () => {
+    const c = collect(); const consumer = vi.fn(() => ({ spawned: true, pid: 2 })); const decide = vi.fn(async () => 'block' as const);
+    const raisePopup = vi.fn();
+    const h = harness({ logEvent: c.logEvent, holdBudget: holdWith(SUBMIT_POPUP_MIN_REMAINING_MS - 1) as never,
+      spawnExpiryConsumer: consumer, spawnAutoFn: fakeChild, waitForChild: async () => {}, decide, raisePopup });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    const floor = c.find('cursor_hook_hold_floor');
+    expect(floor).toHaveLength(1);
+    expect(floor[0]!.data).toMatchObject({ remaining_after_auto_ms: SUBMIT_POPUP_MIN_REMAINING_MS - 1, floor_ms: SUBMIT_POPUP_MIN_REMAINING_MS });
+    expect(decide).not.toHaveBeenCalled();
+    expect(raisePopup).not.toHaveBeenCalled(); // no popup to raise
+    expect(consumer).toHaveBeenCalledTimes(1);
+    expect((consumer.mock.calls[0]![0] as unknown as { reason: string }).reason).toBe('below_floor');
+    expect(c.find('cursor_hook_hold_expired')).toHaveLength(0);
+    expect(c.find('cursor_hook_decision')[0]!.data).toMatchObject({ decision: 'allow', decider_timed_out: false });
+    expect(c.find('cursor_hook_hold_split')[0]!.data).toMatchObject({ decision: 'allow', decider_ms: null });
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('exactly AT the floor the decider still runs and nothing is consumed', async () => {
+    const consumer = vi.fn(() => ({ spawned: true, pid: 3 })); const decide = vi.fn(async () => 'allow' as const);
+    const h = harness({ logEvent: () => {}, holdBudget: holdWith(SUBMIT_POPUP_MIN_REMAINING_MS) as never,
+      spawnExpiryConsumer: consumer, spawnAutoFn: fakeChild, waitForChild: async () => {}, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(consumer).not.toHaveBeenCalled();
+  });
+
+  it('a normal block run (real budget) ⇒ consumer never spawned, continue:false unchanged', async () => {
+    const consumer = vi.fn(() => ({ spawned: true, pid: 4 }));
+    const h = harness({ logEvent: () => {}, spawnExpiryConsumer: consumer, spawnAutoFn: fakeChild,
+      waitForChild: async () => {}, decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(consumer).not.toHaveBeenCalled();
+    expect(JSON.parse(h.writes[0]).continue).toBe(false);
+  });
+
+  it('⭐ NEXPATH_HOLD_REMAINING_MS is set (numeric) for the auto spawn only and restored after; switch OFF ⇒ nothing spawned, nothing set', async () => {
+    const prev = process.env.NEXPATH_HOLD_REMAINING_MS; delete process.env.NEXPATH_HOLD_REMAINING_MS;
+    try {
+      const seen: Array<string | undefined> = [];
+      const h = harness({ logEvent: () => {}, spawnAutoFn: () => { seen.push(process.env.NEXPATH_HOLD_REMAINING_MS); return fakeChild(); },
+        waitForChild: async () => {}, decide: async () => 'allow' as const });
+      await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+      expect(seen).toHaveLength(1);
+      expect(Number(seen[0])).toBeGreaterThan(0);
+      expect(process.env.NEXPATH_HOLD_REMAINING_MS).toBeUndefined(); // restored
+      const spawnAuto = vi.fn(); const consumer = vi.fn(() => ({ spawned: true, pid: 5 }));
+      const off = harness({ logEvent: () => {}, env: { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '0' }, spawnAutoFn: spawnAuto, spawnExpiryConsumer: consumer });
+      await runCursorHookAction('beforeSubmitPrompt', off.deps as never);
+      expect(spawnAuto).not.toHaveBeenCalled();
+      expect(consumer).not.toHaveBeenCalled();
+      expect(process.env.NEXPATH_HOLD_REMAINING_MS).toBeUndefined();
+    } finally { if (prev !== undefined) process.env.NEXPATH_HOLD_REMAINING_MS = prev; }
   });
 });

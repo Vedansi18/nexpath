@@ -41,6 +41,7 @@ import {
 import { openStore, closeStore } from '../../store/db.js';
 import { log } from '../../logger.js';
 import { killProcessTree } from '../../utils/kill-tree.js';
+import { spawnExpiryConsumer, SUBMIT_POPUP_MIN_REMAINING_MS } from './submit-expiry-consumer.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { writeSubmitDecision, readReplacementEchoes, latestReplacementEchoAt,
@@ -500,6 +501,11 @@ export interface WindsurfHookActionDeps {
    */
   logEvent?: typeof log;
   /**
+   * RC71 seam: the detached expiry / floor consumer (submit-expiry-consumer.ts).
+   * Defaults to the real spawner; injected in tests so nothing is spawned.
+   */
+  spawnExpiryConsumer?: typeof spawnExpiryConsumer;
+  /**
    * Bound on the POST-leg stdin read. Separate from `stdinTimeoutMs` (the PRE
    * leg, which holds the user's prompt and must stay tight): nothing is held on
    * the post-response leg, and the payload carries the full response text, which
@@ -598,6 +604,18 @@ export async function runWindsurfHookAction(
   };
   let autoMs: number | null = null;
   let remainingAfterAutoMs: number | null = null;
+  // RC71 (tester §4b): the rows `auto` built THIS turn must not survive an
+  // expiry (or a below-floor skip) to replay on the next turn. Detached so the
+  // prompt is released now; the consumer waits for a possibly-stale lock on
+  // its own time. `before` = this instant, so a re-submit's rows are never touched.
+  const consumeThisTurn = (reason: 'auto_expired' | 'decider_expired' | 'below_floor'): void => {
+    const r = (deps.spawnExpiryConsumer ?? spawnExpiryConsumer)({
+      projectRoot: opts.project ?? process.cwd(), before: Date.now(), reason,
+    });
+    logEvent(r.spawned ? 'info' : 'warn', 'windsurf_hook_expiry_consume', {
+      reason, spawned: r.spawned, pid: r.pid ?? null, error: r.error ?? null,
+    });
+  };
   // Holds the stdin buffer when the gated path consumed it, so `handle` can replay
   // it instead of reading an already-drained pipe. Null ⇒ nothing was read.
   let preReadRaw: string | null = null;
@@ -841,6 +859,10 @@ export async function runWindsurfHookAction(
     // `nexpath stop` child inherits process.env (see windsurf-hook/spawn.ts
     // baseOpts), so setting it here makes the Windsurf popup say "Windsurf".
     env.NEXPATH_AGENT = 'windsurf';
+    // RC71 (F-14): tell `auto` how much of the hold is left — an additive env
+    // the engine may honour for its LLM timeouts (nothing reads it yet).
+    // Gated only: with the switch off there is no hold and nothing is set.
+    if (hold) env.NEXPATH_HOLD_REMAINING_MS = String(hold.remaining());
     // Call shape is IDENTICAL to before when nothing was pre-read, so the
     // switch-off path passes exactly two arguments as it always has. Only the
     // gated path adds the replay dep.
@@ -885,6 +907,17 @@ export async function runWindsurfHookAction(
         // No orphan may survive the hold (plan acceptance). The child is
         // detached from our lifetime explicitly rather than left running.
         killProcessTree(result.child); // RC62: take the popup terminal too
+        consumeThisTurn('auto_expired'); // RC71: whatever auto persisted must not replay
+      } else if (decideAfterAuto && remainingAfterAutoMs < SUBMIT_POPUP_MIN_REMAINING_MS) {
+        // RC71 (6.1 floor): the popup waits on a HUMAN; with this little hold
+        // left it is certain to be killed mid-read — strictly worse than no
+        // popup (A3). Skip the decider, consume this turn's rows, release the
+        // prompt: the turn behaves exactly like today's "no advisory".
+        logEvent('warn', 'windsurf_hook_hold_floor', {
+          auto_ms: autoMs, remaining_after_auto_ms: remainingAfterAutoMs, floor_ms: SUBMIT_POPUP_MIN_REMAINING_MS,
+        });
+        decideAfterAuto = false;
+        consumeThisTurn('below_floor');
       }
     } else {
       await waitForChild(result.child);
@@ -919,6 +952,7 @@ export async function runWindsurfHookAction(
         // Hold exhausted while stop's popup waited — reap it so no popup
         // process outlives the hook (mirrors the auto orphan-kill above).
         killProcessTree(stopChildRef.current); // RC62: take the popup terminal too
+        consumeThisTurn('decider_expired'); // RC71: the popup's rows must not replay next turn
       }
       // RC67: the budget split on EVERY gated turn — how much of the hold auto
       // consumed and how long the popup had — so a slow turn is readable from

@@ -36,6 +36,7 @@ import { checkAndRecordCursorInvocation } from '../../cursor-hook/invocation-gua
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 import { log } from '../../logger.js';
 import { killProcessTree } from '../../utils/kill-tree.js';
+import { spawnExpiryConsumer, SUBMIT_POPUP_MIN_REMAINING_MS } from './submit-expiry-consumer.js';
 import { readFileSync } from 'node:fs';
 
 /**
@@ -243,6 +244,11 @@ export interface CursorHookActionDeps {
    * fail-open contract outranks observability.
    */
   logEvent?: typeof log;
+  /**
+   * RC71 seam: the detached expiry / floor consumer (submit-expiry-consumer.ts).
+   * Defaults to the real spawner; injected in tests so nothing is spawned.
+   */
+  spawnExpiryConsumer?: typeof spawnExpiryConsumer;
 }
 
 /**
@@ -426,9 +432,32 @@ export async function runCursorHookAction(
       // payloads are untouched.
       let autoMs: number | null = null;
       let remainingAfterAutoMs: number | null = null;
+      // RC71 (tester §4b): see windsurf-hook.ts `consumeThisTurn` — identical
+      // contract; the project root is the payload's, as the decider's is.
+      let autoExpired = false;
+      let belowFloor = false;
+      const consumeThisTurn = (reason: 'auto_expired' | 'decider_expired' | 'below_floor'): void => {
+        const r = (deps.spawnExpiryConsumer ?? spawnExpiryConsumer)({
+          projectRoot: payload?.projectRoot ?? process.cwd(), before: Date.now(), reason,
+        });
+        logEvent(r.spawned ? 'info' : 'warn', 'cursor_hook_expiry_consume', {
+          reason, spawned: r.spawned, pid: r.pid ?? null, error: r.error ?? null,
+        });
+      };
       if (promptText.trim() !== '') {
         const autoStartedAt = Date.now();
-        const child = spawnAutoFn(promptText, { cwd: payload?.projectRoot ?? process.cwd() });
+        // RC71 (F-14): additive env for `auto` — how much hold is left (the
+        // engine may honour it; nothing reads it yet). `spawnAuto` inherits
+        // process.env, so it is set for the spawn only and restored after.
+        const prevRemaining = process.env.NEXPATH_HOLD_REMAINING_MS;
+        process.env.NEXPATH_HOLD_REMAINING_MS = String(hold.remaining());
+        let child: ChildProcess | null;
+        try {
+          child = spawnAutoFn(promptText, { cwd: payload?.projectRoot ?? process.cwd() });
+        } finally {
+          if (prevRemaining === undefined) delete process.env.NEXPATH_HOLD_REMAINING_MS;
+          else process.env.NEXPATH_HOLD_REMAINING_MS = prevRemaining;
+        }
         const waited = await hold.run(() => waitForChild(child));
         autoMs = Date.now() - autoStartedAt;
         remainingAfterAutoMs = hold.remaining();
@@ -439,6 +468,17 @@ export async function runCursorHookAction(
           // Hold exhausted before auto finished: do NOT decide (the signal never
           // landed) and never leave an orphan (R2 — Cursor won't reap it).
           killProcessTree(child); // RC62: take the popup terminal too
+          autoExpired = true;
+          consumeThisTurn('auto_expired'); // RC71: whatever auto persisted must not replay
+        } else if (remainingAfterAutoMs < SUBMIT_POPUP_MIN_REMAINING_MS) {
+          // RC71 (6.1 floor): a popup with this little hold left is certain to
+          // be killed mid-read — strictly worse than no popup (A3). Skip the
+          // decider, consume this turn's rows, release the prompt.
+          logEvent('warn', 'cursor_hook_hold_floor', {
+            auto_ms: autoMs, remaining_after_auto_ms: remainingAfterAutoMs, floor_ms: SUBMIT_POPUP_MIN_REMAINING_MS,
+          });
+          belowFloor = true;
+          consumeThisTurn('below_floor');
         }
         logEvent('info', 'cursor_hook_auto', { spawned: child != null, timed_out: waited.timedOut === true });
       } else {
@@ -449,12 +489,18 @@ export async function runCursorHookAction(
       // forget poller raises 'Nexpath — Action Required' the moment it appears,
       // so the user actually sees it and can select — without which the hold
       // times out and the prompt is never blocked (live root cause 2026-08-12).
+      // RC71: below the floor the decider is not entered at all — an explicit
+      // allow with no popup (the rows were consumed above). `decider_ms` is
+      // null in the split for that case: no decider ran.
+      let decided: { timedOut: boolean; value?: 'allow' | 'block' } = { timedOut: false, value: 'allow' };
+      let deciderMs: number | null = null;
+      if (!belowFloor) {
       (deps.raisePopup ?? bringPopupToFront)();
       // Draws from what the stdin read + auto classification left. A timeout is
       // never a decision: it continues, so the original prompt is released (A3).
       const deciderStartedAt = Date.now();
-      const decided = await hold.run(() => decide(payload));
-      const deciderMs = Date.now() - deciderStartedAt;
+      decided = await hold.run(() => decide(payload));
+      deciderMs = Date.now() - deciderStartedAt;
       if (decided.timedOut) {
         logEvent('warn', 'cursor_hook_hold_expired', {
           segment: 'decider', auto_ms: autoMs, decider_ms: deciderMs, remaining_ms: 0,
@@ -463,6 +509,10 @@ export async function runCursorHookAction(
         // child — Cursor never reaps timed-out hooks (R2), and stop's popups
         // wait on the user with no bound of their own.
         killProcessTree(stopChildRef.current); // RC62: take the popup terminal too
+        // RC71: consume once per turn — an auto expiry already did (the
+        // exhausted budget then refuses this segment too, see the RC67 pin).
+        if (!autoExpired) consumeThisTurn('decider_expired');
+      }
       }
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
       logEvent('info', 'cursor_hook_decision', {
