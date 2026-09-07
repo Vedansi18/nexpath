@@ -56,7 +56,7 @@ describe('⭐ RC50/RC56 — atomic duplicate-invocation claim', () => {
     const fs = memFs();
     checkAndRecordCursorInvocation('/p', 'e', 'old', fs.deps(1000));
     checkAndRecordCursorInvocation('/p', 'e', 'new', fs.deps(1000 + 10 * 60_000 + 1));
-    const names = [...fs.files].map((p) => p.split('/').pop()!);
+    const names = [...fs.files].map((p) => p.split(/[\\/]/).pop()!); // either separator (Windows joins with backslashes)
     expect(names).not.toContain(cursorInvocationMarkerName('e', 'old'));
     expect(names).toContain(cursorInvocationMarkerName('e', 'new'));
   });

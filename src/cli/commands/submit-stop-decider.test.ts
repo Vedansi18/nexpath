@@ -352,6 +352,7 @@ describe('⭐ RC41 — runSequenceContinuationStop', () => {
     const r = await runSequenceContinuationStop('/proj', 'cursor', {
       spawnFn: (() => { const f = fakeChild(''); writes = f.writes; return f.child; }) as never,
       ...seqStore(true), logEvent: () => {},
+      latestEchoAt: (() => null) as never, // hermetic: '/proj/.nexpath' is writable on Windows; a real registry there deferred this pin
       writeDecision: (async () => {}) as never,
     });
     expect(r).toEqual({ ran: true, blocked: false });
@@ -364,6 +365,7 @@ describe('⭐ RC41 — runSequenceContinuationStop', () => {
     const r = await runSequenceContinuationStop('/proj', 'windsurf', {
       spawnFn: (() => fakeChild('{"decision":"block","reason":"item two body — long enough for the echo floor to apply cleanly"}\n').child) as never,
       ...seqStore(true), logEvent: () => {},
+      latestEchoAt: (() => null) as never, // hermetic: '/proj/.nexpath' is writable on Windows; a real registry there deferred this pin
       writeDecision: writeDecision as never, now: () => 5_000,
     });
     expect(r).toEqual({ ran: true, blocked: true });
@@ -399,6 +401,7 @@ describe('⭐ RC42 — itemless active row is logged, behaviour unchanged', () =
       spawnFn: (() => fakeChild('').child) as never,
       openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
       logEvent: ((lvl: string, name: string) => { warns.push([lvl, name]); }) as never,
+      latestEchoAt: (() => null) as never, // hermetic: '/proj/.nexpath' is writable on Windows; a real registry there deferred this pin
       writeDecision: (async () => {}) as never,
     });
     expect(r).toEqual({ ran: true, blocked: false });
@@ -412,6 +415,7 @@ describe('⭐ RC42 — itemless active row is logged, behaviour unchanged', () =
       spawnFn: (() => fakeChild('').child) as never,
       openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
       logEvent: ((_l: string, name: string) => { warns.push(name); }) as never,
+      latestEchoAt: (() => null) as never, // hermetic: '/proj/.nexpath' is writable on Windows; a real registry there deferred this pin
       writeDecision: (async () => {}) as never,
     });
     expect(warns).not.toContain('sequence_continuation_row_has_no_items');

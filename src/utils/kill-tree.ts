@@ -36,7 +36,7 @@ import { spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 /** The launcher's private temp-dir name (`prompt-enhancement-host.ts` makeTempDir) — the marker. */
 export const POPUP_HOST_TEMP_DIR_RE = /nexpath-pe-popup-host-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
@@ -147,7 +147,10 @@ export function killProcessTree(
     const removeDir = deps.removeDirFn ?? ((p: string) => rmSync(p, { recursive: true, force: true }));
     const base = deps.tmpDir ?? tmpdir();
     for (const marker of markers) {
-      try { removeDir(join(base, marker)); } catch { /* best-effort */ }
+      // This branch is POSIX-only (win32 reaps with taskkill above), so the temp-dir path is
+      // built with posix semantics regardless of the host running it (a Windows test runner
+      // would otherwise join with backslashes).
+      try { removeDir(posix.join(base, marker)); } catch { /* best-effort */ }
     }
   } catch {
     try { child.kill(); } catch { /* already gone */ }

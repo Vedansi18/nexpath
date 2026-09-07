@@ -181,8 +181,10 @@ describe('⭐ RC23 — workspace hook pins its project', () => {
   it('both command shapes carry --project when a root is given', () => {
     const cmd = buildWindsurfHookCommand('/cli/index.js', 'pre_user_prompt', '/usr/bin/node', '/ws/proj');
     const ps = buildWindsurfHookPowershell('/cli/index.js', 'pre_user_prompt', '/usr/bin/node', '/ws/proj');
-    expect(cmd).toContain('windsurf-hook pre_user_prompt --project "/ws/proj"');
-    expect(ps).toContain('windsurf-hook pre_user_prompt --project "/ws/proj"');
+    // The root is resolved and forward-slashed (on Windows '/ws/proj' resolves to 'D:/ws/proj').
+    const root = resolve('/ws/proj').replace(/\\/g, '/');
+    expect(cmd).toContain(`windsurf-hook pre_user_prompt --project "${root}"`);
+    expect(ps).toContain(`windsurf-hook pre_user_prompt --project "${root}"`);
   });
 
   it('⭐ the user-level (global) hook stays cwd-derived — no --project', () => {
