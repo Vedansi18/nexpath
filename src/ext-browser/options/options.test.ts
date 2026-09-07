@@ -6,11 +6,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockGet = vi.fn();
 const mockSet = vi.fn();
+const mockRemove = vi.fn();
 const fetchMock = vi.fn();
 
 const mockOnChanged = vi.fn();
 vi.mock('webextension-polyfill', () => ({
-  default: { storage: { local: { get: mockGet, set: mockSet }, onChanged: { addListener: mockOnChanged } } },
+  default: { storage: { local: { get: mockGet, set: mockSet, remove: mockRemove }, onChanged: { addListener: mockOnChanged } } },
 }));
 
 function setupDom(): void {
@@ -434,5 +435,101 @@ describe('the store disclosure lists exactly the events the code sends', () => {
   it('the table says the sixteen are all of them', () => {
     expect(publish).toContain('Sixteen, and no others');
     expect(SENT).toHaveLength(16);
+  });
+
+  // ── Empty credit is surfaced, not swallowed ─────────────────────────────────
+  //
+  // Measured on production 2026-09-07: a $0.00 account gets `402
+  // insufficient_credit` from the service, the pipeline fails open (correct),
+  // and the user is told nothing anywhere — the Test button even said
+  // "Token valid ✅", because /v1/me returns 200 for any live token and the
+  // button never read the balance it was handed. The moment a user has spent
+  // their free credit is the moment the product silently stopped working.
+  describe('empty credit', () => {
+    const VALID = 'npk_' + 'a'.repeat(40);
+
+    function meResponse(hasCredit: boolean): Response {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ balance_microcents: hasCredit ? 100000000 : 0,
+                             balance_display: hasCredit ? '$1.00' : '$0.00',
+                             has_credit: hasCredit }),
+      } as unknown as Response;
+    }
+
+    async function clickTestToken(): Promise<HTMLParagraphElement> {
+      (document.getElementById('nexpath-token') as HTMLInputElement).value = VALID;
+      (document.getElementById('test-token') as HTMLButtonElement).click();
+      await flush(); await flush();
+      return document.getElementById('token-status') as HTMLParagraphElement;
+    }
+
+    it('Test with a live token AND credit says valid, and clears any stale exhausted flag', async () => {
+      mockGet.mockResolvedValue({});
+      mockSet.mockResolvedValue(undefined);
+      mockRemove.mockResolvedValue(undefined);
+      fetchMock.mockResolvedValueOnce(meResponse(true));
+      await loadOptionsModule();
+
+      const status = await clickTestToken();
+      expect(status.textContent).toBe('Token valid ✅');
+      expect(status.className).toContain('ok');
+      expect(mockRemove).toHaveBeenCalledWith('nexpath_credit_exhausted_at');
+    });
+
+    it('Test with a live token but NO credit says so, names the balance, and points at the account page', async () => {
+      mockGet.mockResolvedValue({});
+      mockSet.mockResolvedValue(undefined);
+      fetchMock.mockResolvedValueOnce(meResponse(false));
+      await loadOptionsModule();
+
+      const status = await clickTestToken();
+      expect(status.textContent).toContain('no credit remaining');
+      expect(status.textContent).toContain('$0.00');
+      expect(status.textContent).toContain('account page');
+      expect(status.className).toContain('err');
+      // The token is still SAVED — it is valid; only the credit is gone.
+      expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ nexpath_token: VALID }));
+      // And the flag is set so the STATUS card explains it after a reload too.
+      expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ nexpath_credit_exhausted_at: expect.any(Number) }));
+    });
+
+    it('the status message never renders HTML from the response body', async () => {
+      mockGet.mockResolvedValue({});
+      mockSet.mockResolvedValue(undefined);
+      fetchMock.mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ has_credit: false, balance_display: '<img src=x onerror=alert(1)>' }),
+      } as unknown as Response);
+      await loadOptionsModule();
+
+      const status = await clickTestToken();
+      expect(status.querySelector('img')).toBeNull();
+      expect(status.textContent).toContain('<img');
+    });
+
+    it('STATUS card shows a Credit row with the account link while the flag is set on the token route', async () => {
+      mockGet.mockResolvedValue({ nexpath_token: VALID, nexpath_credit_exhausted_at: 1788766000000 });
+      await loadOptionsModule();
+      const html = els().selfCheck.innerHTML;
+      expect(html).toContain('Credit');
+      expect(html).toContain('Used up');
+      expect(html).toContain('https://parseos.tech/nexpath/account');
+    });
+
+    it('STATUS card shows NO Credit row when the flag is absent', async () => {
+      mockGet.mockResolvedValue({ nexpath_token: VALID });
+      await loadOptionsModule();
+      expect(els().selfCheck.innerHTML).not.toContain('Credit');
+    });
+
+    it('STATUS card shows NO Credit row when an own OpenAI key is the route, even if the flag is stale', async () => {
+      // A key never produces the 402 that sets the flag, so a leftover flag
+      // from earlier token use must not accuse the key route of being empty.
+      mockGet.mockResolvedValue({ openai_api_key: 'sk-' + 'a'.repeat(30), nexpath_token: VALID, nexpath_credit_exhausted_at: 1788766000000 });
+      await loadOptionsModule();
+      expect(els().selfCheck.innerHTML).not.toContain('Used up');
+    });
   });
 });

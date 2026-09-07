@@ -4,6 +4,7 @@ import {
   NEXPATH_BASE_URL_KEY,
   DEFAULT_API_BASE_URL,
   isValidNexpathTokenShape,
+  NEXPATH_CREDIT_EXHAUSTED_AT_KEY,
 } from '../adapters/llm-credentials.js';
 
 const KEY_NAME = 'openai_api_key';
@@ -172,7 +173,25 @@ tokenTestBtn.addEventListener('click', async () => {
       const payload: Record<string, string> = { [NEXPATH_TOKEN_KEY]: token };
       if (baseUrlInput) payload[NEXPATH_BASE_URL_KEY] = baseUrlInput.value.trim();
       await browser.storage.local.set(payload);
-      setTokenStatus('Token valid ✅', 'ok');
+      // /v1/me answers 200 for any live token, credit or not. The body says
+      // which — read it, or an empty account is told "valid" and then wonders
+      // why nothing ever appears. A probe that shows credit also clears the
+      // exhausted flag the fetch adapter may have left.
+      const me = await resp.json().catch(() => ({})) as { has_credit?: boolean; balance_display?: string };
+      if (me.has_credit === false) {
+        // setTokenStatus is textContent on purpose (never HTML from a response
+        // body), so the message stays plain; the clickable link is in the
+        // STATUS card row below, which renderSelfCheck draws from our own
+        // template. Keep the flag set so that row appears.
+        await browser.storage.local.set({ [NEXPATH_CREDIT_EXHAUSTED_AT_KEY]: Date.now() });
+        setTokenStatus(
+          `Token valid, but no credit remaining (${me.balance_display ?? '$0.00'}) — top up on your account page`,
+          'err',
+        );
+      } else {
+        await browser.storage.local.remove(NEXPATH_CREDIT_EXHAUSTED_AT_KEY);
+        setTokenStatus('Token valid ✅', 'ok');
+      }
       } else if (resp.status === 401) {
       setTokenStatus('Invalid token ❌ — regenerate it on your account page', 'err');
     } else {
@@ -257,7 +276,7 @@ function escHtml(str: string): string {
 }
 
 async function renderSelfCheck(): Promise<void> {
-  const result = await browser.storage.local.get([KEY_NAME, ROLE_KEY, NEXPATH_TOKEN_KEY]);
+  const result = await browser.storage.local.get([KEY_NAME, ROLE_KEY, NEXPATH_TOKEN_KEY, NEXPATH_CREDIT_EXHAUSTED_AT_KEY]);
   const hasKey = typeof result[KEY_NAME] === 'string' && (result[KEY_NAME] as string).length > 0;
   const hasToken =
     typeof result[NEXPATH_TOKEN_KEY] === 'string' && (result[NEXPATH_TOKEN_KEY] as string).length > 0;
@@ -273,6 +292,19 @@ async function renderSelfCheck(): Promise<void> {
       ? 'Nexpath service — token'
       : 'Not configured ❌';
 
+  // Only meaningful on the token route: an own OpenAI key never produces the
+  // 402 that sets this, and if the user has since added a key the note is
+  // stale, so it is shown only while the token is the route actually in use.
+  const creditExhausted = !hasKey && hasToken
+    && typeof result[NEXPATH_CREDIT_EXHAUSTED_AT_KEY] === 'number';
+  const creditRow = creditExhausted
+    ? `
+    <div class="check-row">
+      <span class="check-label">Credit</span>
+      <span class="check-val err">Used up — <a href="https://parseos.tech/nexpath/account" target="_blank" rel="noopener">top up on your account page</a></span>
+    </div>`
+    : '';
+
   checkEl.innerHTML = `
     <div class="check-row">
       <span class="check-label">API key</span>
@@ -285,7 +317,7 @@ async function renderSelfCheck(): Promise<void> {
     <div class="check-row">
       <span class="check-label">LLM route</span>
       <span class="check-val ${hasKey || hasToken ? 'ok' : 'err'}">${route}</span>
-    </div>
+    </div>${creditRow}
     <div class="check-row">
       <span class="check-label">Project role</span>
       <span class="check-val ok">${escHtml(roleLabel)}</span>

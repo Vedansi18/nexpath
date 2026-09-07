@@ -17,6 +17,12 @@ Token mode now delivers the full enhancement.
   Because it does, a popup uses more of your credit than it did in 0.1.54.
 
 ### Changed
+- **The settings page now tells you when your Nexpath credit is used up.** Before,
+  an empty account was told "Token valid" by the Test button and then saw nothing
+  happen, because the service's refusal was handled silently. Test now reports the
+  remaining balance and points to your account page, and the Status card shows a
+  Credit row with a top-up link until a later check finds credit again. Prompts still
+  go through untouched while credit is empty — nothing about that changes.
 - The Nexpath token card on the settings page now links straight to your account
   page, where the token is shown.
 - The rule for what a valid Nexpath token looks like is now read from one shared

@@ -231,3 +231,50 @@ describe('FetchLLMAdapter — endpoint resolution (Nexpath-token mode, llm-crede
     expect(mockFetch.mock.calls[0]![0]).toBe('https://explicit.example/v1/chat/completions');
   });
 });
+
+describe('402 from the Nexpath service', () => {
+  it('still throws (fail-open is unchanged) AND leaves the exhausted flag for the settings page', async () => {
+    const set = vi.fn().mockResolvedValue(undefined);
+    (globalThis as { browser?: unknown }).browser = { storage: { local: { set } } };
+    try {
+      mockFetch.mockResolvedValueOnce({
+        ok: false, status: 402, statusText: 'Payment Required',
+        text: async () => '{"error":{"code":"insufficient_credit"}}',
+      } as unknown as Response);
+      const adapter = new FetchLLMAdapter('npk_' + 'a'.repeat(40));
+      await expect(
+        adapter.chat({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'x' }] }),
+      ).rejects.toThrow('OpenAI fetch error 402');
+      // the note is fire-and-forget; let it land
+      await new Promise((r) => setTimeout(r, 0));
+      expect(set).toHaveBeenCalledWith({ nexpath_credit_exhausted_at: expect.any(Number) });
+    } finally {
+      delete (globalThis as { browser?: unknown }).browser;
+    }
+  });
+
+  it('a 401 does NOT set the flag — only a credit refusal does', async () => {
+    const set = vi.fn().mockResolvedValue(undefined);
+    (globalThis as { browser?: unknown }).browser = { storage: { local: { set } } };
+    try {
+      mockFetch.mockResolvedValueOnce({
+        ok: false, status: 401, statusText: 'Unauthorized', text: async () => 'Unauthorized',
+      } as unknown as Response);
+      const adapter = new FetchLLMAdapter('npk_' + 'a'.repeat(40));
+      await expect(adapter.chat({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(set).not.toHaveBeenCalled();
+    } finally {
+      delete (globalThis as { browser?: unknown }).browser;
+    }
+  });
+
+  it('a 402 with no extension storage available still throws cleanly (no second error)', async () => {
+    delete (globalThis as { browser?: unknown }).browser;
+    mockFetch.mockResolvedValueOnce({
+      ok: false, status: 402, statusText: 'Payment Required', text: async () => 'no credit',
+    } as unknown as Response);
+    const adapter = new FetchLLMAdapter('npk_' + 'a'.repeat(40));
+    await expect(adapter.chat({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow('402');
+  });
+});

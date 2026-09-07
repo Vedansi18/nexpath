@@ -1,4 +1,5 @@
 import type { LLMPort, LLMChatParams } from '../../core/ports/llm.port.js';
+import { NEXPATH_CREDIT_EXHAUSTED_AT_KEY } from './llm-credentials.js';
 
 export const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -73,10 +74,32 @@ export class FetchLLMAdapter implements LLMPort {
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => resp.statusText);
+      // 402 is the Nexpath service refusing for lack of credit — the one
+      // failure the user can fix and the one the pipeline would otherwise hide.
+      // The throw below is unchanged (fail-open: the prompt still goes through
+      // untouched); this only leaves a note the settings page can read.
+      // Best-effort and never awaited on the throw path: a storage failure must
+      // not change what this call reports.
+      if (resp.status === 402) void noteCreditExhausted();
       throw new Error(`OpenAI fetch error ${resp.status}: ${text}`);
     }
 
     const json = await resp.json() as { choices?: { message?: { content?: string } }[] };
     return json.choices?.[0]?.message?.content ?? '';
+  }
+}
+
+/**
+ * Record that the service refused a call for lack of credit. Reads
+ * `browser.storage.local` only if it exists (the adapter is also constructed
+ * in tests and the options page, where there may be no extension context).
+ */
+async function noteCreditExhausted(): Promise<void> {
+  try {
+    const store = (globalThis as { browser?: { storage?: { local?: { set(v: Record<string, unknown>): Promise<void> } } } })
+      .browser?.storage?.local;
+    if (store) await store.set({ [NEXPATH_CREDIT_EXHAUSTED_AT_KEY]: Date.now() });
+  } catch {
+    /* best-effort only */
   }
 }
