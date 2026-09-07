@@ -366,6 +366,56 @@ export function spawnRecordSignal(kind: string, opts: IpcOptions = {}): Promise<
   });
 }
 
+/** Shape of one `nexpath credential-status` JSON line (see the CLI command). */
+export interface CredentialStatusResult {
+  source: string;
+  configured: boolean;
+}
+
+/** Bound on the credential probe — the keychain layer can prompt or stall. */
+export const CREDENTIAL_STATUS_TIMEOUT_MS = 8_000;
+
+/**
+ * Spawn `nexpath credential-status` (read-only: no store, no lock) and parse
+ * its one JSON line. Resolves `null` on ANY failure — missing binary, non-zero
+ * exit, timeout, unparsable output — so the caller can only ever act on a
+ * positive "nothing resolves" answer, never on an absence of answer.
+ */
+export function spawnCredentialStatus(opts: IpcOptions = {}): Promise<CredentialStatusResult | null> {
+  return new Promise<CredentialStatusResult | null>((resolve) => {
+    let done = false;
+    const finish = (value: CredentialStatusResult | null): void => { if (!done) { done = true; resolve(value); } };
+    try {
+      const bin = resolveBinaryPath(opts);
+      const spawner = opts.spawnFn ?? spawn;
+      const safe = shellSafeSpawnTokens(bin, ['credential-status']);
+      const child = spawner(safe.bin, safe.args, { ...buildSpawnOptions(opts), stdio: ['ignore', 'pipe', 'ignore'] });
+      let stdout = '';
+      const timer = setTimeout(() => { try { child.kill(); } catch { /* already gone */ } finish(null); }, CREDENTIAL_STATUS_TIMEOUT_MS);
+      if (typeof timer.unref === 'function') timer.unref();
+      child.on('error', () => { clearTimeout(timer); finish(null); });
+      child.stdout?.on('data', (chunk: Buffer) => { stdout = appendCapped(stdout, chunk.toString()); });
+      child.on('close', (code: number | null) => {
+        clearTimeout(timer);
+        if (code !== 0) { finish(null); return; }
+        try {
+          const line = stdout.trim().split('\n').pop() ?? '';
+          const p = JSON.parse(line) as { source?: unknown; configured?: unknown };
+          if (p && typeof p.source === 'string' && typeof p.configured === 'boolean') {
+            finish({ source: p.source, configured: p.configured });
+          } else {
+            finish(null);
+          }
+        } catch {
+          finish(null);
+        }
+      });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
 /**
  * Spawn `nexpath stop` and parse the decision-session payload from stdout.
  *

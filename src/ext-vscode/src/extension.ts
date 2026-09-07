@@ -59,7 +59,8 @@ import {
   type ChatHistoryWatcher,
 } from './chat-history-watcher.js';
 import { createChatEventHandler } from './chat-pipeline.js';
-import { spawnAuto, spawnStop, spawnRecordSignal } from './ipc.js';
+import { spawnAuto, spawnStop, spawnRecordSignal, spawnCredentialStatus } from './ipc.js';
+import { maybeShowCredentialNotice, CREDENTIAL_NOTICE_KEY } from './credential-notice.js';
 import { peEventTypeToSignalKind } from './pe-signal-map.js';
 import { resolveWorkspaceFromDbPath, canonicalizeCwd } from './resolve-db-workspace.js';
 import { createAdvisoryFallback, type AdvisoryFallback } from './advisory-fallback.js';
@@ -374,6 +375,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       .then(() => { armSubmitFlowLate?.('post-setup-offer'); })
       .catch((err) =>
         log(`[nexpath] CLI setup offer failed: ${err instanceof Error ? err.message : String(err)}`),
+      )
+      // No-credential notice (2026-09-07): after the setup offer has had its
+      // turn, ask the CLI which credential layer resolves and say so ONCE if
+      // none does — the state in which every submit-time turn silently does
+      // nothing. Fail-quiet: no CLI / no answer ⇒ no notice.
+      .then(() => maybeShowCredentialNotice({
+        queryStatus: () => spawnCredentialStatus({ cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd() }),
+        show: (message) => { void vscode.window.showInformationMessage(message); },
+        getLastShownAt: () => context.globalState.get<number>(CREDENTIAL_NOTICE_KEY),
+        setLastShownAt: (at) => context.globalState.update(CREDENTIAL_NOTICE_KEY, at),
+        log,
+      }))
+      .catch((err) =>
+        log(`[nexpath] credential check failed: ${err instanceof Error ? err.message : String(err)}`),
       );
   }, 0);
   // RC15: bounded re-check — covers `nexpath install` run manually in a

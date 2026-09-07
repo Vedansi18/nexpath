@@ -173,8 +173,18 @@ vi.mock('./ipc.js', () => ({
   spawnAuto: vi.fn(),
   spawnStop: vi.fn(),
   spawnRecordSignal: vi.fn(() => Promise.resolve()),
+  // No-credential notice: null = "no answer" ⇒ nothing shown in every existing pin.
+  spawnCredentialStatus: vi.fn(() => Promise.resolve(null)),
 }));
-import { spawnRecordSignal } from './ipc.js';
+import { spawnRecordSignal, spawnCredentialStatus } from './ipc.js';
+// Hermetic: the deferred setup offer (`setTimeout(…, 0)` in activate) runs the REAL
+// installer glue — CLI staging probes, spawnSync — once a test yields to the event loop.
+// Earlier pins never yielded, so it never fired; the notice pins do. Stub only the two
+// entry points activate() calls; everything else in the module stays real.
+vi.mock('./installer/vscode-glue.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./installer/vscode-glue.js')>();
+  return { ...mod, offerSetupIfNeeded: vi.fn(async () => {}), runSetupCommand: vi.fn(async () => 'done') };
+});
 vi.mock('./deliverer-heartbeat.js', () => ({
   startDelivererHeartbeat: mockStartDelivererHeartbeat,
 }));
@@ -1620,5 +1630,53 @@ describe('deactivate', () => {
     expect(mockPePollerStart).toHaveBeenCalledOnce();
     deactivate();
     expect(mockPePollerStop).toHaveBeenCalledOnce();
+  });
+});
+
+/** No-credential notice (2026-09-07) — wired after the deferred setup offer; fail-quiet on no answer. */
+describe('no-credential notice wiring', () => {
+  // makeCtx's globalState has no `update`; the notice stamps through it, so give the
+  // context a real (spied) update that writes back into the same store `get` reads.
+  const ctxWithUpdate = (consent: boolean) => {
+    const base = makeCtx(consent) as unknown as { globalState: { get: (k: string) => unknown } & Record<string, unknown> };
+    const stored = new Map<string, unknown>();
+    const get = base.globalState.get.bind(base.globalState);
+    base.globalState.get = ((k: string) => (stored.has(k) ? stored.get(k) : get(k))) as never;
+    const update = vi.fn(async (k: string, v: unknown) => { stored.set(k, v); });
+    base.globalState.update = update;
+    return { ctx: base, update };
+  };
+  const notices = () => mockShowInformationMessage.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('no LLM credential'));
+  // Every earlier activate() in this file queued its deferred setTimeout(0) block and never
+  // yielded to the event loop; drain those (they answer null ⇒ no notice) before arming ours.
+  const drain = () => new Promise((r) => setTimeout(r, 30));
+
+  it('⭐ CLI answers {configured:false} ⇒ one information message naming set-api-key/set-token, stamped in globalState', async () => {
+    await drain();
+    vi.mocked(spawnCredentialStatus).mockReset().mockResolvedValue(null);
+    vi.mocked(spawnCredentialStatus).mockResolvedValueOnce({ source: 'none', configured: false });
+    mockShowInformationMessage.mockReset();
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    const { ctx, update } = ctxWithUpdate(true);
+    await activate(ctx as never);
+    await new Promise((r) => setTimeout(r, 30)); // the check is deferred behind the setup offer
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]).toContain('nexpath config set-api-key');
+    expect(notices()[0]).toContain('nexpath config set-token');
+    expect(update).toHaveBeenCalledWith('nexpath.credentialNoticeAt', expect.any(Number));
+    vi.mocked(spawnCredentialStatus).mockReset().mockResolvedValue(null);
+  });
+
+  it('no answer from the CLI (null) ⇒ no notice', async () => {
+    await drain();
+    vi.mocked(spawnCredentialStatus).mockReset().mockResolvedValue(null);
+    mockShowInformationMessage.mockReset();
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    const { ctx } = ctxWithUpdate(true);
+    await activate(ctx as never);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(notices()).toHaveLength(0);
   });
 });
