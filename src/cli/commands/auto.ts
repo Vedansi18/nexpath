@@ -31,7 +31,6 @@ import { getProject, upsertProject } from '../../store/projects.js';
 import { getRecentPrompts } from '../../store/prompts.js';
 import { importHistoricalPrompts } from '../../store/historical-import.js';
 import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
-import { isUsableLlmCredential } from '../../config/credential-shape.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
 import { OpenAILLMAdapter } from '../adapters/llm.adapter.js';
 import { loggerAdapter } from '../adapters/log.adapter.js';
@@ -1139,40 +1138,16 @@ export async function runAuto(
 
   // ── 2. LLM profile classification — runs before the stage classifier so the classifier
   //       calibrates on the freshly-computed profile ──────────────────────────────
-  // ⛔ THE CREDENTIAL GATE IS LOAD-BEARING — without it this line CRASHED the hook.
-  //
-  // `openai` is undefined on the production hook path, so `OpenAILLMAdapter` falls back to
-  // `new OpenAI()` (llm.adapter.ts:14), and the SDK throws when no key resolves. That killed
-  // `nexpath auto` with exit 1 in ~260 ms — on the THIRD prompt of every session, because
-  // MIN_PROFILE_PROMPTS is 4 and this tests `>= MIN_PROFILE_PROMPTS - 1`. Nothing was captured and
-  // the user was told nothing. Reported by Vedansi with four reproductions, 2026-09-07.
-  //
-  // The comment below used to claim offline paths "don't require an API key". True of the lazy
-  // CONSTRUCTION, false of this branch, which reaches the call. It has been corrected.
-  //
-  // Reading `process.env` is correct here and is NOT env-only: `autoAction` calls
-  // `resolveOpenAIKey()` (auto.ts, before `runAuto` is invoked), which promotes the winner of the
-  // 4-layer chain — env → project .env → OS keychain → 0600 file — into `process.env`. A keychain
-  // user is unaffected. Same predicate the composer uses at facade.ts:222 and :334, and
-  // `isUsableLlmCredential` deliberately accepts a Nexpath token as well as an `sk-` key.
-  //
-  // `openai !== undefined` short-circuits first, and that is not a convenience for tests: an
-  // INJECTED client needs no credential of its own, so gating it on the env var would disable a
-  // perfectly working caller. Two existing auto.test.ts cases inject a stub and no key — they
-  // caught this when the gate was credential-only, which is exactly what they are there for.
-  //
-  // With no usable credential the profile simply is not recomputed — the same degrade the stage
-  // classifier already performs, and every consumer of `profile` already handles null.
   if (isProfileStale(mgr.current.profile, mgr.current.promptCount) &&
-      mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1 &&
-      (openai !== undefined || isUsableLlmCredential(process.env['OPENAI_API_KEY'] ?? ''))) {
+      mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1) {
     const updatedProfile = await classifyUserProfileLLM(
       mgr.current.promptHistory as import('../../core/classifier/types.js').PromptRecord[],
       mgr.current.promptCount,
       mgr.current.profile,
-      // Adapters — wired to core port interfaces. Constructed lazily here (not at runAuto entry):
-      // the OpenAI SDK is only instantiated when profile classification actually runs. The branch
-      // above guarantees a usable credential by the time we get here.
+      // Adapters — wired to core port interfaces. Constructed lazily here (not at
+      // runAuto entry): the OpenAI SDK is only instantiated when profile
+      // classification actually runs, so offline paths that never reach an LLM
+      // call don't require an API key.
       new OpenAILLMAdapter(openai),
       loggerAdapter,
     );
