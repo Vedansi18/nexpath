@@ -25,7 +25,7 @@
  * Fully dependency-injected; the real spawns are `spawnSync` (no shell).
  */
 import { spawnSync } from 'node:child_process';
-import { buildWin32KeystrokeScript, WIN32_KEYSTROKE_TIMEOUT_MS } from './submit-clipboard-delivery.js';
+import { buildWin32KeystrokeScript, WIN32_KEYSTROKE_TIMEOUT_MS, win32HelperAssemblyPath } from './submit-clipboard-delivery.js';
 import { activateDarwinApp } from './darwin-focus.js';
 
 export interface AutoPasteDeps {
@@ -115,7 +115,8 @@ export function pasteKeystroke(deps: AutoPasteDeps = {}): boolean {
       // (measured on the Windows tester); defaultRun's 3 s ceiling would kill
       // every cold paste. Injected `run` (tests) keeps the plain seam; the
       // production path spawns with the shared 20 s ceiling.
-      const script = buildWin32KeystrokeScript(deps.win32Titles, '^v');
+      // RC72: the cached user32 helper (see win32HelperPrelude) — no per-keystroke compile.
+      const script = buildWin32KeystrokeScript(deps.win32Titles, '^v', { helperDll: win32HelperAssemblyPath(env) });
       if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', script]);
       try {
         return spawnSync('powershell', ['-NoProfile', '-Command', script], {

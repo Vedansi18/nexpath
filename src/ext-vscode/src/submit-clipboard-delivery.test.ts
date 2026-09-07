@@ -23,6 +23,11 @@ import {
   scheduleWindsurfQueueFlush,
   warmWin32KeystrokePath,
   WIN32_USER32_ADDTYPE,
+  WIN32_USER32_CSHARP,
+  win32HelperAssemblyPath,
+  win32HelperPrelude,
+  buildWin32PrewarmScript,
+  parseWin32HelperMode,
   submitFailedHint,
 } from './submit-clipboard-delivery.js';
 
@@ -606,7 +611,8 @@ describe('⭐ RC65 — warmWin32KeystrokePath', () => {
     expect(spawns).toHaveLength(1);
     expect(spawns[0]!.cmd).toBe('powershell');
     const script = spawns[0]!.args.join(' ');
-    expect(script).toContain(WIN32_USER32_ADDTYPE);
+    // RC72: the pre-warm compiles the byte-identical C# source (to the cache when the env names one).
+    expect(script).toContain(WIN32_USER32_CSHARP);
     expect(script).toContain('exit 0');
     expect(script).not.toContain('SendKeys');
     expect(script).not.toContain('AppActivate');
@@ -704,5 +710,72 @@ describe('⭐ F-9 — darwin frontmost gate on the submit keystroke', () => {
     const run = vi.fn().mockReturnValue(true); const runCapture = vi.fn(() => 'Terminal');
     expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', run, runCapture })).toBe(true);
     expect(runCapture).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⭐ RC72 — Windows post-Enter latency: the user32 helper is compiled ONCE to a per-user
+ * assembly by the pre-warm; keystroke scripts load it and fall back to the byte-identical
+ * inline compile. Without a cache path every script is byte-identical to RC49–RC65.
+ */
+describe('⭐ RC72 — cached win32 helper assembly', () => {
+  const env = { LOCALAPPDATA: 'C:\\Users\\SALVI GAURAV\\AppData\\Local' };
+  it('cache path: LOCALAPPDATA first, TEMP/TMP fallback, null without any; hash of the C# source', () => {
+    const p = win32HelperAssemblyPath(env)!;
+    expect(p.startsWith('C:\\Users\\SALVI GAURAV\\AppData\\Local\\nexpath\\user32-fg-')).toBe(true);
+    expect(p).toMatch(/user32-fg-[0-9a-f]{8}\.dll$/);
+    expect(win32HelperAssemblyPath({ TEMP: 'D:\\t\\' })).toBe(`D:\\t\\nexpath\\${p.split('\\').pop()}`);
+    expect(win32HelperAssemblyPath({})).toBeNull();
+    expect(win32HelperAssemblyPath({ LOCALAPPDATA: '  ' })).toBeNull();
+  });
+  it('⭐ prelude: try the cached DLL, then the byte-identical inline compile; reports which ran', () => {
+    const pre = win32HelperPrelude('C:\\x\\u.dll');
+    expect(pre).toContain("$nxDll='C:\\x\\u.dll'");
+    expect(pre).toContain('Add-Type -LiteralPath $nxDll -ErrorAction Stop');
+    expect(pre.indexOf('Add-Type -LiteralPath')).toBeLessThan(pre.indexOf(WIN32_USER32_ADDTYPE));
+    expect(pre).toContain(`if($nxHelper -ne 'cached'){${WIN32_USER32_ADDTYPE}}`);
+    expect(pre).toContain('Write-Output ("NXHELPER=" + $nxHelper)');
+    expect(win32HelperPrelude(null)).toBe(WIN32_USER32_ADDTYPE);
+    expect(win32HelperPrelude(undefined)).toBe(WIN32_USER32_ADDTYPE);
+  });
+  it('⭐ keystroke scripts: with a cache path the prelude leads and the RC49/60 body is unchanged; without one, byte-identical to before', () => {
+    const cached = buildWin32KeystrokeScript(['Devin'], '{ENTER}', { helperDll: 'C:\\x\\u.dll' });
+    const plain = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(cached.startsWith(win32HelperPrelude('C:\\x\\u.dll'))).toBe(true);
+    expect(cached.slice(win32HelperPrelude('C:\\x\\u.dll').length)).toBe(plain.slice(WIN32_USER32_ADDTYPE.length));
+    expect(plain.startsWith(WIN32_USER32_ADDTYPE)).toBe(true);
+    expect(buildWin32KeystrokeScript(['Devin'], '{ENTER}', { helperDll: null })).toBe(plain);
+  });
+  it('⭐ pre-warm script: compiles the same source to a temp name and renames atomically; a present cache is left alone; no keys', () => {
+    const ps = buildWin32PrewarmScript('C:\\x\\u.dll');
+    expect(ps).toContain("if(-not (Test-Path -LiteralPath $nxDll))");
+    expect(ps).toContain(`Add-Type '${WIN32_USER32_CSHARP}' -Name U -Namespace W -OutputAssembly $nxTmp`);
+    expect(ps).toContain("$nxTmp=$nxDll+'.tmp-'+$PID+'.dll'");
+    expect(ps).toContain('Move-Item -LiteralPath $nxTmp -Destination $nxDll -Force');
+    expect(ps).toContain("$nxDir='C:\\x'");
+    expect(ps.endsWith('exit 0')).toBe(true);
+    expect(ps).not.toContain('SendKeys');
+    expect(buildWin32PrewarmScript(null)).toBe(`${WIN32_USER32_ADDTYPE}exit 0`);
+  });
+  it('pre-warm wiring: with a Windows env the spawned script targets the cache; without one it is the RC65 script', () => {
+    const spawns: string[][] = [];
+    const child = { on: () => undefined, unref: () => undefined, kill: () => undefined };
+    warmWin32KeystrokePath(() => {}, { platform: 'win32', env, spawnFn: (_c, a) => { spawns.push(a); return child; } });
+    expect(spawns[0]!.join(' ')).toContain('-OutputAssembly');
+    expect(spawns[0]!.join(' ')).toContain('SALVI GAURAV');
+    warmWin32KeystrokePath(() => {}, { platform: 'win32', env: {}, spawnFn: (_c, a) => { spawns.push(a); return child; } });
+    expect(spawns[1]!.join(' ')).toBe(`-NoProfile -Command ${WIN32_USER32_ADDTYPE}exit 0`);
+  });
+  it('submit on win32 passes the cache path into the script (run seam), paste too', () => {
+    const calls: string[] = [];
+    submitKeystroke({ platform: 'win32', env, host: 'cursor', isPopupFocused: () => false, run: (_c, a) => { calls.push(a.join(' ')); return true; } });
+    expect(calls[0]).toContain("$nxDll='C:\\Users\\SALVI GAURAV\\AppData\\Local\\nexpath\\user32-fg-");
+    expect(calls[0]).toContain('SendKeys("{ENTER}")');
+  });
+  it('parseWin32HelperMode reads the marker and tolerates noise', () => {
+    expect(parseWin32HelperMode('NXHELPER=cached\r\n')).toBe('cached');
+    expect(parseWin32HelperMode('junk\nNXHELPER=compiled\nFOREGROUND=x')).toBe('compiled');
+    expect(parseWin32HelperMode('')).toBe('unknown');
+    expect(parseWin32HelperMode(null)).toBe('unknown');
   });
 });

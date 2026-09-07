@@ -144,3 +144,17 @@ describe('⭐ RC59 — raiseAppWindow candidates', () => {
     expect(tried).toEqual(['windsurf']);
   });
 });
+
+/** ⭐ RC72 — the paste script also uses the cached helper when the Windows env names a cache dir. */
+describe('⭐ RC72 — pasteKeystroke uses the cached win32 helper', () => {
+  it('with LOCALAPPDATA: the cache-aware prelude leads; without: the RC49 script byte-identical', () => {
+    const calls: string[][] = [];
+    pasteKeystroke({ platform: 'win32', env: { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, win32Titles: ['Devin'], run: (_c, a) => { calls.push(a); return true; } });
+    expect(calls[0]!.join(' ')).toContain("$nxDll='C:\\Users\\u\\AppData\\Local\\nexpath\\user32-fg-");
+    expect(calls[0]!.join(' ')).toContain('Add-Type -LiteralPath $nxDll');
+    expect(calls[0]!.join(' ')).toContain('SendKeys("^v")');
+    pasteKeystroke({ platform: 'win32', env: {}, win32Titles: ['Devin'], run: (_c, a) => { calls.push(a); return true; } });
+    expect(calls[1]!.join(' ').startsWith('-NoProfile -Command Add-Type ')).toBe(true);
+    expect(calls[1]!.join(' ')).not.toContain('$nxDll');
+  });
+});
