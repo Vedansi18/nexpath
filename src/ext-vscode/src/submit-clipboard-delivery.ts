@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { darwinAppCandidates, darwinEditorIsFrontmost } from './darwin-focus.js';
 
 /**
@@ -349,8 +350,67 @@ export function submitFailedHint(
  * cold cost being warmed is csc/.NET/Defender machine caches keyed off this
  * compile — a different source would warm nothing).
  */
-export const WIN32_USER32_ADDTYPE =
-  `Add-Type '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' -Name U -Namespace W;`;
+export const WIN32_USER32_CSHARP =
+  '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);';
+export const WIN32_USER32_ADDTYPE = `Add-Type '${WIN32_USER32_CSHARP}' -Name U -Namespace W;`;
+
+/**
+ * RC72 (Windows post-Enter latency, owner report 2026-09-07: "Ubuntu 3–5 s, Windows far
+ * more"). Every win32 keystroke spawned a PowerShell that COMPILED the user32 helper with
+ * Add-Type (csc.exe) — RC52 measured 8,025 ms cold / 805 ms warm PER keystroke, and one
+ * delivery needs two (paste ^v, then {ENTER}), so Windows paid 1.6 s warm to 16 s cold on
+ * top of the poll tick, where Linux's xdotool takes milliseconds. The RC65 pre-warm only
+ * warmed machine caches; every keystroke still compiled.
+ *
+ * Fix: the pre-warm compiles the SAME C# source ONCE to a per-user assembly
+ * (`%LOCALAPPDATA%\nexpath\user32-fg-<hash>.dll`; the hash is of the source, so a changed
+ * helper can never load a stale DLL). Keystroke scripts load that DLL (tens of ms) and fall
+ * back to the byte-identical inline compile when it is missing or fails to load. Same type
+ * name, same script after the prelude, same failure modes — only the compile leaves the hot
+ * path. `NXHELPER=cached|compiled` on stdout names which path ran (the submit log shows it).
+ */
+export const WIN32_HELPER_CACHE_VERSION = 'v1';
+
+/** Per-user cache location of the compiled helper; null when Windows' env gives no base dir. */
+export function win32HelperAssemblyPath(env: NodeJS.ProcessEnv = process.env): string | null {
+  const base = env.LOCALAPPDATA?.trim() || env.TEMP?.trim() || env.TMP?.trim();
+  if (!base) return null;
+  const hash = createHash('sha1').update(`${WIN32_USER32_CSHARP}|${WIN32_HELPER_CACHE_VERSION}`).digest('hex').slice(0, 8);
+  return `${base.replace(/[\\/]+$/, '')}\\nexpath\\user32-fg-${hash}.dll`;
+}
+
+const psQuote = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+
+/** Prelude that makes `[W.U]` available: cached assembly first, inline compile as the fallback. */
+export function win32HelperPrelude(helperDll: string | null | undefined): string {
+  if (!helperDll) return WIN32_USER32_ADDTYPE;
+  return (
+    `$nxDll=${psQuote(helperDll)};$nxHelper='compiled';` +
+    `if(Test-Path -LiteralPath $nxDll){try{Add-Type -LiteralPath $nxDll -ErrorAction Stop;$nxHelper='cached'}catch{}};` +
+    `if($nxHelper -ne 'cached'){${WIN32_USER32_ADDTYPE}};` +
+    `Write-Output ("NXHELPER=" + $nxHelper);`
+  );
+}
+
+/** The activation pre-warm: compile the helper to the cache once (atomic rename); a present cache is left alone. */
+export function buildWin32PrewarmScript(helperDll: string | null | undefined): string {
+  if (!helperDll) return `${WIN32_USER32_ADDTYPE}exit 0`;
+  const dir = helperDll.replace(/[\\/][^\\/]*$/, '');
+  return (
+    `$nxDll=${psQuote(helperDll)};$nxDir=${psQuote(dir)};` +
+    `if(-not (Test-Path -LiteralPath $nxDll)){New-Item -ItemType Directory -Force -Path $nxDir|Out-Null;` +
+    `$nxTmp=$nxDll+'.tmp-'+$PID+'.dll';` +
+    `Add-Type '${WIN32_USER32_CSHARP}' -Name U -Namespace W -OutputAssembly $nxTmp;` +
+    `if(Test-Path -LiteralPath $nxTmp){Move-Item -LiteralPath $nxTmp -Destination $nxDll -Force}};exit 0`
+  );
+}
+
+/** Which helper path a win32 keystroke script reported on stdout (see win32HelperPrelude). */
+export function parseWin32HelperMode(stdout: string | null | undefined): 'cached' | 'compiled' | 'unknown' {
+  const line = (stdout ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('NXHELPER='));
+  const v = line?.slice('NXHELPER='.length);
+  return v === 'cached' || v === 'compiled' ? v : 'unknown';
+}
 
 /**
  * RC65 (Windows/Cursor marketplace tester, 2026-08-25): the FIRST win32
@@ -370,6 +430,7 @@ export function warmWin32KeystrokePath(
   logFn: (line: string) => void,
   deps: {
     platform?: NodeJS.Platform;
+    env?: NodeJS.ProcessEnv;
     now?: () => number;
     spawnFn?: (cmd: string, args: string[]) => {
       on: (ev: 'exit' | 'error', fn: (a?: unknown) => void) => unknown;
@@ -385,14 +446,15 @@ export function warmWin32KeystrokePath(
     const start = now();
     const spawnFn = deps.spawnFn ?? ((cmd: string, args: string[]) =>
       spawn(cmd, args, { stdio: 'ignore', windowsHide: true }));
-    const child = spawnFn('powershell', ['-NoProfile', '-Command', `${WIN32_USER32_ADDTYPE}exit 0`]);
+    const helperDll = win32HelperAssemblyPath(deps.env ?? process.env);
+    const child = spawnFn('powershell', ['-NoProfile', '-Command', buildWin32PrewarmScript(helperDll)]);
     // Hygiene only: a hung PowerShell is inert (stdio ignored, unref'd), but
     // don't leave one per activation lying around forever.
     const reap = setTimeout(() => { try { child.kill?.(); } catch { /* already gone */ } }, 30_000);
     if (typeof (reap as { unref?: () => void }).unref === 'function') (reap as unknown as { unref: () => void }).unref();
     child.on('exit', (code) => {
       clearTimeout(reap as Parameters<typeof clearTimeout>[0]);
-      logFn(`[nexpath] win32 keystroke pre-warm: compiler warmed in ${now() - start} ms (exit ${String(code ?? 'null')})`);
+      logFn(`[nexpath] win32 keystroke pre-warm: compiler warmed in ${now() - start} ms (exit ${String(code ?? 'null')}) — helper cache: ${helperDll ?? 'none'}`);
     });
     child.on('error', () => {
       clearTimeout(reap as Parameters<typeof clearTimeout>[0]);
@@ -421,10 +483,14 @@ export function warmWin32KeystrokePath(
  * and there the lock permits it more often, because the user has interacted
  * recently. On final failure, print the foreground title and exit 1.
  */
-export function buildWin32KeystrokeScript(titles: readonly string[], sendKeys: string): string {
+export function buildWin32KeystrokeScript(
+  titles: readonly string[],
+  sendKeys: string,
+  opts: { helperDll?: string | null } = {},
+): string {
   const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
   return (
-    WIN32_USER32_ADDTYPE +
+    win32HelperPrelude(opts.helperDll) +
     `$w=New-Object -ComObject WScript.Shell;` +
     `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
     `$ok=$false;` +
@@ -523,8 +589,9 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // exact/prefix/suffix — "Devin Next" misses the bare product names).
       const titles = [...new Set([deps.appName?.trim(), ...hostTitles].filter((t): t is string => !!t))];
       // RC49: foreground-first — see buildWin32KeystrokeScript.
-      const ps = buildWin32KeystrokeScript(titles, '{ENTER}');
+      const ps = buildWin32KeystrokeScript(titles, '{ENTER}', { helperDll: win32HelperAssemblyPath(env) });
       if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
+      const t0 = Date.now();
       // RC52 (Windows tester 2026-08-24): the FIRST submit of a session took
       // 8025 ms — the old 8000 ms timeout killed PowerShell mid Add-Type
       // (cold C# compile + Defender scan on first run); the second, warm call
@@ -533,6 +600,8 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       const res = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
         stdio: ['ignore', 'pipe', 'ignore'], timeout: WIN32_KEYSTROKE_TIMEOUT_MS, encoding: 'utf8',
       });
+      // RC72: name the helper path and the wall time — the Windows tester's log answers "was it the compile?" from one line.
+      deps.submitLog?.(`[nexpath] submit-win32: keystroke script ${Date.now() - t0} ms (helper=${parseWin32HelperMode(res.stdout)}, status=${res.status ?? 'null'})`);
       if (res.status === 0) return true;
       const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
       // RC52: name HOW it failed — status null + SIGTERM is the timeout kill,

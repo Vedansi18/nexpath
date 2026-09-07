@@ -243,14 +243,14 @@ export function createProgram(): Command {
     .command('set-token')
     .description('Prompt for a Nexpath token and store it securely (keychain → fallback file)')
     .action(async () => {
-      await configSetTokenAction();
+      await runInteractiveCommand(() => configSetTokenAction());
     });
 
   configCmd
     .command('rotate-token')
     .description('Replace the stored Nexpath token (errors if no token is currently stored)')
     .action(async () => {
-      await configRotateTokenAction();
+      await runInteractiveCommand(() => configRotateTokenAction());
     });
 
   configCmd

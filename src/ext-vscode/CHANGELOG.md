@@ -33,6 +33,27 @@
   are written locally through the CLI; nothing is sent anywhere unless you have turned
   telemetry on yourself, which is off by default.
 - Internal comment and documentation cleanup. No change to how the extension behaves.
+- Windows: sending the strengthened prompt (paste, then Enter) no longer compiles the
+  small window-targeting helper on every keystroke. The helper is compiled once, in the
+  background when the extension starts, into `%LOCALAPPDATA%\nexpath\` and reused from
+  there; if that file is missing it is compiled in place exactly as before. On the Windows
+  machine measured earlier each compile cost about 0.8 s warm and 8 s cold, twice per
+  send, which is why Windows waited far longer than Linux after Enter in the popup. The
+  log now shows the time each keystroke script took and whether the cached helper was
+  used (`helper=cached`). Behaviour is otherwise unchanged on every platform.
+- Uninstalling the extension now cleans up after itself, like a first-class product:
+  its entries in your editor's hooks file (`~/.cursor/hooks.json` or
+  `~/.codeium/windsurf/hooks.json`; other tools' entries are left alone), its key in
+  `~/.nexpath/submit-flow.json` and its heartbeat files are removed, and — only when no
+  other editor still uses them — the staged CLI (`~/.nexpath/cli`, `~/.nexpath/bin`), the
+  setup runner, `.setup-sentinel` and `session-env.json`. Your prompt store, credential
+  and `nexpath.log` are never removed. Installing again then starts fresh: the Allow and
+  Setup steps run as on a first install instead of being remembered from before. As VS
+  Code defines it, the uninstall cleanup runs when the editor is next started after the
+  uninstall — provided the editor's automatic extension update check
+  (`extensions.autoCheckUpdates`, on by default) is enabled; with it off the editor never
+  runs any extension's uninstall script. A line is written to
+  `~/.nexpath/ext-uninstall.log` each time it runs.
 
 ## 0.1.35 — 2026-08-26
 
