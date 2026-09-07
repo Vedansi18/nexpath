@@ -12,7 +12,6 @@ export {
 } from './prompts.js';
 export { getConfig, setConfig, getAllConfig, isConfigSet, deleteConfig, DEFAULT_CONFIG } from './config.js';
 export { redactSecrets } from './redact.js';
-export { expireSessionsForCredentialChange } from './session-reset.js';
 export { upsertProject, getProject, listProjects, setDetectedLanguage, type ProjectRecord, type UpsertProjectParams } from './projects.js';
 export {
   insertSkippedSession,

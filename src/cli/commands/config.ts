@@ -3,7 +3,11 @@ import {
   NonInteractiveTerminalError,
   withInteractiveTerminal,
 } from './interactive-terminal.js';
-import { openStore, closeStore, DEFAULT_DB_PATH, getConfig, setConfig, deleteConfig, expireSessionsForCredentialChange } from '../../store/index.js';
+import { openStore, closeStore, DEFAULT_DB_PATH, getConfig, setConfig, deleteConfig } from '../../store/index.js';
+// Imported from its own module rather than through the store barrel: `store/index.ts` is not this
+// side's file (harshil480 9 · Ashish 5 · hi0001234d 2 · bhavnesh75 1), and re-exporting through it
+// bought nothing — `install.ts` already imports this directly.
+import { expireSessionsForCredentialChange } from '../../store/session-reset.js';
 import { ENV_PROBE_ENABLED_KEY, purgeAllEnvFacts } from '../../store/env-facts.js';
 import {
   ConfigValidationError,
