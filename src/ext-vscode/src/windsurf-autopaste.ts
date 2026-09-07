@@ -26,7 +26,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { buildWin32KeystrokeScript, WIN32_KEYSTROKE_TIMEOUT_MS, win32HelperAssemblyPath } from './submit-clipboard-delivery.js';
-import { activateDarwinApp } from './darwin-focus.js';
+import { activateDarwinApp, activateDarwinAppWindow } from './darwin-focus.js';
 import {
   parseWmctrlList,
   rankEditorWindows,
@@ -174,7 +174,12 @@ export function raiseAppWindow(appClass: string | readonly string[], deps: AutoP
   // the first RUNNING candidate process to the front through System Events
   // (see darwin-focus.ts); `false` when none runs, and the paste still proceeds
   // exactly as before. win32 stays a no-op (RC49 targets inside its script).
-  if (platform === 'darwin') return activateDarwinApp(candidates, { run });
+  // RC74 (macOS): raise this host's own window when we can name it; otherwise front the app.
+  if (platform === 'darwin') {
+    return deps.windowTarget
+      ? activateDarwinAppWindow(candidates, deps.windowTarget.workspaceName, { run })
+      : activateDarwinApp(candidates, { run });
+  }
   if (platform !== 'linux') return false;
   if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
   const has = deps.hasCommand ?? defaultHasCommand;
@@ -216,7 +221,7 @@ export function pasteKeystroke(deps: AutoPasteDeps = {}): boolean {
       // every cold paste. Injected `run` (tests) keeps the plain seam; the
       // production path spawns with the shared 20 s ceiling.
       // RC72: the cached user32 helper (see win32HelperPrelude) — no per-keystroke compile.
-      const script = buildWin32KeystrokeScript(deps.win32Titles, '^v', { helperDll: win32HelperAssemblyPath(env) });
+      const script = buildWin32KeystrokeScript(deps.win32Titles, '^v', { helperDll: win32HelperAssemblyPath(env), target: deps.windowTarget });
       if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', script]);
       try {
         return spawnSync('powershell', ['-NoProfile', '-Command', script], {

@@ -248,9 +248,9 @@ function buildSubmitAdvisory(
     // Reuse the shipped raiser — Linux/X11 only by design; elsewhere it returns
     // false and the paste still proceeds.
     focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host], { windowTarget: editorWindowTarget() }),
-    pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, host === 'cursor' ? 'Cursor' : 'Devin', 'Windsurf'] }),
+    pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, host === 'cursor' ? 'Cursor' : 'Devin', 'Windsurf'], windowTarget: editorWindowTarget() }),
     // RC11: Enter only when THIS editor is focused (one raise retry inside).
-    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, submitLog: log }),
+    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, windowTarget: editorWindowTarget(), submitLog: log }),
     log,
   });
   return createSubmitAdvisoryForHost({
@@ -476,7 +476,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       focused = true;
     } catch { /* command absent on this build — paste into whatever has focus */ }
     await new Promise((r) => setTimeout(r, focused ? 400 : 250));
-    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] });
+    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'], windowTarget: editorWindowTarget() });
     log(`[nexpath] windsurf inject (fallback) → ${ok ? `auto-pasted into Cascade (${focused ? 'openChatPanel → ' : ''}Ctrl+V)` : 'no keystroke tool; left on clipboard'}`);
     return ok;
   };
@@ -530,7 +530,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const tFocus = Date.now();
     await new Promise((r) => setTimeout(r, focused ? 400 : 250));
     const tSettle = Date.now();
-    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Cursor'] });
+    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Cursor'], windowTarget: editorWindowTarget() });
     const tPaste = Date.now();
     log(`[nexpath] cursor inject → ${ok ? `auto-pasted into existing chat (${focused ? focusedVia + ' → ' : ''}Ctrl+V)` : 'no keystroke tool found; left on clipboard'}`);
     log(`[nexpath] cursor inject timing: clipboard=${tClip - t0}ms focus=${tFocus - tClip}ms(${focusedVia || 'none'}) settle=${tSettle - tFocus}ms paste=${tPaste - tSettle}ms total=${tPaste - t0}ms`);
@@ -914,10 +914,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Reuse the shipped raiser — Linux/X11 only by design; on other OSes it
         // returns false and the paste still proceeds (see the module's notes).
         focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }),
-        pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] }),
+        pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'], windowTarget: editorWindowTarget() }),
         // RC11: Enter only when Windsurf itself is focused — a blind Enter
         // pressed the Welcome view's "Start session" and closed the chat.
-        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, submitLog: log }),
+        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, windowTarget: editorWindowTarget(), submitLog: log }),
         log: (m) => log(m),
       });
 
@@ -994,7 +994,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // "1 queued message" that only a further Enter sends — tap once.
           if (outcome === 'delivered' && host === 'windsurf') {
             scheduleWindsurfQueueFlush(
-              () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, submitLog: log }),
+              () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf'], { windowTarget: editorWindowTarget() }), appName: vscode.env.appName, windowTarget: editorWindowTarget(), submitLog: log }),
               log,
             );
           }

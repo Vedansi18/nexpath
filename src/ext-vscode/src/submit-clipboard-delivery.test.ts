@@ -24,6 +24,8 @@ import {
   warmWin32KeystrokePath,
   WIN32_USER32_ADDTYPE,
   WIN32_USER32_CSHARP,
+  buildWin32WindowTargetBlock,
+  parseWin32WindowScore,
   win32HelperAssemblyPath,
   win32HelperPrelude,
   buildWin32PrewarmScript,
@@ -777,5 +779,91 @@ describe('⭐ RC72 — cached win32 helper assembly', () => {
     expect(parseWin32HelperMode('junk\nNXHELPER=compiled\nFOREGROUND=x')).toBe('compiled');
     expect(parseWin32HelperMode('')).toBe('unknown');
     expect(parseWin32HelperMode(null)).toBe('unknown');
+  });
+});
+
+/**
+ * ⭐ RC74 (Windows) — focus THIS window, not any window of the app.
+ *
+ * `AppActivate` matches a title by prefix and hands back an arbitrary match, and the
+ * foreground check accepted any window of the application — the same wrong-window defect
+ * that was measured on Linux. The block below walks the top-level windows and focuses the
+ * best-scoring one by handle, with the whole RC49/RC60 path kept as the fallback.
+ *
+ * ⚠ Script shape only. The generated script parses under PowerShell and its `nxScore`
+ * half was executed there (11/11 against the Linux scorer); the P/Invoke half was not run.
+ */
+describe('⭐ RC74 — win32 window targeting', () => {
+  const target = { appName: 'Cursor', workspaceName: 'nexpath' };
+
+  it('⭐ the C# helper gained exactly the calls the walk needs, and keeps the ones it had', () => {
+    for (const fn of ['GetForegroundWindow', 'GetWindowText', 'FindWindowEx', 'SetForegroundWindow', 'IsWindowVisible']) {
+      expect(WIN32_USER32_CSHARP).toContain(fn);
+    }
+    expect(WIN32_USER32_CSHARP).not.toContain('EnumWindows');   // no scriptblock→delegate cast on PS 5.1
+  });
+
+  it('⭐ scores titles with the SAME tiers as the Linux ranking', () => {
+    const ps = buildWin32WindowTargetBlock(target);
+    expect(ps).toContain("if($t -eq ($ws+' - '+$app)){return 100}");
+    expect(ps).toContain("if($t.EndsWith(' - '+$ws+' - '+$app)){return 90}");
+    expect(ps).toContain("if($t.Contains(' - '+$ws+' - ')){return 80}");
+    expect(ps).toContain("if($t.StartsWith($ws+' - ')){return 75}");
+    expect(ps).toContain("if($t.Contains($ws)){return 30}");
+    expect(ps).toContain("if($t -eq $app){return 100}");
+    expect(ps).toContain("(($t -split ' - ').Count -eq 2)){return 60}");
+    // A window of another application is never a candidate, exactly as on Linux.
+    expect(ps).toContain("if(-not ($t -eq $app -or $t.EndsWith(' - '+$app) -or $t.EndsWith($app))){return 0}");
+  });
+
+  it('⭐ walks the top-level windows, skips invisible ones, and focuses by handle', () => {
+    const ps = buildWin32WindowTargetBlock(target);
+    expect(ps).toContain('FindWindowEx([IntPtr]::Zero,[IntPtr]::Zero,$null,$null)');
+    expect(ps).toContain('FindWindowEx([IntPtr]::Zero,$nxH,$null,$null)');   // iterate, no callback
+    expect(ps).toContain('IsWindowVisible($nxH)');
+    // Already foreground ⇒ do not touch focus at all.
+    expect(ps).toContain('if([W.U]::GetForegroundWindow() -eq $nxBest){$ok=$true}');
+    expect(ps).toContain('SetForegroundWindow($nxBest)');
+    // …and the focus is verified, so a refused SetForegroundWindow falls through.
+    expect(ps.lastIndexOf('GetForegroundWindow() -eq $nxBest')).toBeGreaterThan(ps.indexOf('SetForegroundWindow($nxBest)'));
+    expect(ps).toContain('Write-Output ("NXWIN=" + $nxTop)');
+  });
+
+  it('⭐ the app name and workspace are PowerShell-escaped; no app name ⇒ no block at all', () => {
+    expect(buildWin32WindowTargetBlock({ appName: "O'Brien's Editor", workspaceName: "my'repo" }))
+      .toContain("$nxApp='O''Brien''s Editor';$nxWs='my''repo';");
+    expect(buildWin32WindowTargetBlock({})).toBe('');
+    expect(buildWin32WindowTargetBlock({ appName: '   ' })).toBe('');
+    expect(buildWin32WindowTargetBlock({ appName: 'Cursor' })).toContain("$nxWs='';");  // folder-less still walks
+  });
+
+  it('⭐ the block runs BEFORE the candidate matching, and the RC49/RC60 fallback is untouched', () => {
+    const withT = buildWin32KeystrokeScript(['Cursor'], '{ENTER}', { target });
+    const without = buildWin32KeystrokeScript(['Cursor'], '{ENTER}');
+    expect(withT.indexOf('$nxBest')).toBeLessThan(withT.indexOf('AppActivate'));
+    expect(withT.indexOf('$ok=$false;')).toBeLessThan(withT.indexOf('nxScore'));
+    // Removing the block yields the shipped script character for character.
+    expect(withT.replace(buildWin32WindowTargetBlock(target), '')).toBe(without);
+    for (const keep of ['foreach($r in 1..2)', 'AppActivate($t)', 'Write-Output ("FOREGROUND=" + $fg)', 'SendKeys("{ENTER}")']) {
+      expect(withT).toContain(keep);
+    }
+  });
+
+  it('⭐ submit passes the target through; without one the script is the shipped shape', () => {
+    const calls: string[] = [];
+    submitKeystroke({ platform: 'win32', env: {}, host: 'cursor', isPopupFocused: () => false,
+      appName: 'Cursor', windowTarget: target, run: (_c, a) => { calls.push(a.join(' ')); return true; } });
+    expect(calls[0]).toContain('$nxApp=');
+    calls.length = 0;
+    submitKeystroke({ platform: 'win32', env: {}, host: 'cursor', isPopupFocused: () => false,
+      appName: 'Cursor', run: (_c, a) => { calls.push(a.join(' ')); return true; } });
+    expect(calls[0]).not.toContain('$nxApp=');
+  });
+
+  it('parseWin32WindowScore reads the marker and tolerates noise', () => {
+    expect(parseWin32WindowScore('NXHELPER=cached\nNXWIN=100\n')).toBe(100);
+    expect(parseWin32WindowScore('NXWIN=0')).toBe(0);
+    expect(parseWin32WindowScore('nothing')).toBe(-1);
+    expect(parseWin32WindowScore(null)).toBe(-1);
   });
 });

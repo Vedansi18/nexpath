@@ -1719,12 +1719,13 @@ describe('RC73 window targeting is wired, not just available', () => {
     const src = readFileSync(fileURLToPath(new URL('./extension.ts', import.meta.url)), 'utf8');
     const raises = src.match(/raise(?:AppWindow|WindsurfWindow)\(/g) ?? [];
     const targeted = src.match(/windowTarget: editorWindowTarget\(\)/g) ?? [];
-    expect(raises.length).toBeGreaterThanOrEqual(7);
-    expect(targeted.length).toBe(raises.length);
-    // win32 and macOS targeting is deliberately NOT changed by RC73 — no report, and no
-    // machine here to run them on. These stay exactly as the RC47/F-9 rounds left them.
+    expect(raises.length).toBe(7);
+    // RC74: the same target now reaches the win32 and macOS keystroke paths too, so every
+    // raise, paste and submit call site names this window.
     expect((src.match(/win32Titles: \[vscode\.env\.appName/g) ?? []).length).toBe(4);
-    expect(src).not.toContain('qualifiedTitle');
+    expect((src.match(/pasteKeystroke\(\{/g) ?? []).length).toBe(4);
+    expect((src.match(/submitKeystroke\(\{/g) ?? []).length).toBe(3);
+    expect(targeted.length).toBe(7 + 4 + 3);   // raises + pastes + submits, none left blind
     expect(src).toContain('function editorWindowTarget(): EditorWindowTarget');
     expect(src).toContain('appName: vscode.env.appName, workspaceName: vscode.workspace.name');
   });

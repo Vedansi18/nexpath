@@ -38,9 +38,10 @@
   system happened to list first for that application to the front, so a prompt written in
   one window could be answered in another, and that other window would jump forward on its
   own. Sending now identifies this window by its own title, the folder name together with
-  the editor name, and brings exactly that window forward before typing. A setup with a
-  single editor window behaves exactly as before. (Linux; on Windows and macOS the same
-  situation is unchanged for now.)
+  the editor name, and brings exactly that window forward before typing. This applies on
+  Linux, Windows and macOS. If the window cannot be identified — an unusual window title,
+  or no folder open — sending falls back to exactly what it did before, and a setup with a
+  single editor window is unchanged on every platform.
 - Windows: sending the strengthened prompt (paste, then Enter) no longer compiles the
   small window-targeting helper on every keystroke. The helper is compiled once, in the
   background when the extension starts, into `%LOCALAPPDATA%\nexpath\` and reused from
