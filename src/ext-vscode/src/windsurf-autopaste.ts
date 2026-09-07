@@ -26,6 +26,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { buildWin32KeystrokeScript, WIN32_KEYSTROKE_TIMEOUT_MS } from './submit-clipboard-delivery.js';
+import { activateDarwinApp } from './darwin-focus.js';
 
 export interface AutoPasteDeps {
   /**
@@ -67,13 +68,19 @@ function defaultRun(cmd: string, args: string[]): boolean {
 export function raiseAppWindow(appClass: string | readonly string[], deps: AutoPasteDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
-  if (platform !== 'linux') return false;
-  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
-  const has = deps.hasCommand ?? defaultHasCommand;
   const run = deps.run ?? defaultRun;
   // RC59: rebranded hosts (Devin) carry their own WM_CLASS — try every
   // candidate until one raises. A single string keeps the old behaviour.
   const candidates = typeof appClass === 'string' ? [appClass] : appClass;
+  // F-9 (2026-09-07): macOS had no targeting at all — ⌘V and Enter went to
+  // whatever was frontmost after the CLI popup's Terminal window closed. Bring
+  // the first RUNNING candidate process to the front through System Events
+  // (see darwin-focus.ts); `false` when none runs, and the paste still proceeds
+  // exactly as before. win32 stays a no-op (RC49 targets inside its script).
+  if (platform === 'darwin') return activateDarwinApp(candidates, { run });
+  if (platform !== 'linux') return false;
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+  const has = deps.hasCommand ?? defaultHasCommand;
   if (has('wmctrl')) return candidates.some((c) => run('wmctrl', ['-x', '-a', c]));
   if (has('xdotool')) return candidates.some((c) => run('xdotool', ['search', '--class', c, 'windowactivate', '--sync']));
   return false;

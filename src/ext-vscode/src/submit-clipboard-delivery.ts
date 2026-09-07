@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { darwinAppCandidates, darwinEditorIsFrontmost } from './darwin-focus.js';
 
 /**
  * Clipboard-fallback delivery for the submit-time advisory (hook milestone H3).
@@ -147,6 +148,8 @@ export interface SubmitKeystrokeDeps {
   appName?: string;
   /** RC47: diagnostic sink for the win32 submit path (which titles failed, what held the foreground). */
   submitLog?: (message: string) => void;
+  /** F-9 seam: capture runner for the darwin frontmost read (defaults to a bounded spawnSync). */
+  runCapture?: (cmd: string, args: string[]) => string | null;
 }
 
 
@@ -263,7 +266,17 @@ export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
 } = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
-  if (platform !== 'linux') return true; // no check possible; prior behaviour
+  // F-9 (2026-09-07): macOS gets the same "Enter only when the editor is in
+  // front" rule Linux has had since RC11 — the frontmost process name via
+  // System Events, live appName first (RC47 rule). Unreadable ⇒ false: a
+  // keystroke we cannot target must not fire; the caller reports
+  // `submit_failed` and the one-time Accessibility hint (RC16/F-3) explains.
+  if (platform === 'darwin') {
+    return darwinEditorIsFrontmost(darwinAppCandidates(deps.appName, host), {
+      runCapture: deps.runCapture ?? defaultRunCapture,
+    });
+  }
+  if (platform !== 'linux') return true; // win32: RC49 targets inside its own script
   if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
   const has = deps.hasCommand ?? defaultHasCommand;
   const runCapture = deps.runCapture ?? defaultRunCapture;
@@ -446,7 +459,7 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   // button and closed the user's chat.
   if (deps.host) {
     const isEditorFocused = deps.isEditorFocused ?? focusedWindowIsEditor;
-    const focusDeps = { platform, env, appName: deps.appName };
+    const focusDeps = { platform, env, appName: deps.appName, runCapture: deps.runCapture };
     if (!isEditorFocused(deps.host, focusDeps)) {
       deps.focusEditor?.();
       if (!isEditorFocused(deps.host, focusDeps)) {

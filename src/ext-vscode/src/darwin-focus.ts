@@ -50,8 +50,11 @@ export function buildDarwinActivateScript(candidates: readonly string[]): string
   return [
     'tell application "System Events"',
     `  repeat with n in {${list}}`,
-    '    if exists (process named (n as text)) then',
-    '      set frontmost of process named (n as text) to true',
+    // `whose name is` uses AppleScript's default case-insensitive comparison, so
+    // the lowercase X11 class names the extension already passes ('cursor',
+    // 'devin', 'windsurf') match the real process names ("Cursor", …).
+    '    if exists (first application process whose name is (n as text)) then',
+    '      set frontmost of (first application process whose name is (n as text)) to true',
     '      return (n as text)',
     '    end if',
     '  end repeat',

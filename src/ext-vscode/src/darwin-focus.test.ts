@@ -19,8 +19,8 @@ describe('⭐ F-9 — activation script', () => {
     const s = buildDarwinActivateScript(['Devin', 'Windsurf']);
     expect(s).toContain('tell application "System Events"');
     expect(s).toContain('repeat with n in {"Devin", "Windsurf"}');
-    expect(s).toContain('if exists (process named (n as text)) then');
-    expect(s).toContain('set frontmost of process named (n as text) to true');
+    expect(s).toContain('if exists (first application process whose name is (n as text)) then');
+    expect(s).toContain('set frontmost of (first application process whose name is (n as text)) to true');
     expect(s).toContain('error "nexpath: editor process not running"');
     expect(s).not.toMatch(/tell application "(Devin|Windsurf)"/);
   });

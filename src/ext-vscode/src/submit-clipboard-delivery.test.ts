@@ -660,3 +660,49 @@ describe('⭐ RC70 — submitFailedHint', () => {
     expect(submitFailedHint('inject_failed', 'darwin', null)).toBeNull();
   });
 });
+
+/** ⭐ F-9 (2026-09-07) — macOS gets the RC11 rule: Enter only when the editor is frontmost (System Events). */
+describe('⭐ F-9 — darwin frontmost gate on the submit keystroke', () => {
+  const DARWIN_FRONT = 'tell application "System Events" to get name of first application process whose frontmost is true';
+
+  it('focusedWindowIsEditor(darwin): true when the frontmost process is the live appName or the product name; false otherwise or unreadable', () => {
+    const seen: string[] = [];
+    const cap = (name: string | null) => (cmd: string, args: string[]) => { seen.push(cmd + ' ' + args[1]); return name; };
+    expect(focusedWindowIsEditor('cursor', { platform: 'darwin', appName: 'Cursor', runCapture: cap('Cursor') })).toBe(true);
+    expect(seen[0]).toBe('osascript ' + DARWIN_FRONT);
+    expect(focusedWindowIsEditor('windsurf', { platform: 'darwin', appName: 'Devin Next', runCapture: cap('Devin Next') })).toBe(true);
+    expect(focusedWindowIsEditor('windsurf', { platform: 'darwin', runCapture: cap('Windsurf') })).toBe(true);
+    expect(focusedWindowIsEditor('cursor', { platform: 'darwin', appName: 'Cursor', runCapture: cap('Terminal') })).toBe(false);
+    expect(focusedWindowIsEditor('cursor', { platform: 'darwin', appName: 'Cursor', runCapture: cap(null) })).toBe(false);
+  });
+
+  it('⭐ editor frontmost ⇒ Enter (key code 36) fires exactly as before', () => {
+    const run = vi.fn().mockReturnValue(true);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', host: 'cursor', appName: 'Cursor',
+      runCapture: () => 'Cursor', run })).toBe(true);
+    expect(String(run.mock.calls[0][1])).toContain('key code 36');
+  });
+
+  it('⭐ something else frontmost ⇒ one raise, recheck, NO blind Enter, submit_failed with a log line', () => {
+    const run = vi.fn().mockReturnValue(true); const focusEditor = vi.fn(); const logs: string[] = [];
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', host: 'windsurf', appName: 'Windsurf',
+      runCapture: () => 'Terminal', run, focusEditor, submitLog: (m) => { logs.push(m); } })).toBe(false);
+    expect(focusEditor).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(logs.join('\n')).toContain('editor not focused after raise');
+  });
+
+  it('the raise retry works: frontmost flips to the editor after focusEditor ⇒ Enter fires', () => {
+    let front = 'Finder';
+    const run = vi.fn().mockReturnValue(true);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', host: 'cursor', appName: 'Cursor',
+      runCapture: () => front, run, focusEditor: () => { front = 'Cursor'; } })).toBe(true);
+    expect(String(run.mock.calls[0][1])).toContain('key code 36');
+  });
+
+  it('no host (pre-RC11 callers) ⇒ darwin behaviour unchanged: Enter fires without any frontmost read', () => {
+    const run = vi.fn().mockReturnValue(true); const runCapture = vi.fn(() => 'Terminal');
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', run, runCapture })).toBe(true);
+    expect(runCapture).not.toHaveBeenCalled();
+  });
+});
