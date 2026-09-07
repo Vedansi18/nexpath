@@ -45,12 +45,20 @@ export const NEXPATH_BASE_URL_KEY = 'nexpath_api_base_url';
  */
 export const DEFAULT_API_BASE_URL = 'https://parseos.tech/v1';
 
-/** Mirror of `isValidNexpathToken` — `npk_` + at least 20 url-safe chars. */
-const NEXPATH_TOKEN_REGEX = /^npk_[A-Za-z0-9_-]{20,}$/;
+/**
+ * The token shape rule, from the one place it is defined.
+ *
+ * This used to be a hand-copied regex ("mirror of the CLI validator"), which is
+ * exactly how the two surfaces drifted: the CLI once demanded 40 chars while we
+ * accepted 24, so a token the service issued worked here and was called
+ * malformed there. `src/config/credential-shape.ts` is a zero-import leaf the
+ * engine already bundles, so there is no longer any reason to hold a copy —
+ * both surfaces now read the same regex object. The exported name is kept so
+ * the options page and the resolver below are unchanged.
+ */
+import { isValidNexpathToken } from '../../config/credential-shape.js';
 
-export function isValidNexpathTokenShape(value: string): boolean {
-  return NEXPATH_TOKEN_REGEX.test(value);
-}
+export const isValidNexpathTokenShape = isValidNexpathToken;
 
 export type LLMCredentialSource = 'openai' | 'nexpath_token' | 'none';
 

@@ -68,17 +68,32 @@ const browserLoggerPlugin = {
  * First-party heavy-chain stubs for the prompt-enhancement engine's import
  * graph (same remap technique as the logger plugin above — match by RESOLVED
  * absolute path so nothing else is caught):
- *  - config/ApiKeyResolver.ts → drags dotenv + cross-keychain + native keyring;
- *    the facade only calls its pure `isValidApiKey` regex. Stub keeps the regex
- *    (drift-pinned by a differential test).
  *  - store/db.ts → the sql.js/WASM CLI store; reached via store/config.ts,
  *    which the engine imports for the real `DEFAULT_CONFIG` DATA (deliberately
  *    kept real). Stub throws loudly on any actual store call.
  * Engine files themselves are never modified (owner boundary).
+ *
+ * config/ApiKeyResolver.ts used to be stubbed here too: it drags dotenv +
+ * cross-keychain + native keyring, and the facade only wanted its `isValidApiKey`
+ * regex, so a hand-copied duplicate was shipped and pinned by a differential
+ * test. As of the credential-shape change the shape rules live in
+ * `src/config/credential-shape.ts`, a zero-import leaf the engine imports
+ * directly, so nothing in the browser graph reaches ApiKeyResolver any more
+ * (measured: 0 references in the built service worker). The stub is gone.
+ *
+ * ⚠️ The resolver is now a TRIPWIRE rather than a remap. If any future engine
+ * change re-imports ApiKeyResolver from browser-reachable code, the build FAILS
+ * with a message pointing at the leaf module — instead of silently bundling a
+ * native keychain binding that cannot exist in a service worker.
  */
 const FIRST_PARTY_STUBS = new Map([
-  [path.join(ROOT, 'src', 'config', 'ApiKeyResolver.ts'), path.join(SRC, 'shims', 'api-key-resolver.ts')],
-  [path.join(ROOT, 'src', 'store', 'db.ts'),              path.join(SRC, 'shims', 'store-db.ts')],
+  [path.join(ROOT, 'src', 'store', 'db.ts'), path.join(SRC, 'shims', 'store-db.ts')],
+]);
+const BROWSER_FORBIDDEN = new Map([
+  [path.join(ROOT, 'src', 'config', 'ApiKeyResolver.ts'),
+   'config/ApiKeyResolver.ts drags dotenv + cross-keychain into the browser bundle. '
+   + 'Import the credential shape predicates from src/config/credential-shape.ts instead '
+   + '(isValidApiKey / isValidNexpathToken / isUsableLlmCredential) — it has zero imports.'],
 ]);
 const firstPartyStubPlugin = {
   name: 'nexpath-first-party-stubs',
@@ -88,6 +103,10 @@ const firstPartyStubPlugin = {
       const abs = path
         .resolve(path.dirname(args.importer), args.path)
         .replace(/\.js$/, '.ts');
+      const forbidden = BROWSER_FORBIDDEN.get(abs);
+      if (forbidden) {
+        return { errors: [{ text: forbidden, location: null, detail: { importer: args.importer } }] };
+      }
       const stub = FIRST_PARTY_STUBS.get(abs);
       return stub ? { path: stub } : null;
     });
