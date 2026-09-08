@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { nexpathClientHeaders } from '../../config/nexpath-client-headers.js';
 import type { LLMPort, LLMChatParams } from '../../core/ports/llm.port.js';
 
 /**
@@ -11,7 +12,11 @@ export class OpenAILLMAdapter implements LLMPort {
   private readonly client: OpenAI;
 
   constructor(client?: OpenAI) {
-    this.client = client ?? new OpenAI();
+    // On a Nexpath token the client carries X-Nexpath-Client / X-Nexpath-Surface on
+    // every request it makes (config/nexpath-client-headers.ts); on the user's own
+    // OpenAI key the helper returns undefined, which the SDK treats as "no headers",
+    // so those requests are byte-identical to before.
+    this.client = client ?? new OpenAI({ defaultHeaders: nexpathClientHeaders() });
   }
 
   async chat(params: LLMChatParams): Promise<string> {

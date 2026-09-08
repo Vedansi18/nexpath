@@ -127,3 +127,49 @@ describe('OpenAILLMAdapter.chat', () => {
     ).rejects.toThrow('openai api error');
   });
 });
+
+// ── Attribution headers ride on the default client ───────────────────────────
+// The one CLI construction site this side owns (the 17-site map, 2026-09-08).
+// Read back from the SDK's own options rather than assumed, the way the helper's
+// author verified his sites.
+describe('OpenAILLMAdapter — default client attribution headers', () => {
+  const TOKEN = 'npk_abcdefghijklmnopqrstuvwxyz012345';
+  const saved = { key: process.env['OPENAI_API_KEY'], agent: process.env['NEXPATH_AGENT'] };
+  const restore = () => {
+    if (saved.key === undefined) delete process.env['OPENAI_API_KEY']; else process.env['OPENAI_API_KEY'] = saved.key;
+    if (saved.agent === undefined) delete process.env['NEXPATH_AGENT']; else process.env['NEXPATH_AGENT'] = saved.agent;
+  };
+  const headersOf = (adapter: OpenAILLMAdapter) =>
+    (adapter as unknown as { client: { _options: { defaultHeaders?: unknown } } }).client._options.defaultHeaders;
+
+  it('a Nexpath token + a named surface ⇒ both headers on the constructed client', () => {
+    process.env['OPENAI_API_KEY'] = TOKEN;
+    process.env['NEXPATH_AGENT'] = 'cursor';
+    try {
+      expect(headersOf(new OpenAILLMAdapter())).toEqual({ 'X-Nexpath-Client': 'cli', 'X-Nexpath-Surface': 'cursor' });
+    } finally { restore(); }
+  });
+
+  it('a Nexpath token with no surface named ⇒ the agreed default, claude-code', () => {
+    process.env['OPENAI_API_KEY'] = TOKEN;
+    delete process.env['NEXPATH_AGENT'];
+    try {
+      expect(headersOf(new OpenAILLMAdapter())).toEqual({ 'X-Nexpath-Client': 'cli', 'X-Nexpath-Surface': 'claude-code' });
+    } finally { restore(); }
+  });
+
+  it("the user's own OpenAI key ⇒ no headers at all (undefined, not an empty object)", () => {
+    process.env['OPENAI_API_KEY'] = 'sk-abcdefghijklmnopqrstuvwxyz012345';
+    process.env['NEXPATH_AGENT'] = 'cursor';
+    try {
+      expect(headersOf(new OpenAILLMAdapter())).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it('an injected client is used as given — no headers are forced onto it', () => {
+    const client = makeOpenAI('ok');
+    const adapter = new OpenAILLMAdapter(client as never);
+    expect((adapter as unknown as { client: unknown }).client).toBe(client);
+  });
+});
+
