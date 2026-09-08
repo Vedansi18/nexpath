@@ -47,7 +47,7 @@ import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { writeSubmitDecision, readReplacementEchoes, latestReplacementEchoAt,
 } from './submit-decision-store.js';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
-import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
+import { createHoldBudget, computePopupWaitBudgetMs, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
 // `harshil480` 15) — it is called here, never modified.
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
@@ -181,7 +181,7 @@ export function buildDefaultPromptSubmitDecider(
     openStore?: (db?: string) => Promise<unknown>;
     closeStore?: (store: unknown) => Promise<void> | void;
   } = {},
-): (event: string, o: { project?: string }, promptText?: string) => Promise<WindsurfPromptSubmitDecision> {
+): (event: string, o: { project?: string; turnStartedAt?: number }, promptText?: string) => Promise<WindsurfPromptSubmitDecision> {
   const now = ports.now ?? (() => Date.now());
   const openStoreFn = ports.openStore ?? openStore;
   const closeStoreFn = ports.closeStore ?? closeStore;
@@ -514,6 +514,8 @@ export interface WindsurfHookActionDeps {
   readFlagFile?: (path: string) => string | null;
   /** H4: injectable hold budget. Defaults to the plan's 60-90s self-enforced cap. */
   holdBudget?: HoldBudget;
+  /** RC77 seam: the popup's own wait budget (defaults to computePopupWaitBudgetMs; Windsurf has no host ceiling). */
+  popupWaitBudgetMs?: (ctx: { host: 'windsurf'; elapsedMs: number }) => number;
   /**
    * VED-PE-10 echo detector (see `isReplacementEcho`). Injected for tests so
    * they never open the real store; defaults to the real implementation.
@@ -528,7 +530,7 @@ export interface WindsurfHookActionDeps {
    * switch is on. Defaults to `'allow'` so H2 alone is behaviour-neutral; H3
    * replaces it with the real popup-backed decision.
    */
-  decidePromptSubmit?: (event: string, opts: { project?: string }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
+  decidePromptSubmit?: (event: string, opts: { project?: string; turnStartedAt?: number }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
   /** OWNER RULING 2026-08-12: consume the session's pending advisories before `stop` runs (switch on only). */
   suppressOldAdvisorySurface?: (projectRoot: string, sessionId: string) => Promise<number>;
   /** RC41 seam: injected in tests; defaults to the real continuation runner. */
@@ -665,6 +667,9 @@ export async function runWindsurfHookAction(
   let hold: HoldBudget | null = null;
   let decideAfterAuto = false;
   let pendingPromptText = '';
+  // RC76: when THIS turn's `auto` started — passed to the decider so a pending row from an
+  // earlier turn is consumed before `stop` runs (see consumeRowsFromEarlierTurns).
+  let turnStartedAt = 0;
   // Default decider (H3). Constructed unconditionally, but this only BUILDS a
   // closure — `openStore` lives inside it and runs solely on the gated call below
   // (`isWindsurfPromptSubmitAdvisoryEnabled`). So with the switch off no Store is
@@ -908,6 +913,7 @@ export async function runWindsurfHookAction(
     // switch-off path passes exactly two arguments as it always has. Only the
     // gated path adds the replay dep.
     const autoStartedAt = Date.now();
+    turnStartedAt = autoStartedAt; // RC76
     const result = preReadRaw === null
       ? await handle(event, opts)
       : await handle(event, opts, { readStdin: async () => preReadRaw as string });
@@ -927,6 +933,15 @@ export async function runWindsurfHookAction(
     if (hold) {
       const waited = await hold.run(() => waitForChild(result.child));
       autoMs = Date.now() - autoStartedAt;
+      // RC77: the popup waits on a HUMAN — grant it its own window once the preparation
+      // has actually finished; an exhausted preparation stays exhausted (shared budget for
+      // stdin + auto untouched). Windsurf/Devin never kill a hook (spike-measured), so the
+      // cap alone applies.
+      if (!waited.timedOut && decideAfterAuto) {
+        const popupWaitMs = (deps.popupWaitBudgetMs ?? ((ctx) => computePopupWaitBudgetMs({ ...ctx, env: deps.env ?? process.env })))({ host: 'windsurf', elapsedMs: hold.elapsed?.() ?? 0 });
+        hold.extendFor?.(popupWaitMs);
+        logEvent('info', 'windsurf_hook_popup_budget', { popup_wait_ms: popupWaitMs, auto_ms: autoMs });
+      }
       remainingAfterAutoMs = hold.remaining();
       if (waited.timedOut) {
         // RC67: the FIRST log line the expiry path ever had. `auto` ate the
@@ -981,8 +996,8 @@ export async function runWindsurfHookAction(
       // only what the earlier segments left.
       const deciderStartedAt = Date.now();
       const decided = hold
-        ? await hold.run(() => decidePromptSubmit(event, opts, pendingPromptText))
-        : { timedOut: false, value: await decidePromptSubmit(event, opts, pendingPromptText).catch(() => 'allow' as const) };
+        ? await hold.run(() => decidePromptSubmit(event, { ...opts, turnStartedAt }, pendingPromptText))
+        : { timedOut: false, value: await decidePromptSubmit(event, { ...opts, turnStartedAt }, pendingPromptText).catch(() => 'allow' as const) };
       const deciderMs = Date.now() - deciderStartedAt;
       if (decided.timedOut) {
         // RC67: name the expiry. Before this the only evidence a popup had been
