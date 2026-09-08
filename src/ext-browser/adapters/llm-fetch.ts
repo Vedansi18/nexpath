@@ -1,5 +1,6 @@
 import type { LLMPort, LLMChatParams } from '../../core/ports/llm.port.js';
 import { NEXPATH_CREDIT_EXHAUSTED_AT_KEY } from './llm-credentials.js';
+import { attributionHeadersFromEnv } from './llm-attribution.js';
 
 export const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -45,7 +46,14 @@ export class FetchLLMAdapter implements LLMPort {
       timer = setTimeout(() => controller.abort(), params.timeoutMs);
     }
 
-    const url = this.chatUrl ?? chatUrlFromEnv() ?? OPENAI_CHAT_URL;
+    const serviceUrl = chatUrlFromEnv();
+    const url = this.chatUrl ?? serviceUrl ?? OPENAI_CHAT_URL;
+    // The attribution labels (client + site — llm-attribution.ts) travel ONLY
+    // when the env has routed this call to the Nexpath service. A user's own
+    // key goes to api.openai.com, where the worker holds no host permission:
+    // a custom header there would turn the call into a CORS preflight OpenAI
+    // does not answer for these names, and BYOK would break outright.
+    const attribution = serviceUrl !== undefined ? attributionHeadersFromEnv() : {};
     let resp: Response;
     try {
       resp = await fetch(url, {
@@ -53,6 +61,7 @@ export class FetchLLMAdapter implements LLMPort {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`,
+          ...attribution,
         },
         body: JSON.stringify(body),
         signal,

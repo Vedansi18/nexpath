@@ -28,6 +28,11 @@ Token mode now delivers the full enhancement.
 - The rule for what a valid Nexpath token looks like is now read from one shared
   definition rather than kept as a copy in the extension, so the extension and the
   Nexpath CLI can no longer disagree about a token the service issued.
+- **In token mode, each request to the Nexpath service now carries two short labels:**
+  that it came from the browser extension, and which supported site it was made on
+  (Replit, Lovable or Bolt). This lets the service's usage record say where a request
+  came from. No page content, URL or project path is added, and requests made with
+  your own OpenAI key carry neither label.
 
 ## 0.1.54
 

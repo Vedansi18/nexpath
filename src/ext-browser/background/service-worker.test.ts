@@ -1992,6 +1992,36 @@ describe('service-worker.ts', () => {
         (name === `nexpath_last_prompt::${P}` ? JSON.stringify({ text: 'just ship it', at: 1 }) : null));
     });
 
+    // ── ATTRIBUTION: the site of this turn reaches the service's usage record ──
+    // The decider publishes the surface beside the credential, before any model
+    // call, so every token-mode request of this turn carries X-Nexpath-Surface
+    // (llm-attribution.ts). Without it the service's `surface` column is NULL
+    // for every browser call — which is what production showed for 439 rows.
+    describe('the site label for the service (llm-attribution.ts)', () => {
+      type EnvHolder = { process?: { env?: Record<string, string | undefined> } };
+      const surfaceEnv = () => (globalThis as EnvHolder).process?.env?.['NEXPATH_SURFACE'];
+
+      it('publishes the surface of the submitting project before the popup runs', async () => {
+        delete (globalThis as EnvHolder).process?.env?.['NEXPATH_SURFACE'];
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+        expect(surfaceEnv()).toBe('bolt');
+      });
+
+      it('a turn from another supported site replaces it — the label follows the turn, never the install', async () => {
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+        expect(surfaceEnv()).toBe('bolt');
+        const R = 'https://replit.com/@u/p2';
+        keyStoreGetKey.mockImplementation(async (name: string) =>
+          (name === `nexpath_last_prompt::${R}` ? JSON.stringify({ text: 'just ship it', at: 1 }) : null));
+        decide(messageListener, 7, { site: 'replit', projectRoot: R, submitId: 's2', requestId: 'r2' });
+        await vi.waitFor(() => expect(surfaceEnv()).toBe('replit'));
+      });
+    });
+
     // ── RELEASING THE HOLD WHEN THE USER PICKS THEIR OWN PROMPT ───────────────
     // "Use original" does not emit its command until the satisfaction step is
     // answered, and the hold has no ceiling — so an abandoned survey held the

@@ -93,7 +93,12 @@ declaration narrower than what the code does is the class of mistake that gets a
 removed. Four tests in `manifest.test.ts` pin this shape.
 
 **`websiteContent` is required** because the prompt the user submits is sent to the LLM route to
-generate the suggestion. That is the extension's whole purpose, so it is not optional.
+generate the suggestion. That is the extension's whole purpose, so it is not optional. In token
+mode that same request carries two fixed labels as metadata of the transmission — the client
+(`ext`) and one word naming the supported site it was made on — so the service's usage record
+can be read by site (`src/ext-browser/adapters/llm-attribution.ts` holds the vocabulary).
+No URL, page title or project path is sent, and a user's own OpenAI key never carries either
+label, so this adds no data category beyond the prompt transmission already declared.
 
 **`technicalAndInteraction` is optional, not required** — it covers the rating send (installation
 ID, 1–4 rating, timestamps). Mozilla does not permit this key in the `required` list, so declaring

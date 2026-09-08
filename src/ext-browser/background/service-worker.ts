@@ -29,6 +29,7 @@ import { IdbStorageAdapter } from '../adapters/storage-idb.js';
 import { makeMemoryStoragePort } from '../adapters/memory-storage.js';
 import { FetchLLMAdapter } from '../adapters/llm-fetch.js';
 import { applyLLMCredentialEnv, resolveLLMCredentials } from '../adapters/llm-credentials.js';
+import { applyLLMAttributionEnv } from '../adapters/llm-attribution.js';
 import { normalizePromptForDedup } from '../adapters/prompt-dedup.js';
 import { ChromeStorageKeyAdapter } from '../adapters/storage-chrome.js';
 import { BrowserClockAdapter } from '../adapters/clock-browser.js';
@@ -762,6 +763,9 @@ async function decideHeldSubmit(
   // Publish key + base URL into the engine's polyfilled env (own key wins;
   // Nexpath-token mode routes through the configured service — llm-credentials.ts).
   applyLLMCredentialEnv(llmCreds);
+  // …and the site this turn belongs to, for the service's usage record
+  // (token mode only — llm-attribution.ts).
+  applyLLMAttributionEnv(projectRoot);
   const apiKey = llmCreds.apiKey;
 
   const popup = runBrowserPePopup({
@@ -901,6 +905,9 @@ async function runPromptSubmitPipeline(
   // exactly as before: the variable is the effective bearer, null when neither
   // credential exists.
   applyLLMCredentialEnv(llmCreds);
+  // …and the site this turn belongs to, for the service's usage record
+  // (token mode only — llm-attribution.ts).
+  applyLLMAttributionEnv(projectRoot);
   const apiKey = llmCreds.apiKey;
 
   // ── Step 1.2: Cross-page duplicate guard (see CROSS_PAGE_PROMPT_DEDUP_MS) ───
@@ -1689,6 +1696,9 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
   ]);
   // Own key wins; token mode routes via the service (llm-credentials.ts).
   applyLLMCredentialEnv(llmCreds);
+  // …and the site this turn belongs to, for the service's usage record
+  // (token mode only — llm-attribution.ts).
+  applyLLMAttributionEnv(projectRoot);
   const apiKey = llmCreds.apiKey;
   const stopOutcome = await runBrowserPePopup({
     log,
@@ -1767,6 +1777,9 @@ async function handleResponseStopLegacyAdvisory(projectRoot: string, tabId: numb
   // Own key wins; token mode routes via the service (llm-credentials.ts).
   const llmCreds = await resolveLLMCredentials(keyStore);
   applyLLMCredentialEnv(llmCreds);
+  // …and the site this turn belongs to, for the service's usage record
+  // (token mode only — llm-attribution.ts).
+  applyLLMAttributionEnv(projectRoot);
   const apiKey = llmCreds.apiKey;
 
   if (!raw) {

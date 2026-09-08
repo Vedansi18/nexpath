@@ -105,7 +105,8 @@ session and speaks up where a skipped step actually costs you something.
 - With **your own OpenAI key**: recent prompt context is sent **only to OpenAI**, using your key,
   and only when a suggestion fires — ParseOS receives nothing.
 - With a **Nexpath token**: prompt context is sent to **Nexpath's own service**, which forwards it
-  to OpenAI to generate the suggestion and meters your account credit.
+  to OpenAI to generate the suggestion and meters your account credit. Each such request is
+  labelled with which client and supported site it came from — never the page, URL or project.
 - **No tracking and no remote code.** There is no analytics script, no ad or tracking network, and
   no code is ever downloaded and run.
 - **Usage signals stay on your machine until you choose to send them.** Nexpath keeps a local,

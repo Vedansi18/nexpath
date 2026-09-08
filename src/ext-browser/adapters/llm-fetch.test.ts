@@ -203,6 +203,7 @@ describe('FetchLLMAdapter — endpoint resolution (Nexpath-token mode, llm-crede
     vi.stubGlobal('fetch', mockFetch);
     mockFetch.mockClear();
     delete env()['OPENAI_BASE_URL'];
+    delete env()['NEXPATH_SURFACE'];
   });
 
   const ok = () => makeResponse({ choices: [{ message: { content: 'ok' } }] });
@@ -229,6 +230,48 @@ describe('FetchLLMAdapter — endpoint resolution (Nexpath-token mode, llm-crede
     mockFetch.mockResolvedValueOnce(ok());
     await new FetchLLMAdapter('sk-test', 'https://explicit.example/v1/chat/completions').chat(params);
     expect(mockFetch.mock.calls[0]![0]).toBe('https://explicit.example/v1/chat/completions');
+  });
+
+  // ── attribution labels (llm-attribution.ts) ─────────────────────────────────
+  const sentHeaders = () => (mockFetch.mock.calls[0]![1] as { headers: Record<string, string> }).headers;
+
+  it('token mode sends the client label AND the published site label to the service', async () => {
+    env()['OPENAI_BASE_URL'] = 'https://service.example/v1';
+    env()['NEXPATH_SURFACE'] = 'replit';
+    mockFetch.mockResolvedValueOnce(ok());
+    await new FetchLLMAdapter('npk_0123456789abcdefghij').chat(params);
+    expect(sentHeaders()['X-Nexpath-Client']).toBe('ext');
+    expect(sentHeaders()['X-Nexpath-Surface']).toBe('replit');
+  });
+
+  it('token mode with no site published still says which client it is, and omits the site header', async () => {
+    env()['OPENAI_BASE_URL'] = 'https://service.example/v1';
+    mockFetch.mockResolvedValueOnce(ok());
+    await new FetchLLMAdapter('npk_0123456789abcdefghij').chat(params);
+    expect(sentHeaders()['X-Nexpath-Client']).toBe('ext');
+    expect('X-Nexpath-Surface' in sentHeaders()).toBe(false);
+  });
+
+  it("a user's own key sends NEITHER label to api.openai.com, even with a site published — a custom header there would be a CORS preflight OpenAI does not answer", async () => {
+    env()['NEXPATH_SURFACE'] = 'replit';
+    mockFetch.mockResolvedValueOnce(ok());
+    await new FetchLLMAdapter('sk-own-key').chat(params);
+    expect(mockFetch.mock.calls[0]![0]).toBe('https://api.openai.com/v1/chat/completions');
+    expect('X-Nexpath-Client' in sentHeaders()).toBe(false);
+    expect('X-Nexpath-Surface' in sentHeaders()).toBe(false);
+  });
+
+  it('the labels never displace the request headers that were already there', async () => {
+    env()['OPENAI_BASE_URL'] = 'https://service.example/v1';
+    env()['NEXPATH_SURFACE'] = 'bolt';
+    mockFetch.mockResolvedValueOnce(ok());
+    await new FetchLLMAdapter('npk_0123456789abcdefghij').chat(params);
+    expect(sentHeaders()).toEqual({
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer npk_0123456789abcdefghij',
+      'X-Nexpath-Client': 'ext',
+      'X-Nexpath-Surface': 'bolt',
+    });
   });
 });
 
