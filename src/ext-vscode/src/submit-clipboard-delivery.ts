@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { darwinAppCandidates, darwinEditorIsFrontmost } from './darwin-focus.js';
-import type { EditorWindowTarget } from './editor-window-target.js';
+import { isOurWindowTitle, type EditorWindowTarget } from './editor-window-target.js';
 
 /**
  * Clipboard-fallback delivery for the submit-time advisory (hook milestone H3).
@@ -600,7 +600,7 @@ export function buildWin32KeystrokeScript(
     win32HelperPrelude(opts.helperDll) +
     `$w=New-Object -ComObject WScript.Shell;` +
     `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
-    `$ok=$false;` +
+    `$ok=$false;$nxBest=[IntPtr]::Zero;` +
     // RC74: focus THIS window first; everything below is the untouched fallback.
     (opts.target ? buildWin32WindowTargetBlock(opts.target) : '') +
     // RC60 (Windows/Devin staging tester, 2026-08-24): this Devin build titles
@@ -618,6 +618,18 @@ export function buildWin32KeystrokeScript(
     `if($ok){break};Start-Sleep -Milliseconds 400};` +
     `if($ok){Start-Sleep -Milliseconds 120}};` +
     `if(-not $ok){Write-Output ("FOREGROUND=" + $fg);exit 1};` +
+    // RC75 — the FINAL GATE. Everything above decided the editor *should* be in front; this
+    // re-reads what is in front in the instant before typing and refuses if it is anything
+    // else. The Windows tester's log: a 15 s delivery on a starved machine, the user switched
+    // to another application in that gap, and both the paste and the Enter followed the focus
+    // into it. When the RC74 walk identified our window the foreground HANDLE must be that
+    // window (a second window of the same editor is refused too); otherwise the shipped
+    // candidate rule applies to the current title. No sleep sits between this and SendKeys.
+    `$nxB2=New-Object System.Text.StringBuilder 256;$nxNow=[W.U]::GetForegroundWindow();[void][W.U]::GetWindowText($nxNow,$nxB2,256);$fg2=$nxB2.ToString();` +
+    `$ok2=$false;` +
+    `if($nxBest -ne [IntPtr]::Zero){if($nxNow -eq $nxBest){$ok2=$true}}` +
+    `else{foreach($t in @(${psTitles})){if($fg2 -eq $t -or $fg2.EndsWith($t) -or $fg2.StartsWith($t + ' - ') -or $fg2.Contains(' - ' + $t + ' - ')){$ok2=$true;break}}};` +
+    `if(-not $ok2){Write-Output ("FOREGROUND=" + $fg2 + " (changed before send)");exit 1};` +
     `$w.SendKeys("${sendKeys}")`
   );
 }
@@ -641,6 +653,16 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
         // RC59: name the refusing gate — the linux submit_failed used to be
         // indistinguishable from a missing tool (same one-line outcome).
         deps.submitLog?.(`[nexpath] submit-linux: editor not focused after raise (host=${deps.host}, appName=${deps.appName ?? 'unset'})`);
+        return false;
+      }
+    }
+    // RC75 (Linux): RC11 accepts ANY window of this editor; with the window named, the Enter
+    // must go to THAT window and nowhere else — a second window of the same editor is the
+    // wrong chat. Read in the instant before the key. `xdotool` absent ⇒ RC11's own rule.
+    if (platform === 'linux' && deps.windowTarget && (deps.hasCommand ?? defaultHasCommand)('xdotool')) {
+      const active = (deps.runCapture ?? defaultRunCapture)('xdotool', ['getactivewindow', 'getwindowname']);
+      if (!isOurWindowTitle(active, deps.windowTarget)) {
+        deps.submitLog?.(`[nexpath] submit-linux: refused — "${active ?? '<unreadable>'}" is in front, not this editor window (nothing typed)`);
         return false;
       }
     }

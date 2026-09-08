@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  parseWmctrlList, scoreEditorWindow, windowClassMatches, rankEditorWindows,
+  parseWmctrlList, scoreEditorWindow, windowClassMatches, rankEditorWindows, isOurWindowTitle,
 } from './editor-window-target.js';
 
 /** Verbatim `wmctrl -lx`, 2026-09-07, Ubuntu/GNOME. */
@@ -133,5 +133,28 @@ describe('⭐ RC74a — Devin mid-title app name', () => {
       '0x3  0 google-chrome.Google-chrome h Devin docs - Chrome',
     ].join('\n'));
     expect(rankEditorWindows(rows, { ...t, classNeedles: ['devin', 'windsurf'] }).map((w) => w.id)).toEqual(['0x2']);
+  });
+});
+
+/** ⭐ RC75 — the instant-before-typing gate: is the window in front THIS host's window? */
+describe('⭐ RC75 — isOurWindowTitle', () => {
+  const ws = { appName: 'Cursor', workspaceName: 'nexpath' };
+  it('⭐ with a workspace: only the identifying tiers pass; a second window of the same editor is refused', () => {
+    expect(isOurWindowTitle('nexpath - Cursor', ws)).toBe(true);
+    expect(isOurWindowTitle('extension.ts - nexpath - Cursor', ws)).toBe(true);
+    expect(isOurWindowTitle('nexpath - Devin - session', { appName: 'Devin', workspaceName: 'nexpath' })).toBe(true);
+    expect(isOurWindowTitle('Cursor', ws)).toBe(false);            // the folder-less window
+    expect(isOurWindowTitle('other - Cursor', ws)).toBe(false);    // another project's window
+    expect(isOurWindowTitle('nexpath docs - Cursor', ws)).toBe(false); // weak "contains" tier
+    expect(isOurWindowTitle('WhatsApp', ws)).toBe(false);
+    expect(isOurWindowTitle(null, ws)).toBe(false);
+    expect(isOurWindowTitle('', ws)).toBe(false);
+  });
+  it('without a workspace: the folder-less shapes pass, another application never does', () => {
+    expect(isOurWindowTitle('Cursor', { appName: 'Cursor' })).toBe(true);
+    expect(isOurWindowTitle('index.ts - Cursor', { appName: 'Cursor' })).toBe(true);
+    expect(isOurWindowTitle('Devin - session', { appName: 'Devin' })).toBe(true);
+    expect(isOurWindowTitle('Slack', { appName: 'Cursor' })).toBe(false);
+    expect(isOurWindowTitle('Cursor', {})).toBe(false);
   });
 });

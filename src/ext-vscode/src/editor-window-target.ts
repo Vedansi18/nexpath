@@ -99,6 +99,19 @@ export function scoreEditorWindow(title: string, target: EditorWindowTarget = {}
   return 10;
 }
 
+/**
+ * RC75 — the gate every synthetic keystroke passes in the instant before it is sent: is the
+ * window in front, right now, THIS host's window? With a workspace name the title must hit
+ * one of the identifying tiers (≥ 75); the weak "contains the name somewhere" tier and the
+ * bare "some window of this app" tier are refused — a second window of the same editor is
+ * exactly the wrong place to type. Without a workspace name the folder-less shapes (100 / 70
+ * / 60) count. A title of another application is always refused.
+ */
+export function isOurWindowTitle(title: string | null | undefined, target: EditorWindowTarget = {}): boolean {
+  const score = scoreEditorWindow(String(title ?? ''), target);
+  return String(target.workspaceName ?? '').trim() ? score >= 75 : score >= 60;
+}
+
 /** True when a WM_CLASS ("cursor.Cursor") matches any of the raise candidates ("cursor", "devin"…). */
 export function windowClassMatches(wmClass: string, classNeedles: readonly string[]): boolean {
   const c = String(wmClass ?? '').toLowerCase();

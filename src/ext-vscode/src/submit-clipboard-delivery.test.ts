@@ -448,7 +448,8 @@ describe('⭐ RC47 — win32 AppActivate candidates + retry', () => {
     // The builder embeds the candidate list twice (foreground check + activate
     // rounds) — a deduped single candidate appears exactly 2×; a duplicated
     // candidate would appear 4×.
-    expect(ps.match(/'Cursor'/g)?.length).toBe(2);
+    // one per candidate list: foreground check, AppActivate rounds, and (RC75) the final gate before SendKeys
+    expect(ps.match(/'Cursor'/g)?.length).toBe(3);
   });
 });
 
@@ -892,5 +893,65 @@ describe('⭐ RC74 — win32 window targeting', () => {
     expect(parseWin32WindowScore('NXWIN=100')).toBe(100);   // the single-number form still reads
     expect(parseWin32WindowScore('nothing')).toBe(-1);
     expect(parseWin32WindowCount(null)).toBe(-1);
+  });
+});
+
+/**
+ * ⭐ RC75 — the FINAL GATE: nothing is typed unless the window in front, in the instant
+ * before SendKeys / xdotool, is this host's window. Windows tester's log: a 15 s delivery,
+ * the user switched to another application in that gap, and the paste and the Enter
+ * followed the focus into it.
+ */
+describe('⭐ RC75 — final gate before SendKeys (win32 script)', () => {
+  const target = { appName: 'Cursor', workspaceName: 'nexpath' };
+  it('⭐ re-reads the foreground AFTER activation and refuses anything else; no sleep before SendKeys', () => {
+    const ps = buildWin32KeystrokeScript(['Cursor'], '{ENTER}', { target });
+    const exitOld = ps.indexOf('Write-Output ("FOREGROUND=" + $fg);exit 1');
+    const gate = ps.indexOf('$nxNow=[W.U]::GetForegroundWindow()');
+    const refuse = ps.indexOf('(changed before send)');
+    const send = ps.indexOf('SendKeys("{ENTER}")');
+    expect(exitOld).toBeGreaterThan(-1);
+    expect(gate).toBeGreaterThan(exitOld);
+    expect(refuse).toBeGreaterThan(gate);
+    expect(send).toBeGreaterThan(refuse);
+    expect(ps.slice(gate, send)).not.toContain('Start-Sleep');
+    expect(ps.slice(refuse, send)).toContain('exit 1');
+  });
+  it('⭐ with the window identified, the foreground HANDLE must be that window (another window of the same editor is refused)', () => {
+    const ps = buildWin32KeystrokeScript(['Cursor'], '^v', { target });
+    expect(ps).toContain('if($nxBest -ne [IntPtr]::Zero){if($nxNow -eq $nxBest){$ok2=$true}}');
+    expect(ps.indexOf('$ok=$false;$nxBest=[IntPtr]::Zero;')).toBeLessThan(ps.indexOf('nxScore'));  // initialised BEFORE the optional block
+  });
+  it('without a target the gate applies the shipped candidate rule to the CURRENT title', () => {
+    const ps = buildWin32KeystrokeScript(['Devin', 'Windsurf'], '{ENTER}');
+    expect(ps).toContain('$ok=$false;$nxBest=[IntPtr]::Zero;');
+    expect(ps).not.toContain('nxScore');
+    expect(ps).toContain("else{foreach($t in @('Devin','Windsurf')){if($fg2 -eq $t -or $fg2.EndsWith($t) -or $fg2.StartsWith($t + ' - ') -or $fg2.Contains(' - ' + $t + ' - ')){$ok2=$true;break}}}");
+  });
+});
+
+describe('⭐ RC75 — Linux submit: with the window named, Enter goes to THAT window only', () => {
+  const base = {
+    platform: 'linux' as const, env: { DISPLAY: ':0' }, host: 'cursor' as const, appName: 'Cursor',
+    isPopupFocused: () => false, isEditorFocused: () => true, hasCommand: () => true,
+    windowTarget: { appName: 'Cursor', workspaceName: 'nexpath' },
+  };
+  it('⭐ a second window of the same editor in front ⇒ refused, logged, nothing typed', () => {
+    const logs: string[] = []; const run = vi.fn(() => true);
+    expect(submitKeystroke({ ...base, run, runCapture: () => 'other - Cursor', submitLog: (m) => logs.push(m) })).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+    expect(logs.join(' ')).toContain('refused');
+    expect(logs.join(' ')).toContain('"other - Cursor"');
+  });
+  it('our window in front ⇒ Enter is sent', () => {
+    const run = vi.fn(() => true);
+    expect(submitKeystroke({ ...base, run, runCapture: () => 'extension.ts - nexpath - Cursor' })).toBe(true);
+    expect(run).toHaveBeenCalledWith('xdotool', ['key', '--clearmodifiers', 'Return']);
+  });
+  it('no xdotool ⇒ RC11\'s own rule, unchanged; no windowTarget ⇒ unchanged', () => {
+    const run = vi.fn(() => true);
+    expect(submitKeystroke({ ...base, hasCommand: (c) => c !== 'xdotool' && c === 'wtype', run, runCapture: () => 'WhatsApp' })).toBe(true);
+    const run2 = vi.fn(() => true);
+    expect(submitKeystroke({ ...base, windowTarget: undefined, run: run2, runCapture: () => 'WhatsApp' })).toBe(true);
   });
 });

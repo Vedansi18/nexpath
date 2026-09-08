@@ -33,6 +33,14 @@
   are written locally through the CLI; nothing is sent anywhere unless you have turned
   telemetry on yourself, which is off by default.
 - Internal comment and documentation cleanup. No change to how the extension behaves.
+- Sending never types into another application any more. If you switch to a browser or a
+  messenger while the strengthened prompt is being delivered, the paste and the Enter used
+  to follow your focus into that window. Now, in the instant before each keystroke, the
+  window in front is re-checked; if it is not this editor window — another application, or
+  even a second window of the same editor — nothing is typed. A refused paste leaves the
+  text on your clipboard and says so once; a refused Enter leaves it in the chat input with
+  the existing "press Enter yourself" note. On Windows the delivery log now also records
+  which window was in front when a keystroke was refused.
 - Cursor and Windsurf: with more than one editor window open, the strengthened prompt
   could be pasted and sent into the wrong window. Sending brought whichever window the
   system happened to list first for that application to the front, so a prompt written in
