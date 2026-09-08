@@ -9,6 +9,8 @@ import {
   defaultReadItemTable,
   defaultReadWindsurfJsonFiles,
   isUnrecoverableNativeLoadError,
+  nativeSqliteUnsupportedReason,
+  NATIVE_SQLITE_MIN_NODE_MAJOR,
   resolveBundledNativeBinding,
   type ReadItemTableFn,
   type ReadWindsurfJsonFilesFn,
@@ -1220,5 +1222,39 @@ describe('RC79 — unrecoverable native-module load failures latch instead of st
     w.stop();
     expect(onError).toHaveBeenCalledTimes(1);                 // SQLite latched
     expect(readWindsurfJsonFilesFn.mock.calls.length).toBeGreaterThan(1); // Windsurf unaffected
+  });
+});
+
+
+// ── RC79b: never open a database on a runtime that would segfault ────────────
+// better-sqlite3 13 is Node-API (which is what fixes the ABI class) but needs
+// Node >= 22: on Node 20.19 it SEGFAULTS on open (measured: exit 139). A
+// segfault kills the extension host and cannot be caught, so the readers ask
+// first. Electron 34 is the only generation that bundles Node 20.
+describe('RC79b — the Node-runtime guard for the native SQLite reader', () => {
+  it('flags the runtimes that would crash, and clears the ones that would not', () => {
+    expect(nativeSqliteUnsupportedReason('20.18.1')).toContain('needs Node');   // Electron 34
+    expect(nativeSqliteUnsupportedReason('18.20.0')).not.toBeNull();
+    expect(nativeSqliteUnsupportedReason('22.14.0')).toBeNull();                // Electron 35-39
+    expect(nativeSqliteUnsupportedReason('24.15.0')).toBeNull();                // Electron 40-43
+    expect(NATIVE_SQLITE_MIN_NODE_MAJOR).toBe(22);
+  });
+
+  it('treats an unreadable version as SUPPORTED — a guess must not disable capture', () => {
+    expect(nativeSqliteUnsupportedReason(undefined)).toBeNull();
+    expect(nativeSqliteUnsupportedReason('')).toBeNull();
+    expect(nativeSqliteUnsupportedReason('not-a-version')).toBeNull();
+  });
+
+  it('names the runtime so the user can act, without leaking a stack', () => {
+    const reason = nativeSqliteUnsupportedReason('20.18.1')!;
+    expect(reason).toContain('20.18.1');
+    expect(reason).toContain('Update the editor');
+  });
+
+  it('⭐ the guard latches through the SAME path as a load failure (one report, then silence)', () => {
+    // Wiring proof: whatever the guard says must be recognised as unrecoverable,
+    // otherwise it would be retried on every poll tick and re-stage copies.
+    expect(isUnrecoverableNativeLoadError(nativeSqliteUnsupportedReason('20.18.1')!)).toBe(true);
   });
 });

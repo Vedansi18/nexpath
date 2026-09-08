@@ -136,10 +136,46 @@ export const defaultReadWindsurfJsonFiles: ReadWindsurfJsonFilesFn = async (
  * Only these unrecoverable shapes latch — a locked, malformed, or missing
  * database is transient and keeps today's retry behaviour exactly.
  */
+/**
+ * RC79b — refuse to touch the native module on a runtime that would CRASH.
+ *
+ * ⚠ FOUND WHILE CHECKING PUBLISH READINESS, before shipping. better-sqlite3 13
+ * is Node-API (which is what closes the NODE_MODULE_VERSION class), but it
+ * declares `engines.node >= 22` and does not merely warn below that: on Node
+ * 20.19 it SEGFAULTS the process the moment a database is opened (measured
+ * here: exit 139, core dumped). A segfault takes the whole extension host with
+ * it, which is far worse than the error it replaced, and it cannot be caught.
+ *
+ * Electron bundles Node as follows (electron/releases.json, checked 2026-09-08):
+ *   Electron 34 → Node 20.18   ← the only exposed build
+ *   Electron 35-39 → Node 22.x     Electron 40-43 → Node 24.x
+ * So exactly one old editor generation is at risk. Rather than gamble on nobody
+ * running it, the readers ask this first and stand down cleanly, reusing the
+ * RC79 latch (reported once, capture paused, submit flow untouched).
+ *
+ * An unparseable version is treated as SUPPORTED: that is today's behaviour, and
+ * guessing "unsupported" would disable capture for everyone on an odd runtime.
+ */
+export const NATIVE_SQLITE_MIN_NODE_MAJOR = 22;
+export const NATIVE_SQLITE_UNSUPPORTED_MARKER = 'nexpath-native-sqlite-unsupported-runtime';
+
+export function nativeSqliteUnsupportedReason(
+  nodeVersion: string | undefined = process.versions.node,
+): string | null {
+  const major = Number.parseInt(String(nodeVersion ?? '').split('.')[0] ?? '', 10);
+  if (!Number.isFinite(major)) return null; // unknown runtime — behave exactly as before
+  if (major >= NATIVE_SQLITE_MIN_NODE_MAJOR) return null;
+  return `${NATIVE_SQLITE_UNSUPPORTED_MARKER}: the bundled SQLite reader needs Node `
+    + `>= ${NATIVE_SQLITE_MIN_NODE_MAJOR}, but this editor runs Node ${nodeVersion}. `
+    + `Opening a database on this runtime crashes the extension host, so chat-history `
+    + `capture is skipped. Update the editor to re-enable it.`;
+}
+
 export function isUnrecoverableNativeLoadError(message: string): boolean {
   const m = message.toLowerCase();
   return (
-    m.includes('node_module_version')                 // ABI mismatch (the measured case)
+    m.includes(NATIVE_SQLITE_UNSUPPORTED_MARKER)       // RC79b: runtime too old to open a db safely
+    || m.includes('node_module_version')               // ABI mismatch (the measured case)
     || m.includes('err_dlopen_failed')                 // dlopen refused the binary
     || m.includes('was compiled against a different')  // node-gyp's wording
     || m.includes('is not a valid win32 application')  // wrong arch on Windows
@@ -178,6 +214,10 @@ export function resolveBundledNativeBinding(
  * (cheaper extension startup; only loaded on first chat-history read).
  */
 export const defaultReadItemTable: ReadItemTableFn = async (dbPath) => {
+  // RC79b: never open (or even stage a copy for) a database on a runtime that
+  // would segfault. The latch turns this into one report, then silence.
+  const unsupported = nativeSqliteUnsupportedReason();
+  if (unsupported) throw new Error(unsupported);
   const { copyFile, mkdir, rm } = await import('node:fs/promises');
   const { existsSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
