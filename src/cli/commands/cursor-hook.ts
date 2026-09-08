@@ -368,12 +368,15 @@ export async function runCursorHookAction(
     // The stop child a running default decide spawned — killed on hold
     // exhaustion so no popup process outlives the hook (R2).
     const stopChildRef: { current: ChildProcess | null } = { current: null };
+    // RC76: when THIS turn's `auto` started — the decider consumes any pending row older
+    // than this before `stop` runs, so a previous prompt's suggestion can never be shown.
+    let turnStartedAt = 0;
     const decide = deps.decide ?? (async (pl: CursorHookPayload) => {
       const d = buildStopDrivenPromptSubmitDecider(
         { project: pl.projectRoot },
         { host: 'cursor', onChild: (c) => { stopChildRef.current = c; } },
       );
-      return d('beforeSubmitPrompt', { project: pl.projectRoot }, pl.promptText ?? '');
+      return d('beforeSubmitPrompt', { project: pl.projectRoot, turnStartedAt }, pl.promptText ?? '');
     });
     // Config-backed switch (owner ruling 2026-08-12): env var override, else the
     // shipped `~/.nexpath/submit-flow.json` flag. The env-only helper is kept for
@@ -446,6 +449,7 @@ export async function runCursorHookAction(
       };
       if (promptText.trim() !== '') {
         const autoStartedAt = Date.now();
+        turnStartedAt = autoStartedAt; // RC76
         // RC71 (F-14): additive env for `auto` — how much hold is left (the
         // engine may honour it; nothing reads it yet). `spawnAuto` inherits
         // process.env, so it is set for the spawn only and restored after.

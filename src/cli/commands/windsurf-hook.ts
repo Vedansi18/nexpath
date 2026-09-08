@@ -181,7 +181,7 @@ export function buildDefaultPromptSubmitDecider(
     openStore?: (db?: string) => Promise<unknown>;
     closeStore?: (store: unknown) => Promise<void> | void;
   } = {},
-): (event: string, o: { project?: string }, promptText?: string) => Promise<WindsurfPromptSubmitDecision> {
+): (event: string, o: { project?: string; turnStartedAt?: number }, promptText?: string) => Promise<WindsurfPromptSubmitDecision> {
   const now = ports.now ?? (() => Date.now());
   const openStoreFn = ports.openStore ?? openStore;
   const closeStoreFn = ports.closeStore ?? closeStore;
@@ -528,7 +528,7 @@ export interface WindsurfHookActionDeps {
    * switch is on. Defaults to `'allow'` so H2 alone is behaviour-neutral; H3
    * replaces it with the real popup-backed decision.
    */
-  decidePromptSubmit?: (event: string, opts: { project?: string }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
+  decidePromptSubmit?: (event: string, opts: { project?: string; turnStartedAt?: number }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
   /** OWNER RULING 2026-08-12: consume the session's pending advisories before `stop` runs (switch on only). */
   suppressOldAdvisorySurface?: (projectRoot: string, sessionId: string) => Promise<number>;
   /** RC41 seam: injected in tests; defaults to the real continuation runner. */
@@ -665,6 +665,9 @@ export async function runWindsurfHookAction(
   let hold: HoldBudget | null = null;
   let decideAfterAuto = false;
   let pendingPromptText = '';
+  // RC76: when THIS turn's `auto` started — passed to the decider so a pending row from an
+  // earlier turn is consumed before `stop` runs (see consumeRowsFromEarlierTurns).
+  let turnStartedAt = 0;
   // Default decider (H3). Constructed unconditionally, but this only BUILDS a
   // closure — `openStore` lives inside it and runs solely on the gated call below
   // (`isWindsurfPromptSubmitAdvisoryEnabled`). So with the switch off no Store is
@@ -908,6 +911,7 @@ export async function runWindsurfHookAction(
     // switch-off path passes exactly two arguments as it always has. Only the
     // gated path adds the replay dep.
     const autoStartedAt = Date.now();
+    turnStartedAt = autoStartedAt; // RC76
     const result = preReadRaw === null
       ? await handle(event, opts)
       : await handle(event, opts, { readStdin: async () => preReadRaw as string });
@@ -981,8 +985,8 @@ export async function runWindsurfHookAction(
       // only what the earlier segments left.
       const deciderStartedAt = Date.now();
       const decided = hold
-        ? await hold.run(() => decidePromptSubmit(event, opts, pendingPromptText))
-        : { timedOut: false, value: await decidePromptSubmit(event, opts, pendingPromptText).catch(() => 'allow' as const) };
+        ? await hold.run(() => decidePromptSubmit(event, { ...opts, turnStartedAt }, pendingPromptText))
+        : { timedOut: false, value: await decidePromptSubmit(event, { ...opts, turnStartedAt }, pendingPromptText).catch(() => 'allow' as const) };
       const deciderMs = Date.now() - deciderStartedAt;
       if (decided.timedOut) {
         // RC67: name the expiry. Before this the only evidence a popup had been
