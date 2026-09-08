@@ -106,6 +106,56 @@ const targetArch = readTargetArch(extraArgs);
 const releaseBinary = resolve(subPkgRoot, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
 const prebuildsDir = resolve(subPkgRoot, 'prebuilds');
 
+/**
+ * RC79 — is the installed better-sqlite3 a **Node-API** build?
+ *
+ * ⚠ WHY THIS BRANCH EXISTS (Windows/Cursor tester, 2026-09-08). Cursor updated
+ * its Electron runtime to 42 (NODE_MODULE_VERSION 146) while the shipped .vsix
+ * carried per-ABI prebuilds only up to 145, so `better-sqlite3` refused to load
+ * and chat-history capture died with a NODE_MODULE_VERSION error on every read.
+ * The old cure — add another ABI to `electronVersions` — is IMPOSSIBLE on
+ * better-sqlite3 12: Electron 42's V8 requires a tag argument on
+ * `External::Value()`, so 12.x cannot compile against it at all (verified: the
+ * rebuild fails with "candidate expects 1 argument, 0 provided").
+ *
+ * better-sqlite3 13 is built on Node-API (`node-addon-api`) and ships ONE
+ * binary per PLATFORM (`prebuilds/<platform>-<arch>.node`) instead of one per
+ * ABI. Node-API is ABI-stable across Node and Electron versions — verified by
+ * loading the very binary @electron/rebuild accepted for Electron 42 under this
+ * machine's system Node (ABI 127) and running a query through it. So on 13.x
+ * there is nothing to rebuild and nothing to pin: the same .vsix works on every
+ * current and future Electron, and this whole dance is skipped.
+ *
+ * The legacy per-ABI path below is kept intact for a non-Node-API install, so
+ * downgrading the dependency still produces a correct .vsix.
+ */
+function detectNapiBetterSqlite3() {
+  const dir = resolve(subPkgRoot, 'node_modules', 'better-sqlite3', 'prebuilds');
+  if (!existsSync(dir)) return null;
+  // prebuildify layout: <platform>-<arch>.node (NOT the per-ABI <abi>/ layout).
+  const plat = `${process.platform}-${targetArch}.node`;
+  return existsSync(join(dir, plat)) ? { dir, plat } : null;
+}
+const napi = detectNapiBetterSqlite3();
+
+if (napi) {
+  console.log('better-sqlite3 is a Node-API build — ABI-stable across Electron versions.');
+  console.log(`  prebuilds/ ships one binary per platform (this host: ${napi.plat}).`);
+  console.log('  Skipping the per-Electron rebuild: no NODE_MODULE_VERSION pinning is needed.');
+  console.log('');
+  // No stale per-ABI dir may ship: the runtime prefers prebuilds/<abi>/ when it
+  // exists, and a leftover from an older build would reintroduce the mismatch.
+  rmSync(prebuildsDir, { recursive: true, force: true });
+  const code = run(`vsce package ${extraArgs.join(' ')}`.trim(), 'npx', ['vsce', 'package', ...extraArgs]);
+  if (code !== 0) {
+    console.error(`✗ vsce package failed with exit ${code}.`);
+    process.exit(code);
+  }
+  console.log('');
+  console.log('✓ Packaged. better-sqlite3 is Node-API — the same .vsix loads on any Cursor / Windsurf Electron.');
+  process.exit(0);
+}
+
 console.log(`Packaging nexpath-vscode with better-sqlite3 prebuilds for Electron ${versionsToBuild.join(', ')}`);
 console.log('');
 
