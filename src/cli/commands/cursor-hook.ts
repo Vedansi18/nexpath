@@ -27,7 +27,10 @@ import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hook/payload.js';
 import { defaultReadStdin, awaitChild, isReplacementEcho } from './windsurf-hook.js';
-import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
+import { createHoldBudget, computePopupWaitBudgetMs, type HoldBudget } from './submit-hold-budget.js';
+import { readRegisteredCursorHookTimeoutSec } from '../../cursor-hook/install.js';
+import { homedir } from 'node:os';
+import { join as joinPath } from 'node:path';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
@@ -197,6 +200,8 @@ export interface CursorHookActionDeps {
    * segment draws from ONE budget; per-segment timeouts would sum.
    */
   holdBudget?: HoldBudget;
+  /** RC77 seam: the popup's own wait budget (defaults to computePopupWaitBudgetMs with this machine's registration). */
+  popupWaitBudgetMs?: (ctx: { host: 'cursor'; elapsedMs: number }) => number;
   /**
    * OPTION-A ORDERING (2026-08-12): spawn `nexpath auto` to classify THIS
    * prompt before deciding. Injected for tests; defaults to the shared
@@ -464,6 +469,17 @@ export async function runCursorHookAction(
         }
         const waited = await hold.run(() => waitForChild(child));
         autoMs = Date.now() - autoStartedAt;
+        // RC77: the popup waits on a HUMAN — grant it its own window, but only when the
+        // preparation actually finished (an exhausted preparation stays exhausted, so the
+        // shared-budget guarantee for stdin + auto is untouched).
+        if (!waited.timedOut) {
+          const popupWaitMs = (deps.popupWaitBudgetMs ?? ((ctx) => computePopupWaitBudgetMs({
+            ...ctx, env: deps.env ?? process.env,
+            registeredCursorTimeoutSec: readRegisteredCursorHookTimeoutSec(joinPath(homedir(), '.cursor', 'hooks.json')),
+          })))({ host: 'cursor', elapsedMs: hold.elapsed?.() ?? 0 });
+          hold.extendFor?.(popupWaitMs);
+          logEvent('info', 'cursor_hook_popup_budget', { popup_wait_ms: popupWaitMs, auto_ms: autoMs });
+        }
         remainingAfterAutoMs = hold.remaining();
         if (waited.timedOut) {
           logEvent('warn', 'cursor_hook_hold_expired', {

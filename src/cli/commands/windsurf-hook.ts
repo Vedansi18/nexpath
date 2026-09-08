@@ -47,7 +47,7 @@ import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { writeSubmitDecision, readReplacementEchoes, latestReplacementEchoAt,
 } from './submit-decision-store.js';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
-import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
+import { createHoldBudget, computePopupWaitBudgetMs, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
 // `harshil480` 15) — it is called here, never modified.
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
@@ -514,6 +514,8 @@ export interface WindsurfHookActionDeps {
   readFlagFile?: (path: string) => string | null;
   /** H4: injectable hold budget. Defaults to the plan's 60-90s self-enforced cap. */
   holdBudget?: HoldBudget;
+  /** RC77 seam: the popup's own wait budget (defaults to computePopupWaitBudgetMs; Windsurf has no host ceiling). */
+  popupWaitBudgetMs?: (ctx: { host: 'windsurf'; elapsedMs: number }) => number;
   /**
    * VED-PE-10 echo detector (see `isReplacementEcho`). Injected for tests so
    * they never open the real store; defaults to the real implementation.
@@ -931,6 +933,15 @@ export async function runWindsurfHookAction(
     if (hold) {
       const waited = await hold.run(() => waitForChild(result.child));
       autoMs = Date.now() - autoStartedAt;
+      // RC77: the popup waits on a HUMAN — grant it its own window once the preparation
+      // has actually finished; an exhausted preparation stays exhausted (shared budget for
+      // stdin + auto untouched). Windsurf/Devin never kill a hook (spike-measured), so the
+      // cap alone applies.
+      if (!waited.timedOut && decideAfterAuto) {
+        const popupWaitMs = (deps.popupWaitBudgetMs ?? ((ctx) => computePopupWaitBudgetMs({ ...ctx, env: deps.env ?? process.env })))({ host: 'windsurf', elapsedMs: hold.elapsed?.() ?? 0 });
+        hold.extendFor?.(popupWaitMs);
+        logEvent('info', 'windsurf_hook_popup_budget', { popup_wait_ms: popupWaitMs, auto_ms: autoMs });
+      }
       remainingAfterAutoMs = hold.remaining();
       if (waited.timedOut) {
         // RC67: the FIRST log line the expiry path ever had. `auto` ate the
