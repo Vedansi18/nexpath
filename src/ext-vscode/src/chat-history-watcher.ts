@@ -1,4 +1,4 @@
-import { watch, existsSync as existsSyncDefault, type FSWatcher, type WatchListener } from 'node:fs';
+import { watch, existsSync as existsSyncDefault, statSync as statSyncDefault, type FSWatcher, type WatchListener } from 'node:fs';
 import type {
   ChatHistoryEvent,
   ChatHistoryExtractor,
@@ -358,6 +358,8 @@ export interface ChatHistoryWatcherOptions {
   onInfo?: (message: string) => void;
   /** RC53 seam: file-existence probe for the vanished-db check (tests inject). */
   existsSyncFn?: (p: string) => boolean;
+  /** RC80 seam: stat used for the unchanged-content gate. Injected in tests. */
+  statSyncFn?: (p: string) => { size: number; mtimeMs: number };
   /**
    * Emitted when a Cursor target's ItemTable doesn't fingerprint to any
    * known extractor — extension layer surfaces this as a "schema unknown,
@@ -416,6 +418,33 @@ export function createChatHistoryWatcher(
   // isUnrecoverableNativeLoadError). SQLite reads then stand down for the rest
   // of the session instead of re-raising the same error on every poll tick.
   let nativeLoadFailed = false;
+  /**
+   * RC80 — the content signature of each database at its last SUCCESSFUL read.
+   *
+   * ⚠ MEASURED ROOT CAUSE (Windows/Cursor tester, 2026-09-08: "cancelling the
+   * prompt takes so long"). The decision poller runs every 2 s, yet the extension
+   * took 29.6 s to notice a written decision, and a fixed 400 ms settle timer was
+   * measured at 6114 ms. Both are the same symptom: the extension host event loop
+   * is starved ~15x. The cause is this watcher. Every 2 s, for EVERY database, it
+   * copied the whole file plus its WAL to a temp dir and then ran
+   * `SELECT key, value` over `ItemTable` AND `cursorDiskKV` — full scans, no
+   * WHERE, no LIMIT — and better-sqlite3 is synchronous, so the extension host
+   * blocks throughout. Measured on this machine's real Cursor store: the global
+   * database is 51 MB and `cursorDiskKV` holds 6,903 rows totalling 42.5 MB of
+   * values, i.e. ~50 MB copied and ~44 MB pulled into JS strings, per database,
+   * every two seconds. On Windows each of those copies is also scanned by the
+   * antivirus, which is why that machine suffers far more than this one.
+   *
+   * Nearly all of that work was WASTE: emissions are de-duplicated by signature,
+   * so re-reading unchanged bytes emits nothing. Skipping a read whose inputs are
+   * byte-identical is therefore EQUIVALENT, not a behaviour change: identical
+   * bytes produce identical rows, and every one of those rows was already seen.
+   *
+   * Fail-open by construction: if the signature cannot be taken (the file does not
+   * exist, or stat throws), it reads exactly as before. The signature is stored
+   * only AFTER a successful read, so a failed read always retries.
+   */
+  const lastReadSignatures = new Map<string, string>();
   const watchFn = opts.watchFn ?? watch;
   const readItemTableFn = opts.readItemTableFn ?? defaultReadItemTable;
   const readWindsurfJsonFilesFn =
@@ -530,12 +559,40 @@ export function createChatHistoryWatcher(
     reportError(err, path);
   }
 
+  /**
+   * RC80: size+mtime of the main database and its WAL/SHM siblings. SQLite writes
+   * go to the WAL, so the WAL is the part that actually moves between polls.
+   * Returns null when nothing can be stat'd, which the caller treats as "changed".
+   */
+  function sqliteContentSignature(path: string): string | null {
+    const statFn = opts.statSyncFn ?? statSyncDefault;
+    const parts: string[] = [];
+    for (const suffix of ['', '-wal', '-shm'] as const) {
+      try {
+        const st = statFn(path + suffix);
+        parts.push(`${suffix}:${st.size}:${st.mtimeMs}`);
+      } catch {
+        parts.push(`${suffix}:-`); // absent is itself a stable, meaningful state
+      }
+    }
+    return parts.every((p) => p.endsWith(':-')) ? null : parts.join('|');
+  }
+
   async function processSqliteTarget(target: WatchTarget): Promise<void> {
     // RC79: the native module is unloadable — nothing here can succeed, and
     // retrying is what flooded the host. Windsurf's JSON targets are untouched.
     if (nativeLoadFailed) return;
+    // RC80: nothing has changed since the last successful read, so a re-read would
+    // copy ~50 MB, scan it, and emit nothing. Skip it and leave the host free.
+    const signature = sqliteContentSignature(target.path);
+    if (signature !== null && lastReadSignatures.get(target.path) === signature) return;
     try {
       const rows = await readItemTableFn(target.path);
+      // RC80: the costly part is done and these exact bytes are now accounted
+      // for. Recorded here rather than at the end so the early returns below
+      // (unknown schema) also stop re-reading. A THROWN read never records, so
+      // a transient failure still retries on the next tick.
+      if (signature !== null) lastReadSignatures.set(target.path, signature);
       const isInitialPass = !primedTargets.has(target.path);
       primedTargets.add(target.path);
 
