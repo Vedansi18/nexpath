@@ -33,6 +33,15 @@
   are written locally through the CLI; nothing is sent anywhere unless you have turned
   telemetry on yourself, which is off by default.
 - Internal comment and documentation cleanup. No change to how the extension behaves.
+- The submit-time popup now waits for you. It used to close by itself after about
+  75 seconds and let the held prompt run, which cut off anyone still reading the prepared
+  text. Preparing the suggestion is still bounded (a stuck preparation never holds a prompt
+  for long), but once the popup is open it stays until you choose — Enter, "use original",
+  or Esc — for up to 30 minutes by default (`NEXPATH_SUBMIT_POPUP_WAIT_MS` overrides it). On
+  Cursor the wait also never exceeds the hook timeout Nexpath registers, which setup now sets
+  to 1900 seconds (it was 120); an install that has not re-run setup keeps the shorter, safe
+  window until it does. `~/.nexpath/nexpath.log` records the granted window per turn as
+  `cursor_hook_popup_budget` / `windsurf_hook_popup_budget`.
 - The submit-time popup never shows a previous prompt's suggestion again. A suggestion
   prepared for one prompt could be left waiting (the extension not ready at that moment, the
   popup unable to open, a crash) and was then shown for the NEXT prompt that had none of its
