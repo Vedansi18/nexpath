@@ -26,6 +26,7 @@ import {
   WIN32_USER32_CSHARP,
   buildWin32WindowTargetBlock,
   parseWin32WindowScore,
+  parseWin32WindowCount,
   win32HelperAssemblyPath,
   win32HelperPrelude,
   buildWin32PrewarmScript,
@@ -797,7 +798,8 @@ describe('⭐ RC74 — win32 window targeting', () => {
   const target = { appName: 'Cursor', workspaceName: 'nexpath' };
 
   it('⭐ the C# helper gained exactly the calls the walk needs, and keeps the ones it had', () => {
-    for (const fn of ['GetForegroundWindow', 'GetWindowText', 'FindWindowEx', 'SetForegroundWindow', 'IsWindowVisible']) {
+    for (const fn of ['GetForegroundWindow', 'GetWindowText', 'FindWindowEx', 'SetForegroundWindow', 'IsWindowVisible',
+      'GetWindowThreadProcessId', 'GetCurrentThreadId', 'AttachThreadInput', 'BringWindowToTop', 'ShowWindow', 'IsIconic']) {
       expect(WIN32_USER32_CSHARP).toContain(fn);
     }
     expect(WIN32_USER32_CSHARP).not.toContain('EnumWindows');   // no scriptblock→delegate cast on PS 5.1
@@ -806,14 +808,17 @@ describe('⭐ RC74 — win32 window targeting', () => {
   it('⭐ scores titles with the SAME tiers as the Linux ranking', () => {
     const ps = buildWin32WindowTargetBlock(target);
     expect(ps).toContain("if($t -eq ($ws+' - '+$app)){return 100}");
+    expect(ps).toContain("if($t.StartsWith($ws+' - '+$app+' - ')){return 95}");     // RC74a: Devin mid-title
     expect(ps).toContain("if($t.EndsWith(' - '+$ws+' - '+$app)){return 90}");
+    expect(ps).toContain("if($t.Contains(' - '+$ws+' - '+$app+' - ')){return 85}");
+    expect(ps).toContain("if($t.StartsWith($app+' - ')){return 70}");
     expect(ps).toContain("if($t.Contains(' - '+$ws+' - ')){return 80}");
     expect(ps).toContain("if($t.StartsWith($ws+' - ')){return 75}");
     expect(ps).toContain("if($t.Contains($ws)){return 30}");
     expect(ps).toContain("if($t -eq $app){return 100}");
     expect(ps).toContain("(($t -split ' - ').Count -eq 2)){return 60}");
     // A window of another application is never a candidate, exactly as on Linux.
-    expect(ps).toContain("if(-not ($t -eq $app -or $t.EndsWith(' - '+$app) -or $t.EndsWith($app))){return 0}");
+    expect(ps).toContain("if(-not ($t -eq $app -or $t.EndsWith(' - '+$app) -or $t.EndsWith($app) -or $t.StartsWith($app+' - ') -or $t.Contains(' - '+$app+' - '))){return 0}");
   });
 
   it('⭐ walks the top-level windows, skips invisible ones, and focuses by handle', () => {
@@ -826,7 +831,26 @@ describe('⭐ RC74 — win32 window targeting', () => {
     expect(ps).toContain('SetForegroundWindow($nxBest)');
     // …and the focus is verified, so a refused SetForegroundWindow falls through.
     expect(ps.lastIndexOf('GetForegroundWindow() -eq $nxBest')).toBeGreaterThan(ps.indexOf('SetForegroundWindow($nxBest)'));
-    expect(ps).toContain('Write-Output ("NXWIN=" + $nxTop)');
+    expect(ps).toContain('Write-Output ("NXWIN=" + $nxTop + "/" + $nxSeen)');
+  });
+
+  it('⭐ RC74a: takes focus from another application the standard way, and only when not already foreground', () => {
+    const ps = buildWin32WindowTargetBlock(target);
+    const at = (needle: string) => { const i = ps.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
+    const already = at('if([W.U]::GetForegroundWindow() -eq $nxBest){$ok=$true}');
+    const restore = at('if([W.U]::IsIconic($nxBest)){[void][W.U]::ShowWindow($nxBest,9)}');
+    const attach  = at('AttachThreadInput($nxT2,$nxT1,$true)');
+    const top     = at('BringWindowToTop($nxBest)');
+    const fg      = at('SetForegroundWindow($nxBest)');
+    const detach  = at('AttachThreadInput($nxT2,$nxT1,$false)');
+    const verify  = ps.lastIndexOf('GetForegroundWindow() -eq $nxBest');
+    expect(already).toBeLessThan(restore);
+    expect(restore).toBeLessThan(attach);
+    expect(attach).toBeLessThan(top);
+    expect(top).toBeLessThan(fg);
+    expect(fg).toBeLessThan(detach);
+    expect(detach).toBeLessThan(verify);
+    expect(ps).toContain('$nxAtt=(($nxT1 -ne 0) -and ($nxT1 -ne $nxT2))');   // never our own thread, never thread 0
   });
 
   it('⭐ the app name and workspace are PowerShell-escaped; no app name ⇒ no block at all', () => {
@@ -860,10 +884,13 @@ describe('⭐ RC74 — win32 window targeting', () => {
     expect(calls[0]).not.toContain('$nxApp=');
   });
 
-  it('parseWin32WindowScore reads the marker and tolerates noise', () => {
-    expect(parseWin32WindowScore('NXHELPER=cached\nNXWIN=100\n')).toBe(100);
-    expect(parseWin32WindowScore('NXWIN=0')).toBe(0);
+  it('parseWin32WindowScore / parseWin32WindowCount read the tier/count marker and tolerate noise', () => {
+    expect(parseWin32WindowScore('NXHELPER=cached\nNXWIN=95/2\n')).toBe(95);
+    expect(parseWin32WindowCount('NXHELPER=cached\nNXWIN=95/2\n')).toBe(2);
+    expect(parseWin32WindowScore('NXWIN=0/0')).toBe(0);
+    expect(parseWin32WindowCount('NXWIN=0/0')).toBe(0);
+    expect(parseWin32WindowScore('NXWIN=100')).toBe(100);   // the single-number form still reads
     expect(parseWin32WindowScore('nothing')).toBe(-1);
-    expect(parseWin32WindowScore(null)).toBe(-1);
+    expect(parseWin32WindowCount(null)).toBe(-1);
   });
 });

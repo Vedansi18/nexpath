@@ -104,3 +104,34 @@ describe('⭐ rankEditorWindows — the exact live regression', () => {
     expect(rankEditorWindows(two, { classNeedles: ['cursor'], appName: 'Cursor' }).map((w) => w.id)).toEqual(['0xa', '0xb']);
   });
 });
+
+/**
+ * ⭐ RC74a — the Windows tester's exact failure. The Devin build titles its window
+ * "<folder> - Devin - <session title>": the app name sits MID-title, so a suffix-only guard
+ * scored it 0 (`window=0` in the log) and the targeting never engaged. Same four shapes as
+ * the shipped RC60 foreground check, now on both platforms.
+ */
+describe('⭐ RC74a — Devin mid-title app name', () => {
+  const t = { appName: 'Devin', workspaceName: 'profile_testing' };
+  it('⭐ the exact title shape from the Windows log scores as our window', () => {
+    expect(scoreEditorWindow('profile_testing - Devin - set up my food delivery app', t)).toBe(95);
+    expect(scoreEditorWindow('main.ts - profile_testing - Devin - session title', t)).toBe(85);
+    expect(scoreEditorWindow('profile_testing - Devin', t)).toBe(100);
+  });
+  it('a folder-less Devin window ("Devin - <session>") is still identifiable', () => {
+    expect(scoreEditorWindow('Devin - some session', { appName: 'Devin' })).toBe(70);
+  });
+  it('other applications, and the other product name, stay at 0', () => {
+    expect(scoreEditorWindow('WhatsApp', t)).toBe(0);
+    expect(scoreEditorWindow('profile_testing - Windsurf', t)).toBe(0);
+    expect(scoreEditorWindow('Devin docs - Chrome', t)).toBe(0);
+  });
+  it('⭐ ranking picks the Devin window over the browser that was foreground on the tester box', () => {
+    const rows = parseWmctrlList([
+      '0x1  0 whatsapp.WhatsApp     h WhatsApp',
+      '0x2  0 windsurf.Windsurf     h profile_testing - Devin - set up my food delivery app',
+      '0x3  0 google-chrome.Google-chrome h Devin docs - Chrome',
+    ].join('\n'));
+    expect(rankEditorWindows(rows, { ...t, classNeedles: ['devin', 'windsurf'] }).map((w) => w.id)).toEqual(['0x2']);
+  });
+});
