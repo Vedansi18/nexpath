@@ -33,6 +33,13 @@
   are written locally through the CLI; nothing is sent anywhere unless you have turned
   telemetry on yourself, which is off by default.
 - Internal comment and documentation cleanup. No change to how the extension behaves.
+- The submit-time popup never shows a previous prompt's suggestion again. A suggestion
+  prepared for one prompt could be left waiting (the extension not ready at that moment, the
+  popup unable to open, a crash) and was then shown for the NEXT prompt that had none of its
+  own — a tester saw the 3rd prompt's text in the 4th prompt's popup. Before opening a popup,
+  anything prepared before the current prompt was received is now discarded; only a
+  suggestion prepared for this prompt can be shown. `~/.nexpath/nexpath.log` records each
+  discard as `submit_stop_decider_stale_rows_consumed`.
 - Sending never types into another application any more. If you switch to a browser or a
   messenger while the strengthened prompt is being delivered, the paste and the Enter used
   to follow your focus into that window. Now, in the instant before each keystroke, the

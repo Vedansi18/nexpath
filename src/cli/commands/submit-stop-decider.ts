@@ -42,6 +42,7 @@ import { join, resolve, posix as posixPath, win32 as win32Path } from 'node:path
 import { isWindowsBatchShim } from '../../utils/batch-shim.js';
 import { writeSubmitDecision, appendReplacementEcho, latestReplacementEchoAt } from './submit-decision-store.js';
 import { readDelivererState } from './deliverer-state.js';
+import { consumeExpiredSubmitRows } from './submit-expiry-consumer.js';
 import { log } from '../../logger.js';
 // CONSUME-ONLY store calls (another member's exports), used exactly as stop.ts
 // uses them — no Layer C file is modified.
@@ -230,16 +231,60 @@ export interface StopDrivenDeciderPorts {
   mkdirFn?: typeof mkdirSync;
   /** RC70 seam: the extension's deliverer heartbeat (defaults to the real reader). */
   readDelivererState?: typeof readDelivererState;
+  /** RC76 seam: the stale-row consumer (defaults to the RC71 pure function). */
+  consumeStaleRows?: typeof consumeExpiredSubmitRows;
 }
 
 /**
  * Build a decider with the SAME call shape as `buildDefaultPromptSubmitDecider`
  * so both hooks swap their default without touching their decision plumbing.
  */
+/**
+ * RC76 — a previous prompt's suggestion must never be the popup for this one.
+ *
+ * ⚠ ROOT CAUSE (tester report, 2026-09-08: "the popup on the 4th prompt showed the 3rd
+ * prompt's content"). `auto` writes ONE pending prompt-enhancement row per project and
+ * `stop` pops the newest `pending` row for the project + session — with no check that the
+ * row was produced for THIS prompt. `auto` only writes a row when the prompt is worth a
+ * popup, and never clears an older one when it is not. So whenever a turn leaves its row
+ * pending — the deliverer was not armed and the decider returned before `stop` ran, `stop`
+ * crashed, the popup could not be rendered (`not_shown`) — the very next prompt that gets
+ * no row of its own pops the OLD row, and the user sees the previous prompt's suggestion.
+ *
+ * The RC71 consumer already marks rows "shown" up to a timestamp. Here it runs in the
+ * instant before `stop` is spawned with the boundary "anything created before this turn's
+ * `auto` started" — a row this turn's `auto` wrote is newer than that and survives; every
+ * leftover from an earlier turn is consumed. Fail-open: a store problem is logged and `stop`
+ * runs exactly as before. No boundary (older callers, tests) ⇒ byte-identical behaviour.
+ */
+async function consumeRowsFromEarlierTurns(
+  ports: Pick<StopDrivenDeciderPorts, 'openStoreFn' | 'closeStoreFn' | 'consumeStaleRows'>,
+  projectRoot: string,
+  turnStartedAt: number | undefined,
+  logEvent: typeof log,
+): Promise<void> {
+  if (!(typeof turnStartedAt === 'number' && turnStartedAt > 0)) return;
+  const before = turnStartedAt - 1;
+  let store: unknown = null;
+  try {
+    store = await (ports.openStoreFn ?? openStore)(undefined as never);
+    const counts = (ports.consumeStaleRows ?? consumeExpiredSubmitRows)(store, { projectRoot, before });
+    if (counts.advisories > 0 || counts.promptEnhancements > 0) {
+      logEvent('warn', 'submit_stop_decider_stale_rows_consumed', {
+        advisories: counts.advisories, prompt_enhancements: counts.promptEnhancements, before,
+      });
+    }
+  } catch (err) {
+    logEvent('warn', 'submit_stop_decider_stale_sweep_failed', { message: (err as Error)?.message ?? 'unknown' });
+  } finally {
+    if (store) { try { await (ports.closeStoreFn ?? closeStore)(store as never); } catch { /* fail-open */ } }
+  }
+}
+
 export function buildStopDrivenPromptSubmitDecider(
   opts: { project?: string },
   ports: StopDrivenDeciderPorts,
-): (event: string, o: { project?: string }, promptText?: string) => Promise<'allow' | 'block'> {
+): (event: string, o: { project?: string; turnStartedAt?: number }, promptText?: string) => Promise<'allow' | 'block'> {
   const spawnFn = ports.spawnFn ?? spawn;
   const writeDecision = ports.writeDecision ?? writeSubmitDecision;
   const now = ports.now ?? (() => Date.now());
@@ -291,6 +336,13 @@ export function buildStopDrivenPromptSubmitDecider(
       return 'allow';
     }
 
+    // RC76: nothing from an earlier turn may be what `stop` pops. Guarded so that WITHOUT a
+    // boundary this path stays synchronous up to the spawn exactly as it was — an
+    // unconditional `await` here yielded once and the existing pins caught it (their fake
+    // child emits `exit` in a microtask queued before the decider runs).
+    if (typeof o.turnStartedAt === 'number' && o.turnStartedAt > 0) {
+      await consumeRowsFromEarlierTurns(ports, projectRoot, o.turnStartedAt, logEvent);
+    }
     let child: ChildProcess | null = null;
     let stdout = '';
     try {
