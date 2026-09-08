@@ -26,7 +26,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, cpSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, cpSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -133,14 +133,25 @@ function detectNapiBetterSqlite3() {
   const dir = resolve(subPkgRoot, 'node_modules', 'better-sqlite3', 'prebuilds');
   if (!existsSync(dir)) return null;
   // prebuildify layout: <platform>-<arch>.node (NOT the per-ABI <abi>/ layout).
-  const plat = `${process.platform}-${targetArch}.node`;
-  return existsSync(join(dir, plat)) ? { dir, plat } : null;
+  // Detect the LAYOUT, not this host's slice of it: CI cross-packages
+  // (`--target linux-arm64` from an x64 runner), and requiring the host's own
+  // binary would drop such a build into the legacy per-ABI path, which cannot
+  // work on a Node-API dependency (there is no build/Release to copy) and would
+  // fail the publish. Any prebuildify-named entry proves the dependency is
+  // Node-API, and Node-API is ABI-stable, so the same .vsix serves every host.
+  const entries = readdirSync(dir).filter((f) => /^[a-z0-9]+-[a-z0-9]+\.node$/.test(f));
+  if (entries.length === 0) return null;
+  const wanted = `${process.platform}-${targetArch}.node`;
+  return { dir, entries, wanted, hasWanted: entries.includes(wanted) };
 }
 const napi = detectNapiBetterSqlite3();
 
 if (napi) {
   console.log('better-sqlite3 is a Node-API build — ABI-stable across Electron versions.');
-  console.log(`  prebuilds/ ships one binary per platform (this host: ${napi.plat}).`);
+  console.log(`  prebuilds/ ships ${napi.entries.length} platform binaries: ${napi.entries.join(', ')}`);
+  if (!napi.hasWanted) {
+    console.log(`  note: ${napi.wanted} is not among them; the .vsix still ships every platform binary above.`);
+  }
   console.log('  Skipping the per-Electron rebuild: no NODE_MODULE_VERSION pinning is needed.');
   console.log('');
   // No stale per-ABI dir may ship: the runtime prefers prebuilds/<abi>/ when it
