@@ -266,6 +266,15 @@ export async function runCursorHookAction(
   const write = deps.write ?? ((t: string) => process.stdout.write(t));
   const exit = deps.exit ?? ((c: number) => process.exit(c));
   const stdinTimeoutMs = deps.stdinTimeoutMs ?? 2_000;
+  // Name this surface for every child this hook spawns — `auto` inside the
+  // gate, the `stop` inside the decider, the continuation stop. They inherit
+  // process.env (windsurf-hook/spawn.ts baseOpts), and the CLI's calls to the
+  // Nexpath service take their X-Nexpath-Surface label from NEXPATH_AGENT (the
+  // attribution helper in src/config/). Windsurf's hook has named itself all
+  // along; Cursor never did, so a Cursor-driven call reached the service with
+  // no surface at all. The popup wording is agent-neutral (nexpathAgentLabel),
+  // so nothing the user sees changes.
+  (deps.env ?? process.env).NEXPATH_AGENT = 'cursor';
   // Never let observability break fail-open: a throwing logger is swallowed.
   const logEvent: typeof log = (level, name, data) => {
     try { (deps.logEvent ?? log)(level, name, data); } catch { /* logging must never break the hook */ }

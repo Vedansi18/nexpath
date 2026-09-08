@@ -235,6 +235,35 @@ describe('⭐ H6 — the Cursor switch is independent and defaults OFF', () => {
   });
 });
 
+/**
+ * The surface name every child inherits. Windsurf's hook has set NEXPATH_AGENT
+ * since it shipped (windsurf-hook.test.ts pins 'windsurf'); Cursor never did, so
+ * a Cursor-driven call to the Nexpath service carried no X-Nexpath-Surface. The
+ * popup wording is agent-neutral, so this is invisible to the user.
+ */
+describe('⭐ the hook names its surface for the children it spawns', () => {
+  it('sets NEXPATH_AGENT=cursor BEFORE auto is spawned — the child inherits it', async () => {
+    const env: NodeJS.ProcessEnv = { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '1' };
+    const seenAtSpawn: (string | undefined)[] = [];
+    const fakeChild = { kill: vi.fn() } as unknown as import('node:child_process').ChildProcess;
+    const spawnAutoFn = vi.fn(() => { seenAtSpawn.push(env.NEXPATH_AGENT); return fakeChild; });
+    const h = harness({ env, spawnAutoFn, waitForChild: async () => {}, decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(seenAtSpawn).toEqual(['cursor']);
+    expect(env.NEXPATH_AGENT).toBe('cursor');
+  });
+
+  it('names itself on every leg, gate on or off — the name belongs to the process, not to one turn', async () => {
+    const off = harness({ env: {} });
+    await runCursorHookAction('beforeSubmitPrompt', off.deps as never);
+    expect((off.deps.env as NodeJS.ProcessEnv).NEXPATH_AGENT).toBe('cursor');
+
+    const post = harness({ runSequenceContinuation: async () => ({ ran: false }) });
+    await runCursorHookAction('afterAgentResponse', post.deps as never);
+    expect((post.deps.env as NodeJS.ProcessEnv).NEXPATH_AGENT).toBe('cursor');
+  });
+});
+
 describe('⭐ H6 — user_message is the Cursor-only text channel', () => {
   it('a block carries an explanation', async () => {
     // Measured: user_message is rendered inside Cursor's block card. Windsurf has
