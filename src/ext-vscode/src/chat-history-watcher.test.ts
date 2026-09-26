@@ -335,6 +335,12 @@ describe('createChatHistoryWatcher', () => {
       onEvent,
       watchFn: watchFn as never,
       readItemTableFn,
+      // The fake path here is not a real file, so the content signature must come back "nothing to
+      // compare" and the read must proceed. On POSIX the real statSync throws and that is what
+      // happens; on Windows a leading-slash path resolves against the current drive, so if anything
+      // has ever created it the stat succeeds, the signature looks unchanged and the read is skipped.
+      // Injecting the throw makes this test a statement about the watcher rather than about the disk.
+      statSyncFn: (() => { throw new Error('ENOENT'); }) as never,
       debounceMs: 1,
     });
     w.start();
@@ -530,6 +536,12 @@ describe('createChatHistoryWatcher', () => {
       onSchemaUnknown,
       watchFn: watchFn as never,
       readItemTableFn,
+      // The fake path here is not a real file, so the content signature must come back "nothing to
+      // compare" and the read must proceed. On POSIX the real statSync throws and that is what
+      // happens; on Windows a leading-slash path resolves against the current drive, so if anything
+      // has ever created it the stat succeeds, the signature looks unchanged and the read is skipped.
+      // Injecting the throw makes this test a statement about the watcher rather than about the disk.
+      statSyncFn: (() => { throw new Error('ENOENT'); }) as never,
       debounceMs: 1,
     });
     w.start();
@@ -612,6 +624,12 @@ describe('createChatHistoryWatcher', () => {
       watchFn: watchFn as never,
       readItemTableFn,
       nowFn: () => fixedDate,
+      // The fake path here is not a real file, so the content signature must come back "nothing to
+      // compare" and the read must proceed. On POSIX the real statSync throws and that is what
+      // happens; on Windows a leading-slash path resolves against the current drive, so if anything
+      // has ever created it the stat succeeds, the signature looks unchanged and the read is skipped.
+      // Injecting the throw makes this test a statement about the watcher rather than about the disk.
+      statSyncFn: (() => { throw new Error('ENOENT'); }) as never,
       debounceMs: 1,
     });
     w.start();
