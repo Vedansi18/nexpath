@@ -62,6 +62,18 @@ function ev(
   };
 }
 
+/**
+ * A stat that always fails, for tests whose target path is a fixture rather than a file.
+ *
+ * The content signature marks each of its three probes absent and returns null when all three are,
+ * which the caller treats as "changed" — so the read proceeds. On POSIX the real `statSync` throws
+ * for these paths and that is what happens anyway; on Windows a leading-slash path resolves against
+ * the current drive, so if anything has ever created it the stat succeeds, the signature looks
+ * unchanged and the read is skipped. Injecting the failure makes such a test a statement about the
+ * watcher rather than about the machine it runs on.
+ */
+const statUnavailable = (() => { throw new Error('ENOENT'); }) as never;
+
 const cursorTarget = (path: string, extractor?: ChatHistoryExtractor): WatchTarget => ({
   path,
   kind: 'cursor-sqlite',
@@ -335,12 +347,7 @@ describe('createChatHistoryWatcher', () => {
       onEvent,
       watchFn: watchFn as never,
       readItemTableFn,
-      // The fake path here is not a real file, so the content signature must come back "nothing to
-      // compare" and the read must proceed. On POSIX the real statSync throws and that is what
-      // happens; on Windows a leading-slash path resolves against the current drive, so if anything
-      // has ever created it the stat succeeds, the signature looks unchanged and the read is skipped.
-      // Injecting the throw makes this test a statement about the watcher rather than about the disk.
-      statSyncFn: (() => { throw new Error('ENOENT'); }) as never,
+      statSyncFn: statUnavailable,
       debounceMs: 1,
     });
     w.start();
@@ -536,12 +543,7 @@ describe('createChatHistoryWatcher', () => {
       onSchemaUnknown,
       watchFn: watchFn as never,
       readItemTableFn,
-      // The fake path here is not a real file, so the content signature must come back "nothing to
-      // compare" and the read must proceed. On POSIX the real statSync throws and that is what
-      // happens; on Windows a leading-slash path resolves against the current drive, so if anything
-      // has ever created it the stat succeeds, the signature looks unchanged and the read is skipped.
-      // Injecting the throw makes this test a statement about the watcher rather than about the disk.
-      statSyncFn: (() => { throw new Error('ENOENT'); }) as never,
+      statSyncFn: statUnavailable,
       debounceMs: 1,
     });
     w.start();
@@ -624,12 +626,7 @@ describe('createChatHistoryWatcher', () => {
       watchFn: watchFn as never,
       readItemTableFn,
       nowFn: () => fixedDate,
-      // The fake path here is not a real file, so the content signature must come back "nothing to
-      // compare" and the read must proceed. On POSIX the real statSync throws and that is what
-      // happens; on Windows a leading-slash path resolves against the current drive, so if anything
-      // has ever created it the stat succeeds, the signature looks unchanged and the read is skipped.
-      // Injecting the throw makes this test a statement about the watcher rather than about the disk.
-      statSyncFn: (() => { throw new Error('ENOENT'); }) as never,
+      statSyncFn: statUnavailable,
       debounceMs: 1,
     });
     w.start();

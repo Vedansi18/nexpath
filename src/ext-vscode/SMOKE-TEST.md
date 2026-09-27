@@ -12,7 +12,7 @@ The unit tests verify each component in isolation. This document walks through v
 
 | Item | Version / state |
 |---|---|
-| Node.js | ≥ 18 |
+| Node.js | **≥ 20.19** — what `package.json` declares in `engines`; npm refuses to install below it |
 | Cursor or Windsurf | Installed and launchable (config dir present under `~/.config/Cursor` on Linux, etc.) |
 | `nexpath` repo | Working tree on `v0.1.3/m2/smoke-test` (or any later stacked branch) |
 | OpenAI API key | Set in `OPENAI_API_KEY` env var — required by Layer C for advisory generation |
@@ -78,7 +78,7 @@ Two paths.
 ### Path A — Extension Development Host (fastest for iteration)
 
 ```bash
-cd ~/Documents/Vedanshi/NexPathMain/reviewduel/nexpath/src/ext-vscode
+cd <repo>/src/ext-vscode
 code .                        # or `cursor .`
 # Then press F5 — opens a new VS Code/Cursor window with the extension loaded.
 ```
