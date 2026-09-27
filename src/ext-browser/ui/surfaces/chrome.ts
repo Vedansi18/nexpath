@@ -334,6 +334,11 @@ export const CHROME_STYLES = `
     color: inherit;
   }
   .np-bold strong { font-weight: 700; }
+  /* The unmarked body, lighter — the same #a8a9a8 that np-dim, np-rule and np-label
+     already use, so no colour is introduced here. A stretch that may never hold a mark
+     carries no class at all and keeps the inherited weight: a title is what the reader
+     navigates by, and the verbatim section is their own prompt quoted back. */
+  .np-bold .np-plain { color: #a8a9a8; }
   /* Structural, and declared rather than left implicit: a marker row is an
      ordinary row until it is hidden, and the unstyled-class guard is right to
      insist that every class the code applies has a rule to point at. */

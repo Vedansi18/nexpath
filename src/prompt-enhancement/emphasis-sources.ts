@@ -3,8 +3,8 @@
  *
  * The popup marks the words a body borrowed from the developer — a path they typed, a tool they
  * named, a fact the project supplied. This module answers only "which words are those", from the
- * sources that already exist: nothing here scans for new kinds of thing, and nothing here decides
- * where a word sits or whether it survives the cap.
+ * sources that already exist plus, since 2026-09-27, the developer's own multi-word terms; nothing
+ * here decides where a word sits or whether it survives the cap.
  *
  * ⛔ The corpus is the invention gate's own allowed texts **minus the two id lists** — the prompt
  * and the section's grounded values. Identifiers are how the pipeline refers to evidence, not words
@@ -27,6 +27,76 @@ export interface PromptEnhancementEmphasisSourceInputV1 {
   sourceFactIds?: readonly string[];
   /** The same, for the section's source ids. */
   sourceIds?: readonly string[];
+}
+
+
+/**
+ * Words that may not begin or end a term.
+ *
+ * A term is the thing the developer was talking about, and these carry no subject of their own: a
+ * phrase that opens or closes on one is a fragment of a sentence rather than a name for anything.
+ * They are allowed in the MIDDLE, because *"the cart drawer"* and *"list of items"* are exactly the
+ * shapes a developer writes.
+ */
+const TERM_EDGE_WORDS: ReadonlySet<string> = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those',
+  'and', 'or', 'but', 'so', 'if', 'then', 'than', 'as', 'also',
+  'of', 'to', 'in', 'on', 'at', 'by', 'for', 'from', 'with', 'into', 'over', 'up', 'out',
+  'i', 'me', 'my', 'we', 'us', 'our', 'you', 'your', 'it', 'its', 'they', 'them', 'their',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
+  'do', 'does', 'did', 'has', 'have', 'had',
+  'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
+  'what', 'which', 'who', 'when', 'where', 'while', 'how', 'why',
+  'not', 'no', 'all', 'any', 'some', 'each', 'every', 'both',
+  'lets', 'let', 'please', 'just', 'very', 'more', 'most',
+]);
+
+/** A term is at least two words and at most four; shorter is a word, longer is a sentence. */
+const TERM_MIN_WORDS = 2 as const;
+const TERM_MAX_WORDS = 4 as const;
+/** …and at least this many characters, so a pair of very short words is not offered as a name. */
+const TERM_MIN_LENGTH = 6 as const;
+
+/**
+ * The developer's own terms: the multi-word phrases they wrote in their prompt.
+ *
+ * ⚠️ **This returns candidates, not marks.** Every one is still filtered by the caller — it must
+ * appear in the section being marked, must not be an identifier, and must survive the classifier's
+ * secret guard and then the cap. A term the body never used is never returned by
+ * {@link collectPromptEnhancementEmphasisUserTermsV1} at all.
+ *
+ * Two rules decide the shape, and both were measured before they were written (2026-09-27):
+ *
+ *  - **Two words minimum.** Single words were measured against phrases on the same bodies: they do
+ *    not add marks, because the per-section cap is spent either way — they *replace* the phrases a
+ *    reader would have picked with fragments of those same phrases.
+ *  - **Longest first.** A four-word term is offered before any phrase inside it, so when the cap
+ *    binds the fuller reading is the one that survives.
+ *
+ * Punctuation ends a phrase. Words on either side of a comma are two things the developer listed,
+ * not one thing they named, and a phrase spanning the comma names neither.
+ */
+export function promptEnhancementDeveloperTermsV1(originalPromptText: string): readonly string[] {
+  const terms: string[] = [];
+  const seen = new Set<string>();
+
+  for (const segment of originalPromptText.split(/[^\p{L}\p{N}\s'\u2019-]+/u)) {
+    const words = segment.split(/\s+/).filter((word) => word.length > 0);
+    for (let size = TERM_MAX_WORDS; size >= TERM_MIN_WORDS; size--) {
+      for (let start = 0; start + size <= words.length; start++) {
+        const span = words.slice(start, start + size);
+        if (TERM_EDGE_WORDS.has(span[0]!.toLowerCase())) continue;
+        if (TERM_EDGE_WORDS.has(span[span.length - 1]!.toLowerCase())) continue;
+        const phrase = span.join(' ');
+        if (phrase.length < TERM_MIN_LENGTH) continue;
+        const key = phrase.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        terms.push(phrase);
+      }
+    }
+  }
+  return terms;
 }
 
 /**
@@ -104,6 +174,18 @@ export function collectPromptEnhancementEmphasisUserTermsV1(
 
   // 4. What the project supplied for this section.
   for (const value of input.groundedFactValues ?? []) offer(value);
+
+  // 5. The developer's own multi-word terms, where the body kept them.
+  //
+  //    LAST on purpose. `offer` keeps the first arrival, so every source above decides before this
+  //    one does and nothing already shipped changes its answer because this exists.
+  //
+  //    Measured 2026-09-27: without it the corpus is EMPTY for an ordinary English prompt — all four
+  //    sources above returned nothing on a prompt whose own words (`cart drawer`, `delivery fee`)
+  //    were sitting in the composed body verbatim. An empty corpus is not only class 2's problem:
+  //    class 1's object must trace to a term, and a section left with only conditions has them
+  //    dropped — so three of the five classes were dark for one reason.
+  for (const term of promptEnhancementDeveloperTermsV1(input.originalPromptText)) offer(term);
 
   return found;
 }

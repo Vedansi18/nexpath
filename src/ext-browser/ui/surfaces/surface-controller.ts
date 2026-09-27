@@ -415,7 +415,19 @@ function scrollRowIntoView(wrapper: HTMLElement): void {
     const line = hints[hints.length - 1];
     if (!line) return;
     const focused = row.hints?.whenFocused ?? [];
-    line.textContent = armed ? row.armedHint : (focused[focused.length - 1] ?? line.textContent);
+    const armedHint = row.armedHint;
+    // A line asked about the text harvests it FIRST, the way `removeSection` does immediately
+    // above — harvest, then read. Nothing harvests on `input`, so without this the number offered
+    // would come from the text as it stood before the last edit, while the cut acts on the text as
+    // it stands now: the two would name different sections from the same keypress.
+    const resolveArmed = (): string => {
+      if (typeof armedHint !== 'function') return armedHint;
+      harvest();
+      return armedHint(bodyText());
+    };
+    // Resolved only on the arming side: the disarm path must touch as little as possible (see
+    // above), and a surface whose line is a plain string reads no text either way.
+    line.textContent = armed ? resolveArmed() : (focused[focused.length - 1] ?? line.textContent);
   }
 
   function say(text: string): void {

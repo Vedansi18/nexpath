@@ -246,6 +246,11 @@ export function measureOffsetPx(field: HTMLTextAreaElement, offset: number): { t
 //     that does not line up.
 
 /** Where a field's bold ranges come from, when the model supplied a rule. */
+const fieldUnmarkableRanges = new WeakMap<
+  HTMLTextAreaElement,
+  (text: string) => readonly { start: number; end: number }[]
+>();
+
 const fieldBoldRanges = new WeakMap<
   HTMLTextAreaElement,
   (text: string) => readonly { start: number; end: number }[]
@@ -294,6 +299,8 @@ export function updateFieldBold(field: HTMLTextAreaElement): void {
   const view = doc.defaultView;
 
   const ranges = fieldBoldRanges.get(field)?.(field.value) ?? [];
+  // The stretches that must stay at full weight however the rest is drawn.
+  const unmarkable = fieldUnmarkableRanges.get(field)?.(field.value) ?? [];
   // Nothing to draw, or a font that would not line up: leave the mirror empty and
   // the field's own text visible. That is the fallback, and it is silent on
   // purpose — a reader who loses the bold still has the prompt.
@@ -345,7 +352,7 @@ export function updateFieldBold(field: HTMLTextAreaElement): void {
   for (const r of merged) {
     const start = Math.max(0, Math.min(r.start, text.length));
     const end = Math.max(start, Math.min(r.end, text.length));
-    if (start > cursor) layer.appendChild(doc.createTextNode(text.slice(cursor, start)));
+    if (start > cursor) appendPlain(doc, layer, text.slice(cursor, start), cursor, unmarkable);
     if (end > start) {
       const strong = doc.createElement('strong');
       strong.textContent = text.slice(start, end);
@@ -353,7 +360,48 @@ export function updateFieldBold(field: HTMLTextAreaElement): void {
     }
     cursor = end;
   }
-  if (cursor < text.length) layer.appendChild(doc.createTextNode(text.slice(cursor)));
+  if (cursor < text.length) appendPlain(doc, layer, text.slice(cursor), cursor, unmarkable);
+}
+
+/**
+ * Append a stretch of UNMARKED text, drawn lighter except where it may never hold a mark.
+ *
+ * The lighter weight is what makes a mark read as a mark; a title and the developer's own prompt
+ * quoted back are not the text being scanned, so they keep full weight. The run is split at every
+ * boundary rather than classified as a whole, because one run can cross from a title into the
+ * sentence under it.
+ *
+ * ⛔ Text nodes throughout — the body is the reader's own words and must never become markup.
+ */
+function appendPlain(
+  doc: Document,
+  layer: HTMLElement,
+  run: string,
+  runStart: number,
+  unmarkable: readonly { start: number; end: number }[],
+): void {
+  if (run.length === 0) return;
+  // Every offset inside the run where full weight starts or stops.
+  const edges = new Set<number>([0, run.length]);
+  for (const range of unmarkable) {
+    for (const edge of [range.start - runStart, range.end - runStart]) {
+      if (edge > 0 && edge < run.length) edges.add(edge);
+    }
+  }
+  const cuts = [...edges].sort((a, b) => a - b);
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const from = cuts[i]!;
+    const to = cuts[i + 1]!;
+    if (to <= from) continue;
+    const at = runStart + from;
+    const full = unmarkable.some((range) => at >= range.start && at < range.end);
+    const piece = run.slice(from, to);
+    if (full) { layer.appendChild(doc.createTextNode(piece)); continue; }
+    const span = doc.createElement('span');
+    span.className = 'np-plain';
+    span.textContent = piece;
+    layer.appendChild(span);
+  }
 }
 
 // ── the field's line numbers ─────────────────────────────────────────────────
@@ -450,6 +498,7 @@ function buildField(
   maxLines?: number,
   lineNumbers?: (text: string) => ReadonlyMap<number, number>,
   boldRanges?: (text: string) => readonly { start: number; end: number }[],
+  unmarkableRanges?: (text: string) => readonly { start: number; end: number }[],
 ): HTMLElement {
   const row = doc.createElement('div');
   row.className = 'np-row';
@@ -509,6 +558,7 @@ function buildField(
   // that trusts the row visibly off the text.
   if (boldRanges) {
     fieldBoldRanges.set(field, boldRanges);
+    if (unmarkableRanges) fieldUnmarkableRanges.set(field, unmarkableRanges);
     row.className = row.className.includes('np-has-marks') ? row.className : 'np-row np-has-marks';
     const bold = doc.createElement('div');
     bold.className = 'np-bold';
@@ -615,6 +665,7 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
     group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↑ above
     group.appendChild(buildField(
       doc, row.text, fieldIndent, row.placeholder, row.readOnly, row.maxLines, row.lineNumbers, row.boldRanges,
+      row.unmarkableRanges,
     ));
     group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↓ below
     for (const hint of row.hints?.always ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));

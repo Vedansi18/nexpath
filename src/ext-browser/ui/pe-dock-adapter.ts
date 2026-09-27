@@ -43,6 +43,8 @@ import type { SurfaceModel, SurfaceRow } from './surfaces/surface-model.js';
 // rather than the knowledge of what a section is. The module is pure and
 // imports nothing itself.
 import { buildPromptEnhancementSectionMapV1 } from '../../prompt-enhancement/popup-section-map.js';
+import { promptEnhancementRemovableSectionTopV1 } from '../../prompt-enhancement/popup-section-removal.js';
+import { promptEnhancementUnmarkableOffsetsV1 } from '../../prompt-enhancement/popup-emphasis-overlay.js';
 // The engine's own cut, for the same reason and on the same side of the bridge.
 // The panel must not carry a second copy of which removals are refused.
 import { removePromptEnhancementSectionV1 } from '../../prompt-enhancement/popup-section-removal.js';
@@ -59,7 +61,7 @@ import {
 import { fieldScroller } from './surfaces/surface-view.js';
 import {
   BODY_HINT, DETAILS_HINT, EDIT_KEYS_HINT, PE_FOOTER,
-  REMOVAL_ARMED_HINT, REMOVAL_HINT, REMOVAL_NOTICE,
+  REMOVAL_HINT, REMOVAL_NOTICE, removalArmedHint,
 } from './surfaces/fixtures/pe.js';
 import {
   SETTINGS_FREQUENCY_CHOICES,
@@ -164,6 +166,13 @@ export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
   // No phrases means no rule, which means the row renders exactly as it always
   // has and the frame is unchanged down to the DOM.
   const phrases = view.emphasisPhrases;
+  // What must stay at full weight when the rest of the body is drawn lighter. Asked about the live
+  // text, like the numbering and the marks beside it, and from the same definition the marks are
+  // placed by — so the two can never disagree about a stretch.
+  const unmarkableRanges = sections === undefined
+    ? undefined
+    : (text: string): readonly { start: number; end: number }[] =>
+      promptEnhancementUnmarkableOffsetsV1({ text, sections });
   const boldRanges = sections === undefined || phrases === undefined || phrases.length === 0
     ? undefined
     : (text: string): readonly { start: number; end: number }[] =>
@@ -177,13 +186,15 @@ export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
     label: view.editorHeading,
     text: view.bodyText,
     ...(lineNumbers ? { lineNumbers } : {}),
-    ...(boldRanges ? { boldRanges } : {}),
+    ...(boldRanges ? { boldRanges, unmarkableRanges } : {}),
     ...(removeSection ? {
       removeSection,
       // The three texts travel together with the rule they describe: a hint for
       // a chord the row cannot run, or a notice for a refusal that can never
       // happen, would each be a promise the surface does not keep.
-      armedHint: REMOVAL_ARMED_HINT,
+      // The range names the sections this body HAS, not the nine the chord could take — and
+      // like the numbering beside it, asked about the live text rather than the opening view.
+      armedHint: (text: string): string => removalArmedHint(promptEnhancementRemovableSectionTopV1(text, sections)),
       removalNotice: REMOVAL_NOTICE,
     } : {}),
     hints: locked

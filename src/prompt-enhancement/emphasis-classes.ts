@@ -113,10 +113,25 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * do, and a developer scanning the popup needs to see it as plainly as a write. The list is the
  * approved starting set; it can still be edited.
  *
+ * ⏪ **Widened 2026-09-27** by `cover`, `document`, `gather`, `define`, `specify` — counted, not
+ * chosen. Across 35 recorded bodies, 273 clause openings outside the never-marked sections were
+ * censused and only **14** matched any shipped list; these five are the verbs that turned up and that
+ * name WORK.
+ *
+ * ⛔ **The widening stopped there, and both further steps were declined on measurement.**
+ * `make`, `include`, `name`, `add` added **no marks at all** — risk with no benefit.
+ * `ensure`, `start`, `calculate`, `display`, `implement` traded two actions for two conditions, a
+ * net change of nothing, using the ordinary planning vocabulary that no verification or acceptance
+ * section can avoid — the same reason the escalation verbs were narrowed in the safety module.
+ *
+ * ⛔ **This list, and only this list.** `EXECUTION_VERB` and `ALWAYS_ESCALATE_PATTERN` are imported
+ * from the safety module and drive authority classification there; widening one of those would change
+ * what the pipeline generates rather than what the popup emphasises.
+ *
  * ⚠️ They rank BELOW writes when the cap bites, which is what {@link
  * PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries.
  */
-const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list)\b/i;
+const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|cover|document|gather|define|specify)\b/i;
 
 /** Words that end a phrase: the next clause has started, so the object has finished. */
 const CLAUSE_BOUNDARY = /[,.;:!?]|\bbefore\b|\bafter\b|\bonce\b|\bunless\b|\buntil\b|\bonly if\b|\brather than\b/i;

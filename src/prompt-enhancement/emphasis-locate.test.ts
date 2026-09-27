@@ -52,7 +52,12 @@ describe('the worked example, through locate and the cap', () => {
   });
 
   it('keeps all nine ranges — none is lost to the cap or to a collapse', () => {
+    // ⏪ The safety line moved to the FRONT on 2026-09-27. The class numbers are still the standard's
+    // priority order; class 5 is spent first because it is the one the cap must never drop, and this
+    // body is under the budget so nothing here is dropped either way. All nine are still present,
+    // which is what this test is about.
     expect(found.map((phrase) => [phrase.emphasisClass, phrase.text])).toEqual([
+      [5, NAMED],
       [1, "run the project's test suite"],
       [2, 'POST /api/upload'],
       [2, 'auth'],
@@ -61,8 +66,34 @@ describe('the worked example, through locate and the cap', () => {
       [3, 'Do not modify the auth middleware'],
       [3, 'Do not assume'],
       [4, 'before reporting done'],
-      [5, NAMED],
     ]);
+  });
+
+  it('spends on the safety line FIRST, so a full body cannot drop it', () => {
+    // The body above is under the budget, so it proves nothing about what the cap sacrifices. This
+    // one is deliberately over it: five sections of four boundaries each is twenty candidates for a
+    // budget of twelve, and the safety line is the LAST section — where, under a plain ascending
+    // class order, the budget is long gone before it is reached.
+    // ⚠️ Every sentence is DIFFERENT. A first draft repeated one across all four sections and got
+    // five marks instead of sixteen: the classifier dedupes a candidate by class and text over the
+    // whole body, so the same sentence four times is one candidate.
+    const overBudget = build({
+      originalPromptText: 'ship the rate limiter',
+      detectedLanguage: 'en',
+      sections: [
+        { sectionKind: 'context_and_constraints', bodyText: 'Do not touch the schema. Never restart the queue. Without a backup, stop there. Use only the staging bucket.' },
+        { sectionKind: 'scope_non_goals', bodyText: 'Do not rename the columns. Never bypass the linter. Without a migration plan, wait. Use only the read replica.' },
+        { sectionKind: 'compatibility', bodyText: 'Do not edit the seed data. Never skip the smoke test. Without a review, hold there. Use only the sandbox key.' },
+        { sectionKind: 'behavior_preservation', bodyText: 'Do not alter the public types. Never widen the timeout. Without a changelog, pause. Use only the beta channel.' },
+        { sectionKind: 'risk_safety_or_confirmation', bodyText: `Still, before you do this ${NAMED} you must ask me for go-ahead confirmation.` },
+      ],
+    });
+
+    // The cap really is binding — otherwise this test would pass for the wrong reason.
+    expect(overBudget).toHaveLength(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_BODY_V1);
+    // …and the safety line is the mark that survived it, at the front.
+    expect(overBudget[0]?.emphasisClass).toBe(5);
+    expect(overBudget.some((phrase) => phrase.emphasisClass === 5)).toBe(true);
   });
 
   it('keeps a term and the clause around it — nesting is two marks, not one', () => {

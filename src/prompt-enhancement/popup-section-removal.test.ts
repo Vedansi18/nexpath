@@ -13,7 +13,9 @@ import {
 } from './multiline-editor.js';
 import { buildPromptEnhancementSectionMapV1, type PromptEnhancementSectionMapInputV1 } from './popup-section-map.js';
 import {
+  PROMPT_ENHANCEMENT_SECTION_REMOVAL_MAX_DIGIT_V1,
   SECTION_REMOVAL_PREFIX_KEY_V1,
+  promptEnhancementRemovableSectionTopV1,
   removePromptEnhancementSectionV1,
   stepPromptEnhancementSectionRemovalChordV1,
 } from './popup-section-removal.js';
@@ -284,5 +286,52 @@ describe('the refusals', () => {
   it('no sections at all: every number is no_such_section', () => {
     const before = editorWith(text);
     expect(removePromptEnhancementSectionV1(before, [], 1).outcome).toBe('no_such_section');
+  });
+});
+
+/**
+ * The range a surface can name without lying.
+ *
+ * Every case below makes the same point: a number a reader is offered has to be a number the cut
+ * would accept. So each is checked against the cut's own view of the body — the map — and not
+ * against what the caller happened to pass in.
+ */
+describe('the range a surface can honestly name', () => {
+  it('is the number of sections the body carries, not the span of the key sequence', () => {
+    expect(promptEnhancementRemovableSectionTopV1(compose(SECTIONS), SECTIONS)).toBe(3);
+    const two = SECTIONS.slice(0, 2);
+    expect(promptEnhancementRemovableSectionTopV1(compose(two), two)).toBe(2);
+  });
+
+  it('is 1 for a single section — a range of one is not a range', () => {
+    const one = SECTIONS.slice(0, 1);
+    expect(promptEnhancementRemovableSectionTopV1(compose(one), one)).toBe(1);
+  });
+
+  it('counts what the cut would FIND, not what it was handed', () => {
+    // The middle title edited away. The remover cannot find it either, so a count that still
+    // included it would offer a digit the cut then refuses — the exact lie being fixed here.
+    const edited = compose(SECTIONS).replace('Context and constraints:', 'and also');
+    expect(buildPromptEnhancementSectionMapV1(edited, SECTIONS).entries).toHaveLength(2);
+    expect(promptEnhancementRemovableSectionTopV1(edited, SECTIONS)).toBe(2);
+  });
+
+  it('never exceeds the one digit the chord accepts', () => {
+    const many = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India', 'Juliett', 'Kilo', 'Lima']
+      .map((title) => ({ title, bodyText: 'the ' + title + ' part.' }));
+    const text12 = compose(many);
+    // Twelve really are found — the cap is a property of the KEY, never of the body.
+    expect(buildPromptEnhancementSectionMapV1(text12, many).entries).toHaveLength(12);
+    expect(promptEnhancementRemovableSectionTopV1(text12, many)).toBe(PROMPT_ENHANCEMENT_SECTION_REMOVAL_MAX_DIGIT_V1);
+    // And that cap is the truth about the chord: one digit, so nothing above 9 is reachable.
+    expect(stepPromptEnhancementSectionRemovalChordV1(true, { kind: 'editor', raw: '9' }).sectionNumber).toBe(9);
+    expect(stepPromptEnhancementSectionRemovalChordV1(true, { kind: 'editor', raw: '0' }).consumed).toBe(false);
+  });
+
+  it('has nothing to name when no digit would work, by any of the three routes', () => {
+    expect(promptEnhancementRemovableSectionTopV1(compose(SECTIONS), undefined)).toBeUndefined();
+    expect(promptEnhancementRemovableSectionTopV1(compose(SECTIONS), [])).toBeUndefined();
+    // Sections were given, but the body no longer carries any of their titles.
+    expect(promptEnhancementRemovableSectionTopV1('just one sentence.', SECTIONS)).toBeUndefined();
   });
 });

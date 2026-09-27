@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { filterFloorExtractForConsumersV1 } from './preservation-floors.js';
+import { promptEnhancementDeveloperTermsV1 } from './emphasis-sources.js';
 
 import {
   buildPromptEnhancementEmphasisCorpusV1,
@@ -149,5 +150,74 @@ describe('the user terms of a section', () => {
       // The curated list answers first and answers in ITS casing, so the mark reads as the tool
       // is written rather than as the developer happened to type it that time.
     })).toEqual(['Redis']);
+  });
+});
+
+/**
+ * The developer's own terms — the fifth source.
+ *
+ * It is the one source that reads nothing but the prompt, so its rules are the whole of it. Each is
+ * asserted here because each was a decision: a term is two words at least (single words were
+ * measured to spend the cap on fragments of the phrases a reader would have picked), four at most,
+ * offered longest first so the fuller reading survives the cap, and never begun or ended by a word
+ * that carries no subject of its own.
+ *
+ * ⚠️ These are CANDIDATES. Whether one becomes a mark is the collector's question — it must appear
+ * in the section — and then the classifier's and the cap's.
+ */
+describe("the developer's own terms", () => {
+  const terms = (prompt: string) => promptEnhancementDeveloperTermsV1(prompt);
+
+  it('takes the multi-word things the developer named', () => {
+    const found = terms('build the cart drawer that shows the delivery fee');
+    expect(found).toContain('cart drawer');
+    expect(found).toContain('delivery fee');
+  });
+
+  it('offers nothing one word long — a fragment is not a name', () => {
+    for (const term of terms('build the cart drawer and show the subtotal')) {
+      expect(term.split(' ').length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('offers the longest reading first, so the cap keeps the fuller one', () => {
+    const found = terms('rebuild the payment gateway client today');
+    const long = found.indexOf('payment gateway client');
+    const short = found.indexOf('payment gateway');
+    expect(long).toBeGreaterThanOrEqual(0);
+    expect(short).toBeGreaterThanOrEqual(0);
+    expect(long).toBeLessThan(short);
+  });
+
+  it('never begins or ends on a word that carries no subject', () => {
+    for (const term of terms('lets me change the quantities or remove the items from it')) {
+      const words = term.toLowerCase().split(' ');
+      expect(['the', 'a', 'an', 'or', 'and', 'of', 'to', 'it', 'me', 'from']).not.toContain(words[0]);
+      expect(['the', 'a', 'an', 'or', 'and', 'of', 'to', 'it', 'me', 'from']).not.toContain(words[words.length - 1]);
+    }
+  });
+
+  it('does not run a phrase across punctuation — two listed things are not one named thing', () => {
+    // ⏪ This first asserted that no term CONTAINS a comma, and a mutation run showed it could not
+    // fail: a version that STRIPS punctuation rather than splitting on it yields `subtotal delivery`,
+    // which has no comma in it. The assertion was checking the character instead of the rule.
+    //
+    // What must not exist is the pair either side of the comma, joined — the developer listed two
+    // things there and named neither of them that.
+    const found = terms('show the subtotal, delivery fee, and total');
+    expect(found).not.toContain('subtotal delivery');
+    expect(found).not.toContain('fee and');
+    // …while the things they DID name, each inside its own clause, are still offered.
+    expect(found).toContain('delivery fee');
+  });
+
+  it('returns nothing from a prompt with nothing to name', () => {
+    expect(promptEnhancementDeveloperTermsV1('')).toEqual([]);
+    expect(promptEnhancementDeveloperTermsV1('do it')).toEqual([]);
+  });
+
+  it('offers each term once, however often it was typed', () => {
+    const found = terms('the cart drawer and the cart drawer again');
+    expect(found.filter((t) => t.toLowerCase() === 'cart drawer')).toHaveLength(1);
   });
 });

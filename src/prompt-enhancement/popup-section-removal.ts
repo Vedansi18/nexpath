@@ -27,6 +27,17 @@ import {
  */
 export const SECTION_REMOVAL_PREFIX_KEY_V1 = '\u0018';
 
+/**
+ * The highest section number the chord can name. The chord consumes ONE digit, so this is a
+ * property of the key sequence and not of the body: a body with twelve sections still has only
+ * nine reachable by keyboard.
+ *
+ * ⚠️ Coupled to the digit test inside {@link stepPromptEnhancementSectionRemovalChordV1}. That
+ * test stays a literal regex (it runs on every keystroke); this constant is what a surface asks
+ * when it needs to TELL a reader the range, so the two must move together.
+ */
+export const PROMPT_ENHANCEMENT_SECTION_REMOVAL_MAX_DIGIT_V1 = 9 as const;
+
 /** What a removal attempt did. Only `removed` changes the body. */
 export type PromptEnhancementSectionRemovalOutcomeV1 =
   | 'removed'
@@ -153,8 +164,35 @@ export function stepPromptEnhancementSectionRemovalChordV1(
   // twice leaves the chord armed rather than passing a control byte to the editor.
   if (isEditorKey && key.raw === SECTION_REMOVAL_PREFIX_KEY_V1) return { armed: true, consumed: true };
   if (!armed) return { armed: false, consumed: false };
+  // A literal regex on purpose — this runs on every keystroke. Its top digit is mirrored by
+  // PROMPT_ENHANCEMENT_SECTION_REMOVAL_MAX_DIGIT_V1, which is what surfaces quote to the reader.
   if (isEditorKey && /^[1-9]$/.test(key.raw!)) {
     return { armed: false, consumed: true, sectionNumber: Number(key.raw) };
   }
   return { armed: false, consumed: false };
+}
+
+/**
+ * The highest digit that names a section in the body as it stands right now — what a surface
+ * needs to describe the range honestly instead of quoting the key sequence's whole span.
+ *
+ * Two things narrow it, and both matter:
+ *
+ *  - the body's OWN sections, counted the way {@link removePromptEnhancementSectionV1} counts
+ *    them, from the same text. A title the user has edited away is not found by either, so a
+ *    range this returns can never promise a digit the removal would then refuse;
+ *  - {@link PROMPT_ENHANCEMENT_SECTION_REMOVAL_MAX_DIGIT_V1}, because the chord takes one key.
+ *
+ * `undefined` means there is no range to name at all: the surface was given no sections, or the
+ * body no longer carries any, and then every digit refuses. Callers keep their own words for
+ * that case — this decides the number and never the sentence.
+ */
+export function promptEnhancementRemovableSectionTopV1(
+  text: string,
+  sections: readonly PromptEnhancementSectionMapInputV1[] | undefined,
+): number | undefined {
+  if (sections === undefined) return undefined;
+  const count = buildPromptEnhancementSectionMapV1(text, sections).entries.length;
+  if (count === 0) return undefined;
+  return Math.min(count, PROMPT_ENHANCEMENT_SECTION_REMOVAL_MAX_DIGIT_V1);
 }

@@ -16,6 +16,7 @@
 import {
   classifyPromptEnhancementEmphasisCandidatesV1,
   type PromptEnhancementEmphasisCandidateV1,
+  type PromptEnhancementEmphasisClassV1,
 } from './emphasis-classes.js';
 import type { PromptEnhancementEmphasisPhraseV1 } from '../store/pending-prompt-enhancements.js';
 
@@ -83,10 +84,32 @@ function firstOccurrence(text: string, phrase: string): { at: number; text: stri
   return { at, text: text.slice(at, at + phrase.length) };
 }
 
+/**
+ * How the cap ranks the classes.
+ *
+ * The class numbers are the standard's priority order and that order is kept — with ONE exception,
+ * added 2026-09-27 and measured before it was written: **the safety line is spent first.**
+ *
+ * ⚠️ The exception exists because the cap began to bind. Class 5 is the sentence the PIPELINE
+ * inserted because it judged this prompt needed one, there is at most one per body, and under the
+ * plain class order it was the first mark dropped — measured, a body at the 12-mark cap lost its
+ * safety line to a noun. Everything else keeps its relative order exactly: 1 ▸ 2 ▸ 3 ▸ 4.
+ *
+ * Measured on the held-out capture, the whole cost of this is **one condition**: total marks are
+ * unchanged at 103, class 4 goes 29 → 28, and class 5 goes 0 → 1.
+ */
+const CAP_RANK_BY_CLASS_V1: Readonly<Record<PromptEnhancementEmphasisClassV1, number>> = {
+  5: 0,
+  1: 1,
+  2: 2,
+  3: 3,
+  4: 4,
+};
+
 /** The order the cap spends in: class first, then writes before reads, then what comes first. */
 function byPriority(left: LocatedPhrase, right: LocatedPhrase): number {
   if (left.candidate.emphasisClass !== right.candidate.emphasisClass) {
-    return left.candidate.emphasisClass - right.candidate.emphasisClass;
+    return CAP_RANK_BY_CLASS_V1[left.candidate.emphasisClass] - CAP_RANK_BY_CLASS_V1[right.candidate.emphasisClass];
   }
   if (left.candidate.emphasisClass === 1) {
     const write = (phrase: LocatedPhrase): number => (phrase.candidate.isWriteVerb === true ? 0 : 1);

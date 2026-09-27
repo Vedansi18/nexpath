@@ -34,7 +34,10 @@ import {
 } from './multiline-editor.js';
 import { buildPromptEnhancementPopupRenderModelV1 } from './popup-render-model.js';
 import { buildPromptEnhancementSectionNumberSuffixesV1 } from './popup-section-numbers.js';
-import { buildPromptEnhancementEmphasisSpansV1 } from './popup-emphasis-overlay.js';
+import {
+  buildPromptEnhancementEmphasisSpansV1,
+  buildPromptEnhancementUnmarkableRowsV1,
+} from './popup-emphasis-overlay.js';
 import { buildPromptEnhancementEmphasisPhrasesV1 } from './emphasis-locate.js';
 import type { PromptEnhancementEmphasisPhraseV1 } from '../store/pending-prompt-enhancements.js';
 
@@ -276,6 +279,18 @@ function frameOf(result: PromptEnhancementPrepareResultV1, options: FrameOptions
     markerBelow: isPromptEnhancementScrollMarkerLineV1(shown[shown.length - 1] ?? ''),
   });
 
+  // …and the rows that may carry no mark at all, which the shell asks for beside the spans so the
+  // body's lighter weight never falls on a title or on the developer's own prompt quoted back.
+  const unmarkable = buildPromptEnhancementUnmarkableRowsV1({
+    text: buffer.text,
+    sections,
+    fieldWidth,
+    windowStart: window.start,
+    windowRows: shown.length,
+    markerAbove: isPromptEnhancementScrollMarkerLineV1(shown[0] ?? ''),
+    markerBelow: isPromptEnhancementScrollMarkerLineV1(shown[shown.length - 1] ?? ''),
+  });
+
   let caret: PromptEnhancementCliFrameStateV1['caret'];
   const marked = spans.findIndex((row) => row.length > 0);
   if (options.caretInsideMark && marked >= 0) {
@@ -299,7 +314,7 @@ function frameOf(result: PromptEnhancementPrepareResultV1, options: FrameOptions
       caret,
       caretOut,
       bodyLineSuffixes,
-      ...(options.plain ? {} : { bodyLineSpans: spans }),
+      ...(options.plain ? {} : { bodyLineSpans: spans, bodyLineUnmarkable: unmarkable }),
       ...(options.plainMarks ? { plainMarks: true } : {}),
     },
   );
@@ -323,6 +338,30 @@ function stripBold(frame: string, marks: number): string {
     out = out.slice(0, open) + out.slice(open + BOLD.length, close) + out.slice(close + RESET.length);
   }
   return out;
+}
+
+/** The characters a reader sees, with every SGR code removed. */
+function visible(frame: string): string {
+  return frame.replace(new RegExp(`${'\u001b'}\\[[0-9;]*m`, 'g'), '');
+}
+
+/** Every SGR code in a frame, in the order it appears. */
+function sgrCodes(frame: string): string[] {
+  return [...frame.matchAll(new RegExp(`${'\u001b'}\\[([0-9;]*)m`, 'g'))].map((match) => match[1] ?? '');
+}
+
+/**
+ * Whether `inner` appears inside `outer` in order, as a subsequence.
+ *
+ * Says the thing the overlay is allowed to do and the thing it is not: it may ADD styling anywhere,
+ * and may not remove, reorder or alter any that the plain frame already had.
+ */
+function isSubsequence(inner: readonly string[], outer: readonly string[]): boolean {
+  let at = 0;
+  for (const code of outer) {
+    if (at < inner.length && inner[at] === code) at += 1;
+  }
+  return at === inner.length;
 }
 
 describe('the recorded frames, emphasised', () => {
@@ -356,10 +395,21 @@ describe('the recorded frames, emphasised', () => {
         expect({ frame: readable(drawn.frame), caretOut: drawn.caretOut }).toMatchSnapshot();
       });
 
-      it('stripped of its bold, equals the frame drawn without it', () => {
+      it('is styling and nothing else — same characters, same caret, nothing pre-existing disturbed', () => {
         const drawn = frameOf(result, testCase.options);
         const plain = frameOf(result, { ...testCase.options, plain: true });
-        expect(stripBold(drawn.frame, drawn.spans.flat().length)).toBe(plain.frame);
+
+        // 1. No character was added, removed or moved: strip every SGR from both and compare.
+        //    ⏪ This replaced a stripper that removed exactly N bold pairs. It could not survive
+        //    the dim drawn beside the bold (2026-09-27), and it only ever inspected the pairs it
+        //    reached; this covers the whole frame.
+        expect(visible(drawn.frame)).toBe(visible(plain.frame));
+
+        // 2. The styling already there is still there, in the same order. The overlay may insert;
+        //    it may not remove, reorder or alter.
+        expect(isSubsequence(sgrCodes(plain.frame), sgrCodes(drawn.frame))).toBe(true);
+
+        // 3. And the caret did not move, which is the reason 1 matters.
         expect(drawn.caretOut).toEqual(plain.caretOut);
       });
 

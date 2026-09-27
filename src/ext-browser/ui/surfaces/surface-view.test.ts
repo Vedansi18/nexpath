@@ -585,13 +585,17 @@ describe('the field\'s bold', () => {
   /** Offsets of `Do not delete` in TEXT — the first mark a producer would ask for. */
   const MARK = { start: TEXT.indexOf('Do not delete'), end: TEXT.indexOf('Do not delete') + 'Do not delete'.length };
 
-  const withBold = (rule?: (text: string) => readonly { start: number; end: number }[]): SurfaceModel => ({
+  const withBold = (
+    rule?: (text: string) => readonly { start: number; end: number }[],
+    keepFull?: (text: string) => readonly { start: number; end: number }[],
+  ): SurfaceModel => ({
     ...PE_FIXTURE,
     rows: [{
       kind: 'field',
       label: 'Use enhanced prompt',
       text: TEXT,
       ...(rule ? { boldRanges: rule } : {}),
+      ...(keepFull ? { unmarkableRanges: keepFull } : {}),
     }],
     footer: PE_FOOTER,
   });
@@ -615,8 +619,11 @@ describe('the field\'s bold', () => {
   };
 
   /** The frame, laid out enough for the drawing to run, with the input fired once. */
-  const draw = (rule?: (text: string) => readonly { start: number; end: number }[]): HTMLElement => {
-    const frame = renderSurface(document, withBold(rule), { focusIndex: 0 });
+  const draw = (
+    rule?: (text: string) => readonly { start: number; end: number }[],
+    keepFull?: (text: string) => readonly { start: number; end: number }[],
+  ): HTMLElement => {
+    const frame = renderSurface(document, withBold(rule, keepFull), { focusIndex: 0 });
     document.body.appendChild(frame);
     const field = frame.querySelector('textarea')!;
     Object.defineProperty(field, 'clientWidth', { value: 365, configurable: true });
@@ -748,6 +755,99 @@ describe('the field\'s bold', () => {
       Object.defineProperty(field, 'clientWidth', { value: 350, configurable: true });
       field.dispatchEvent(new Event('input'));
       expect((frame.querySelector('.np-bold') as HTMLElement).style.width).toBe('350px');
+    });
+  });
+});
+
+/**
+ * The unmarked body, drawn lighter so the marks carry.
+ *
+ * The CLI paints its own text and can dim a run in place; the panel cannot touch a textarea, so the
+ * lighter weight lands on the mirror's unmarked runs instead. Two things are asserted, and the second
+ * is the one that was got wrong on the CLI first: the stretches that may never hold a mark — a
+ * section title, the developer's own prompt quoted back — keep FULL weight, because fading what
+ * someone just wrote says nothing true about it.
+ */
+describe("the field's bold — the unmarked text is lighter", () => {
+  const TEXT = [
+    'Scope:',
+    'Do not delete the audit log while refactoring.',
+    'Acceptance:',
+    'the password is hashed.',
+  ].join('\n');
+  const MARK = { start: TEXT.indexOf('Do not delete'), end: TEXT.indexOf('Do not delete') + 'Do not delete'.length };
+  /** The first title line — the shape the real rule returns for a heading. */
+  const TITLE = { start: 0, end: 'Scope:'.length };
+
+  const withBold = (
+    rule?: (text: string) => readonly { start: number; end: number }[],
+    keepFull?: (text: string) => readonly { start: number; end: number }[],
+  ): SurfaceModel => ({
+    ...PE_FIXTURE,
+    rows: [{
+      kind: 'field',
+      label: 'Use enhanced prompt',
+      text: TEXT,
+      ...(rule ? { boldRanges: rule } : {}),
+      ...(keepFull ? { unmarkableRanges: keepFull } : {}),
+    }],
+    footer: PE_FOOTER,
+  });
+
+  const withFont = (run: () => void): void => {
+    const real = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function rect(this: Element): DOMRect {
+      return { width: 100, height: 15, top: 0, left: 0, right: 100, bottom: 15, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    };
+    try { run(); } finally { Element.prototype.getBoundingClientRect = real; }
+  };
+
+  const draw = (
+    rule?: (text: string) => readonly { start: number; end: number }[],
+    keepFull?: (text: string) => readonly { start: number; end: number }[],
+  ): HTMLElement => {
+    const frame = renderSurface(document, withBold(rule, keepFull), { focusIndex: 0 });
+    document.body.appendChild(frame);
+    const field = frame.querySelector('textarea')!;
+    Object.defineProperty(field, 'clientWidth', { value: 365, configurable: true });
+    Object.defineProperty(field, 'clientHeight', { value: 200, configurable: true });
+    field.dispatchEvent(new Event('input'));
+    return frame;
+  };
+
+  it('draws the unmarked stretches in their own class, and the marked one in strong', () => {
+    withFont(() => {
+      const layer = draw(() => [MARK])!.querySelector('.np-bold')!;
+      expect(layer.querySelectorAll('strong')).toHaveLength(1);
+      expect(layer.querySelectorAll('.np-plain').length).toBeGreaterThan(0);
+      // The body exactly once, however it was split up.
+      expect(layer.textContent).toBe(TEXT);
+    });
+  });
+
+  it('leaves a stretch that may never hold a mark at full weight', () => {
+    withFont(() => {
+      const layer = draw(() => [MARK], () => [TITLE])!.querySelector('.np-bold')!;
+      const lighter = [...layer.querySelectorAll('.np-plain')].map((el) => el.textContent ?? '').join('');
+      expect(lighter).not.toContain('Scope:');
+      // …and the rest of the unmarked body still is lighter, or the test would pass by drawing nothing.
+      expect(lighter).toContain('the audit log');
+      expect(layer.textContent).toBe(TEXT);
+    });
+  });
+
+  it('treats every unmarked stretch alike when it is told of none', () => {
+    withFont(() => {
+      const layer = draw(() => [MARK])!.querySelector('.np-bold')!;
+      const lighter = [...layer.querySelectorAll('.np-plain')].map((el) => el.textContent ?? '').join('');
+      expect(lighter).toContain('Scope:');
+    });
+  });
+
+  it('adds nothing at all when there is no mark to contrast against', () => {
+    withFont(() => {
+      const frame = renderSurface(document, withBold(), { focusIndex: 0 });
+      expect(frame.querySelector('.np-bold')).toBeNull();
     });
   });
 });

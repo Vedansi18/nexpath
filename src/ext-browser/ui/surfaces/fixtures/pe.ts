@@ -56,6 +56,26 @@ export const REMOVAL_HINT = 'Alt+Shift+R #N';
  */
 export const REMOVAL_ARMED_HINT = 'Alt+Shift+R — which section? #1–#9';
 
+/** The range inside that line, exactly as written above, so the substitution has one thing to find. */
+const REMOVAL_ARMED_FULL_RANGE = '#1–#9';
+
+/**
+ * That line with the range the panel actually offers, by the rule the CLI follows: the span of
+ * the key sequence is not the span of the body, and a reader offered nine numbers while seeing
+ * five stops trusting the panel (owner 2026-09-27).
+ *
+ * ⚠️ The wording stays above, in the one literal ruled for it, and only the range substring is
+ * substituted — so the panel's text cannot drift into the CLI's, which is the whole reason these
+ * three are separate constants.
+ *
+ * `undefined` keeps the line as it ships: nothing to count, and every digit refuses anyway.
+ */
+export function removalArmedHint(top: number | undefined): string {
+  if (top === undefined) return REMOVAL_ARMED_HINT;
+  const range = top === 1 ? '#1' : `#1–#${top}`;
+  return REMOVAL_ARMED_HINT.replace(REMOVAL_ARMED_FULL_RANGE, range);
+}
+
 /** ONE text for every refusal, as the CLI settled: the reader needs only that the section did not go. */
 export const REMOVAL_NOTICE = 'no section with that number';
 

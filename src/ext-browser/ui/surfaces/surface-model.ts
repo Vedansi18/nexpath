@@ -131,6 +131,15 @@ export type SurfaceRow =
        */
       boldRanges?: (text: string) => readonly { start: number; end: number }[];
       /**
+       * The stretches that may never hold a mark — a section title, a section the
+       * standard never marks. Asked about the LIVE text like {@link boldRanges}.
+       *
+       * Used only to decide what NOT to draw lighter. Absent means every unmarked
+       * stretch is treated alike, which is right for a surface that has no sections
+       * to reason about.
+       */
+      unmarkableRanges?: (text: string) => readonly { start: number; end: number }[];
+      /**
        * The line to show INSTEAD of this field's focused hint while the removal
        * chord is armed — the question the digit answers.
        *
@@ -142,7 +151,13 @@ export type SurfaceRow =
        * Absent means the chord changes nothing on screen — which is what the
        * surface did before this existed.
        */
-      armedHint?: string;
+      /*
+       * A function is asked about the LIVE text, the way {@link lineNumbers} and
+       * {@link removeSection} are, so a line naming a RANGE cannot fall out of step
+       * with the body after an edit. A plain string is for a surface whose line does
+       * not depend on the text at all.
+       */
+      armedHint?: string | ((text: string) => string);
       /**
        * What to say when {@link removeSection} refuses.
        *

@@ -182,6 +182,58 @@ export function locatePromptEnhancementEmphasisOffsetsV1(input: {
   return out;
 }
 
+/**
+ * The stretches of the buffer that carry no markable text, as offsets.
+ *
+ * ⛔ **Not a second rule** — it is {@link ineligibleRanges} itself: every found title line, every
+ * line of the two sections the standard never marks, and the applied-details block. The row-shaped
+ * answer below serves the CLI, which wraps at a fixed width inside a window; this one serves a
+ * surface that wraps with CSS and has neither, exactly as
+ * {@link locatePromptEnhancementEmphasisOffsetsV1} does beside
+ * {@link buildPromptEnhancementEmphasisSpansV1}.
+ *
+ * Its caller is the browser panel, which draws the rest of the body lighter so the marks carry.
+ * These stretches are excluded from that: a title is structure the reader navigates by, and the
+ * verbatim section is the developer's own prompt quoted back.
+ */
+export function promptEnhancementUnmarkableOffsetsV1(input: {
+  readonly text: string;
+  readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
+}): readonly { start: number; end: number }[] {
+  return ineligibleRanges(input).map((range) => ({ start: range.start, end: range.end }));
+}
+
+/**
+ * Which displayed rows carry no markable text at all.
+ *
+ * ⛔ **Not a second rule.** It is {@link ineligibleRanges} — every found title line, every line of
+ * the two sections the standard never marks, and the applied-details block — read out per row
+ * instead of per offset. The set is the same one the spans builder skips, which is the point: a
+ * surface that draws unmarked text differently must agree with the surface that decides what may be
+ * marked, or the two will disagree about a row.
+ *
+ * Its first caller is the CLI popup, which draws the rest of the body lighter so the marks carry.
+ * These rows are excluded from that: a title is structure the reader navigates by, and the verbatim
+ * section is the developer's own prompt quoted back — fading either says nothing true about them.
+ *
+ * Length equals the number of rows the window shows, so a renderer can index it by the row it is
+ * drawing, exactly as it indexes the spans.
+ */
+export function buildPromptEnhancementUnmarkableRowsV1(
+  input: Omit<PromptEnhancementEmphasisOverlayInputV1, 'phrases'>,
+): readonly boolean[] {
+  const visual = buildPromptEnhancementVisualLineMapV1(input.text, input.fieldWidth);
+  const shownRows = Math.min(input.windowRows, Math.max(0, visual.length - input.windowStart));
+  const ineligible = ineligibleRanges(input);
+  const out: boolean[] = new Array(shownRows).fill(false);
+  for (let row = 0; row < shownRows; row++) {
+    const line = visual[row + input.windowStart];
+    if (line === undefined) continue;
+    out[row] = ineligible.some((range) => line.startOffset >= range.start && line.endOffset <= range.end);
+  }
+  return out;
+}
+
 export function buildPromptEnhancementEmphasisSpansV1(
   input: PromptEnhancementEmphasisOverlayInputV1,
 ): readonly (readonly PromptEnhancementEmphasisSpanV1[])[] {

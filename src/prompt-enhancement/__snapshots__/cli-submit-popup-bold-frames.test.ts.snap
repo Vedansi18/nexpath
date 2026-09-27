@@ -71,9 +71,9 @@ exports[`the recorded frames, emphasised > confirmation-carrying body, colour on
 \\e[36m│\\e[0m     e verification. also drop a shadow under the submit button.
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Test command output:    \\e[2m#2\\e[0m
-\\e[36m│\\e[0m     - Cover Test command output for this request with concrete, source-backe
-\\e[36m│\\e[0m     d specifics — state what is required, how to implement it, and how to ve
-\\e[36m│\\e[0m     rify it.
+\\e[36m│\\e[0m     \\e[2m- Cover Test command output for this request with concrete, source-backe\\e[0m
+\\e[36m│\\e[0m     \\e[2md specifics — state what is required, how to implement it, and how to ve\\e[0m
+\\e[36m│\\e[0m     \\e[2mrify it.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Best practices and standards:    \\e[2m#3\\e[0m
 \\e[36m│\\e[0m     - The current source signal reports stage as task_breakdown → implementa
@@ -82,12 +82,12 @@ exports[`the recorded frames, emphasised > confirmation-carrying body, colour on
 \\e[36m│\\e[0m     n it into direct implementation guidance.
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Risk, safety and confirmation:    \\e[2m#4\\e[0m
-\\e[36m│\\e[0m     - Name risky or irreversible actions, ask for required confirmation, and
-\\e[36m│\\e[0m      include rollback or recovery checks.
-\\e[36m│\\e[0m     - Still, before you do this \\e[1mdestructive file or codebase change\\e[0m you must
-\\e[36m│\\e[0m      ask me for go-ahead confirmation, and before you ask, confirm the actua
-\\e[36m│\\e[0m     l state at ground level by reading the real source. \\e[1mDo not assume\\e[0m, and d
-\\e[36m│\\e[0m     o not rely on what you did earlier in this session.
+\\e[36m│\\e[0m     \\e[2m- Name risky or irreversible actions, ask for required confirmation, and\\e[0m
+\\e[36m│\\e[0m     \\e[2m include rollback or recovery checks.\\e[0m
+\\e[36m│\\e[0m     \\e[2m- Still, before you do this \\e[0m\\e[1mdestructive file or codebase change\\e[0m\\e[2m you must\\e[0m
+\\e[36m│\\e[0m     \\e[2m ask me for go-ahead confirmation, and before you ask, confirm the actua\\e[0m
+\\e[36m│\\e[0m     \\e[2ml state at ground level by reading the real source. \\e[0m\\e[1mDo not assume\\e[0m\\e[2m, and d\\e[0m
+\\e[36m│\\e[0m     \\e[2mo not rely on what you did earlier in this session.\\e[0m
 \\e[36m│\\e[0m     \\e[93mCtrl+J new line · Ctrl+↑/↓ move line · Ctrl+X #N · Enter sends this prompt\\e[0m
 \\e[36m│\\e[0m
 \\e[36m│\\e[0m \\e[90m○\\e[0m \\e[2mAdditional details\\e[0m
@@ -120,28 +120,28 @@ exports[`the recorded frames, emphasised > largest body, colour on > is recorded
 \\e[36m│\\e[0m     e verification. also drop a shadow under the submit button.
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Test command output:    \\e[2m#2\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the payment gateway client and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Fixture and mock context:    \\e[2m#3\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the payment gateway client and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Reproduction and evidence:    \\e[2m#4\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the payment gateway client and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Best practices and standards:    \\e[2m#5\\e[0m
 \\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
 \\e[36m│\\e[0m      with a test.
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Risk, safety and confirmation:    \\e[2m#6\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
-\\e[36m│\\e[0m     - Still, before you do this \\e[1mdestructive file or codebase change\\e[0m you must
-\\e[36m│\\e[0m      ask me for go-ahead confirmation, and before you ask, confirm the actua
-\\e[36m│\\e[0m     l state at ground level by reading the real source. \\e[1mDo not assume\\e[0m, and d
-\\e[36m│\\e[0m     o not rely on what you did earlier in this session.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the payment gateway client and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
+\\e[36m│\\e[0m     \\e[2m- Still, before you do this \\e[0m\\e[1mdestructive file or codebase change\\e[0m\\e[2m you must\\e[0m
+\\e[36m│\\e[0m     \\e[2m ask me for go-ahead confirmation, and before you ask, confirm the actua\\e[0m
+\\e[36m│\\e[0m     \\e[2ml state at ground level by reading the real source. \\e[0m\\e[1mDo not assume\\e[0m\\e[2m, and d\\e[0m
+\\e[36m│\\e[0m     \\e[2mo not rely on what you did earlier in this session.\\e[0m
 \\e[36m│\\e[0m     \\e[93mCtrl+J new line · Ctrl+↑/↓ move line · Ctrl+X #N · Enter sends this prompt\\e[0m
 \\e[36m│\\e[0m
 \\e[36m│\\e[0m \\e[90m○\\e[0m \\e[2mAdditional details\\e[0m
@@ -204,16 +204,16 @@ exports[`the recorded frames, emphasised > refinement view, colour on > is recor
 \\e[36m│\\e[0m     Add a retry with exponential backoff to the payment gateway client.
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Context and constraints:    \\e[2m#2\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the \\e[0m\\e[1mpayment gateway client\\e[0m\\e[2m and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Approach and steps:    \\e[2m#3\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the payment gateway client and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     What done looks like:    \\e[2m#4\\e[0m
-\\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it
-\\e[36m│\\e[0m      with a test.
+\\e[36m│\\e[0m     \\e[2m- Keep the existing behaviour of the payment gateway client and cover it\\e[0m
+\\e[36m│\\e[0m     \\e[2m with a test.\\e[0m
 \\e[36m│\\e[0m     
 \\e[36m│\\e[0m     Best practices and standards:    \\e[2m#5\\e[0m
 \\e[36m│\\e[0m     - Keep the existing behaviour of the payment gateway client and cover it

@@ -788,6 +788,53 @@ left over from the last run`);
   });
 });
 
+describe('what the panel is told to draw lighter', () => {
+  const BODY = [
+    'My original request (verbatim):',
+    'add a retry to the payment gateway client',
+    '',
+    'Context and constraints:',
+    'Keep the payment gateway client as it is.',
+  ].join('\n');
+  const SECTIONS = [
+    { title: 'My original request (verbatim)', bodyText: 'add a retry to the payment gateway client', sectionKind: 'original_request_or_goal' },
+    { title: 'Context and constraints', bodyText: 'Keep the payment gateway client as it is.', sectionKind: 'context_and_constraints' },
+  ];
+  const bodyRow = (v: PePanelViewV1) => {
+    const row = peSurfaceModel(v).rows[0]!;
+    if (row.kind !== 'field') throw new Error('body row is not a field');
+    return row;
+  };
+
+  it('supplies the stretches that must stay at full weight, from the live text', () => {
+    const row = bodyRow(view({ bodyText: BODY, sections: SECTIONS, emphasisPhrases: ['payment gateway client'] }));
+    const keepFull = row.unmarkableRanges;
+    if (typeof keepFull !== 'function') throw new Error('the panel was given no rule for what to keep at full weight');
+
+    const ranges = keepFull(BODY);
+    expect(ranges.length).toBeGreaterThan(0);
+    const covered = (needle: string): boolean => {
+      const at = BODY.indexOf(needle);
+      return at >= 0 && ranges.some((r) => at >= r.start && at < r.end);
+    };
+    // A title, and the section that quotes their own prompt back.
+    expect(covered('My original request (verbatim):')).toBe(true);
+    expect(covered('add a retry to the payment gateway client')).toBe(true);
+    expect(covered('Context and constraints:')).toBe(true);
+    // …and NOT the sentence a mark can land on, or nothing would ever be drawn lighter.
+    expect(covered('Keep the payment gateway client as it is.')).toBe(false);
+  });
+
+  it('asks about the live text, not the view it opened with', () => {
+    const row = bodyRow(view({ bodyText: BODY, sections: SECTIONS, emphasisPhrases: ['payment gateway client'] }));
+    const keepFull = row.unmarkableRanges as (text: string) => readonly { start: number; end: number }[];
+    // A title edited away in the field: the stretch it covered is no longer protected.
+    const edited = BODY.replace('Context and constraints:', 'and also');
+    const before = keepFull(BODY).length;
+    expect(keepFull(edited).length).toBeLessThan(before);
+  });
+});
+
 describe('the removal texts the panel supplies', () => {
   const BODY = ['Add a login page.', '', 'Scope:', 'the login route only.'].join('\n');
   const SECTIONS = [{ title: 'Scope', bodyText: 'the login route only.' }];
@@ -800,7 +847,12 @@ describe('the removal texts the panel supplies', () => {
   it('carries all three, and only when the removal itself is there', () => {
     const withSections = bodyRow(view({ bodyText: BODY, sections: SECTIONS }));
     expect(withSections.hints?.whenFocused?.[0]).toContain('Alt+Shift+R #N');
-    expect(withSections.armedHint).toBe('Alt+Shift+R — which section? #1–#9');
+    // Asked about the LIVE text, like the numbering and the cut beside it — so the range can
+    // never fall out of step with the body after an edit.
+    const armed = withSections.armedHint;
+    if (typeof armed !== 'function') throw new Error('the armed hint must be asked about the live text');
+    // ONE section in this body, so one number — never the nine the chord happens to accept.
+    expect(armed(BODY)).toBe('Alt+Shift+R — which section? #1');
     expect(withSections.removalNotice).toBe('no section with that number');
 
     // No sections, no removal — so no hint for a chord that cannot run, and no
@@ -818,7 +870,11 @@ describe('the removal texts the panel supplies', () => {
 
   it('belong to the panel, never to the CLI', () => {
     const row = bodyRow(view({ bodyText: BODY, sections: SECTIONS }));
-    const all = JSON.stringify([row.hints, row.armedHint, row.removalNotice]);
+    // Resolved before it is stringified: JSON.stringify DROPS a function, which would have
+    // quietly taken the armed line out of this check the day it became one.
+    const armedHint = typeof row.armedHint === 'function' ? row.armedHint(BODY) : row.armedHint;
+    expect(armedHint).toContain('which section?');
+    const all = JSON.stringify([row.hints, armedHint, row.removalNotice]);
     expect(all).not.toContain('Ctrl+X');
     expect(all).not.toContain('this section not found');
     expect(all).not.toContain('Remove which section?');
@@ -834,6 +890,34 @@ describe('the removal texts the panel supplies', () => {
     }));
     expect(hint()).toContain('which section?');
     expect(hint()).not.toContain('Alt+Shift+R #N');
+  });
+
+  it('names the sections the body has, and follows an edit made in the field', () => {
+    const THREE = [
+      { title: 'Scope', bodyText: 'the login route only.' },
+      { title: 'Acceptance', bodyText: 'a passing test for both paths.' },
+      { title: 'Verification', bodyText: 'paste the suite output.' },
+    ];
+    const threeBody = ['Add a login page.', '', ...THREE.flatMap((s) => [s.title + ':', s.bodyText, ''])].join('\n');
+    adapter.show(view({ bodyText: threeBody, sections: THREE }));
+    const hint = () => [...surfaceEl().querySelectorAll('.np-hint')].map((el) => el.textContent ?? '').join(' | ');
+    const press = (key: string, mods: Record<string, unknown> = {}) => bodyField().dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mods }),
+    );
+    const arm = () => press('R', { code: 'KeyR', altKey: true, shiftKey: true });
+
+    arm();
+    expect(hint()).toContain('which section? #1–#3');
+    expect(hint()).not.toContain('#1–#9');
+
+    // Disarm, edit one title away in the field, and arm again: the range is re-read from the
+    // text the panel has harvested — the same source `removeSection` cuts from, so the number
+    // offered and the number accepted cannot part company. `input` is what a real edit fires.
+    press('a');
+    bodyField().value = threeBody.replace('Acceptance:', 'and also');
+    bodyField().dispatchEvent(new Event('input', { bubbles: true }));
+    arm();
+    expect(hint()).toContain('which section? #1–#2');
   });
 
   it('says so when a digit names no section, and sends nothing', () => {

@@ -12,6 +12,7 @@ import { NEVER_MARKED_SECTION_KINDS } from './emphasis-classes.js';
 import { PROMPT_ENHANCEMENT_APPLIED_DETAILS_TITLE_V1 } from './popup-section-map.js';
 import {
   buildPromptEnhancementEmphasisSpansV1,
+  buildPromptEnhancementUnmarkableRowsV1,
   type PromptEnhancementEmphasisOverlayInputV1,
   type PromptEnhancementEmphasisOverlaySectionV1,
 } from './popup-emphasis-overlay.js';
@@ -277,5 +278,49 @@ describe('two phrases on one row', () => {
       { startColumn: second, endColumn: second + 'middleware'.length },
     ]);
     expect(second).toBeGreaterThan(first + 'Do not'.length);
+  });
+});
+
+/**
+ * The rows that carry nothing markable.
+ *
+ * Same set as the one the spans builder skips — that is the point of it existing rather than a
+ * second rule beside it. A surface that draws unmarked text differently has to agree with the
+ * surface that decides what may be marked, or the two will disagree about a row.
+ */
+describe('the rows no mark may land on', () => {
+  const SECTIONS = [
+    { sectionKind: 'original_request_or_goal', title: 'My original request (verbatim)', bodyText: 'add a retry to the payment gateway client' },
+    { sectionKind: 'context_and_constraints', title: 'Context and constraints', bodyText: 'Keep the payment gateway client as it is.' },
+  ];
+  const text = SECTIONS.map((section) => `${section.title}:\n${section.bodyText}`).join('\n\n');
+  const rows = () => buildPromptEnhancementUnmarkableRowsV1({
+    text,
+    sections: SECTIONS,
+    fieldWidth: 200,
+    windowStart: 0,
+    windowRows: text.split('\n').length,
+    markerAbove: false,
+    markerBelow: false,
+  });
+
+  const rowFor = (needle: string) => text.split('\n').findIndex((line) => line.includes(needle));
+
+  it('marks every title line', () => {
+    expect(rows()[rowFor('My original request')]).toBe(true);
+    expect(rows()[rowFor('Context and constraints')]).toBe(true);
+  });
+
+  it("marks the body of a section the standard never marks", () => {
+    expect(NEVER_MARKED_SECTION_KINDS.has('original_request_or_goal')).toBe(true);
+    expect(rows()[rowFor('add a retry to the payment')]).toBe(true);
+  });
+
+  it('leaves an ordinary body row alone — it is the text a mark can land on', () => {
+    expect(rows()[rowFor('Keep the payment gateway client')]).toBe(false);
+  });
+
+  it('answers one entry per row the window shows, like the spans do', () => {
+    expect(rows()).toHaveLength(text.split('\n').length);
   });
 });

@@ -52,9 +52,11 @@ import {
 } from './emphasis-model-call.js';
 import {
   buildPromptEnhancementEmphasisSpansV1,
+  buildPromptEnhancementUnmarkableRowsV1,
   type PromptEnhancementEmphasisSpanV1,
 } from './popup-emphasis-overlay.js';
 import {
+  promptEnhancementRemovableSectionTopV1,
   promptEnhancementSectionRemovalNoticeV1,
   removePromptEnhancementSectionV1,
   stepPromptEnhancementSectionRemovalChordV1,
@@ -708,6 +710,31 @@ const PROMPT_ENHANCEMENT_CLI_REMOVE_SECTION_HINT_V1 = 'Ctrl+X #N' as const;
  * nothing below it moves.
  */
 const PROMPT_ENHANCEMENT_CLI_REMOVE_ARMED_HINT_V1 = 'Remove which section? 1–9' as const;
+/**
+ * The range inside that line, exactly as it is written above. Named so the substitution below
+ * has one thing to find, rather than the same literal typed in a second place.
+ */
+const PROMPT_ENHANCEMENT_CLI_REMOVE_ARMED_FULL_RANGE_V1 = '1–9' as const;
+/**
+ * The same question, carrying the range the frame actually offers.
+ *
+ * `1–9` is the span of the KEY SEQUENCE, and as a label it was wrong for every popup with fewer
+ * than nine sections: the reader counts five numbers on screen, is asked for one of nine, and
+ * concludes the popup does not know its own body (owner 2026-09-27).
+ *
+ * ⚠️ The wording is not rebuilt here. The sentence above is the only place it is written, and
+ * this substitutes the range substring of it — so the words, spacing and punctuation cannot
+ * drift from the line that was ruled, whatever the count turns out to be.
+ *
+ * A single section is asked for as `1` rather than `1–1`: a range of one is not a range.
+ * `undefined` leaves the line exactly as it ships — there is nothing to count, and a body with
+ * no sections refuses every digit anyway, so no number would be truer than another.
+ */
+function promptEnhancementCliRemoveArmedHintV1(top: number | undefined): string {
+  if (top === undefined) return PROMPT_ENHANCEMENT_CLI_REMOVE_ARMED_HINT_V1;
+  const range = top === 1 ? '1' : `1–${top}`;
+  return PROMPT_ENHANCEMENT_CLI_REMOVE_ARMED_HINT_V1.replace(PROMPT_ENHANCEMENT_CLI_REMOVE_ARMED_FULL_RANGE_V1, range);
+}
 
 /** Left indent applied to every wrapped line of editable content (body / details). */
 export const PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 = 6 as const;
@@ -896,6 +923,14 @@ export interface PromptEnhancementCliFrameStateV1 {
    * Absent for the probe frame, so the chrome measurement is unchanged.
    */
   bodyLineSpans?: readonly (readonly PromptEnhancementEmphasisSpanV1[])[];
+  /**
+   * One entry per body row as displayed: true where the row carries nothing that may ever be
+   * marked — a section title, or a line of a section the standard never marks. Those rows stay at
+   * full weight when the rest of the body is drawn lighter: a title is what the reader navigates
+   * by, and the verbatim section is their own prompt quoted back. Absent means "treat every row
+   * alike", which is what a caller that does not know the sections must not be made to guess at.
+   */
+  bodyLineUnmarkable?: readonly boolean[];
   /** Draw the suffixes without any styling, whatever `colorize` says (the `NO_COLOR` rule). */
   plainMarks?: boolean;
   /**
@@ -904,6 +939,12 @@ export interface PromptEnhancementCliFrameStateV1 {
    * to see the same line the user does, even though both are one line.
    */
   sectionRemovalArmed?: boolean;
+  /**
+   * The highest digit that names a section in the body being drawn, for the armed line's range.
+   * Read only while `sectionRemovalArmed` is true, and absent means "do not name a range" — a
+   * caller that does not know the body's sections must not be made to guess at one.
+   */
+  removableSectionTop?: number;
   /**
    * Ctrl+T hint appended to the footer. Set only by the raw-TTY shell, and only when it was given a
    * settings control — a surface that cannot act on Ctrl+T (the browser panel) must not advertise
@@ -1019,26 +1060,30 @@ export function renderPromptEnhancementPopupFrameV1(
     // attribute would bleed into the next one. Nothing else about the row changes: no character is
     // added, removed or moved, which is why the caret and the row's width are unaffected.
     // Columns are clamped to the line so a row can never be drawn short.
-    const emphasise = (line: string, spans: readonly PromptEnhancementEmphasisSpanV1[]): string => {
-      if (!c || frameState.plainMarks === true || spans.length === 0) return line;
+    const emphasise = (line: string, spans: readonly PromptEnhancementEmphasisSpanV1[], dimRest = false): string => {
+      if (!c || frameState.plainMarks === true) return line;
+      // Unmarked text, drawn lighter when this body has something to contrast it against. An empty
+      // run is left alone rather than wrapped, so no row gains an SGR pair that spans nothing.
+      const rest = (text: string): string => (dimRest && text.length > 0 ? `${c.dim}${text}${c.reset}` : text);
+      if (spans.length === 0) return rest(line);
       let out = '';
       let at = 0;
       for (const span of spans) {
         const start = Math.max(at, Math.min(span.startColumn, line.length));
         const end = Math.max(start, Math.min(span.endColumn, line.length));
         if (end === start) continue;
-        out += line.slice(at, start) + c.bold + line.slice(start, end) + c.reset;
+        out += rest(line.slice(at, start)) + c.bold + line.slice(start, end) + c.reset;
         at = end;
       }
-      return out + line.slice(at);
+      return out + rest(line.slice(at));
     };
     // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more
     // lines …") renders in plain gray — the "normal" dim (owner request 2026-08-07: the light
     // yellow hints already provide the distinction, so the marker needs no extra darkening).
     // A scroll indicator carries no emphasis either: it is the window's own text, not the
     // buffer's, and the plain line is what decides that — before any SGR is added to it.
-    const contentLine = (line: string, spans: readonly PromptEnhancementEmphasisSpanV1[] = []) =>
-      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${emphasise(line, spans)}`;
+    const contentLine = (line: string, spans: readonly PromptEnhancementEmphasisSpanV1[] = [], dimRest = false) =>
+      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${emphasise(line, spans, dimRest)}`;
     const editable = row.kind === 'editor_heading' || row.kind === 'additional_details';
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
@@ -1051,8 +1096,13 @@ export function renderPromptEnhancementPopupFrameV1(
         const mark = `#${number}`;
         return c && !frameState.plainMarks ? `    ${c.dim}${mark}${c.reset}` : `    ${mark}`;
       };
+      // Lighter only where there is something to be lighter THAN: a body with no mark on screen is
+      // drawn exactly as it always was, rather than uniformly faint with nothing standing out.
+      const dimUnmarkedBody = (frameState.bodyLineSpans ?? []).some((spans) => spans.length > 0);
       publicText(view.editedBodyText).split('\n').forEach((bodyLine, index) => {
-        lines.push(contentLine(bodyLine, frameState.bodyLineSpans?.[index] ?? []) + suffixFor(index));
+        // …and never a row that could not have carried a mark in the first place.
+        const dimThisRow = dimUnmarkedBody && frameState.bodyLineUnmarkable?.[index] !== true;
+        lines.push(contentLine(bodyLine, frameState.bodyLineSpans?.[index] ?? [], dimThisRow) + suffixFor(index));
       });
       // Body block: the "Enter sends this prompt" hint shows ONLY when this row (Use enhanced prompt) is
       // focused — otherwise it is misleading, because Enter acts on whichever row IS focused, not on the
@@ -1063,7 +1113,7 @@ export function renderPromptEnhancementPopupFrameV1(
       // the digit answers — one line either way, so the caret's row and the body's height do not move.
       if (focused) {
         lines.push(hint(frameState.sectionRemovalArmed === true
-          ? PROMPT_ENHANCEMENT_CLI_REMOVE_ARMED_HINT_V1
+          ? promptEnhancementCliRemoveArmedHintV1(frameState.removableSectionTop)
           : `${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_REMOVE_SECTION_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1}`));
       }
     } else if (row.kind === 'additional_details') {
@@ -1694,9 +1744,16 @@ function createPromptEnhancementCliPopupInteractionV1(
     // rows, and the current details block — no hardcoded chrome constant — so the frame always
     // fills to the window bottom and never overflows/scrolls. The reducer's own viewportRows is
     // resized to match, so cursor-keeping and the display agree.
+    // The armed line's range, from the LIVE buffer — the same text the `#N` marks are placed
+    // from below, so the range and the marks are one derivation and cannot disagree in a frame.
+    // Given to the probe as well: the measurement has to render the line the user reads.
+    const removableSectionTop = promptEnhancementRemovableSectionTopV1(
+      current.editor.buffers.enhanced_body.text,
+      view.sections,
+    );
     const probeChrome = renderPromptEnhancementPopupFrameV1(
       { model: view.model, editedBodyText: 'x', additionalDetailsText: detailsDisplay, publicNotice: view.publicNotice },
-      { focusIndex: current.focusIndex, helpExpanded: current.helpExpanded, refinement: view.refinement, colorize: false, sectionRemovalArmed: current.sectionRemovalArmed },
+      { focusIndex: current.focusIndex, helpExpanded: current.helpExpanded, refinement: view.refinement, colorize: false, sectionRemovalArmed: current.sectionRemovalArmed, removableSectionTop },
     ).split('\n').length - 1;
     const measuredBodyRows = Math.max(4, (output.rows ?? 24) - 1 - probeChrome);
     if (current === state) {
@@ -1738,6 +1795,19 @@ function createPromptEnhancementCliPopupInteractionV1(
         markerAbove: isPromptEnhancementScrollMarkerLineV1(bodyDisplayLines[0] ?? ''),
         markerBelow: isPromptEnhancementScrollMarkerLineV1(bodyDisplayLines[bodyDisplayLines.length - 1] ?? ''),
       });
+    // Which of those rows may carry no mark at all — asked of the same window, the same text and
+    // the same sections the spans were built from, so the two can never disagree about a row.
+    const bodyLineUnmarkable = view.sections === undefined
+      ? undefined
+      : buildPromptEnhancementUnmarkableRowsV1({
+        text: bodyBuffer.text,
+        sections: view.sections,
+        fieldWidth: editorWidth,
+        windowStart: bodyWindow.start,
+        windowRows: bodyDisplayLines.length,
+        markerAbove: isPromptEnhancementScrollMarkerLineV1(bodyDisplayLines[0] ?? ''),
+        markerBelow: isPromptEnhancementScrollMarkerLineV1(bodyDisplayLines[bodyDisplayLines.length - 1] ?? ''),
+      });
     const plainMarks = Boolean(process.env['NO_COLOR']);
     // Caret row is window-relative, derived from the SAME window the display used (its `start`),
     // not the raw buffer scroll. If it still falls outside the shown lines, leave the caret unset
@@ -1768,8 +1838,10 @@ function createPromptEnhancementCliPopupInteractionV1(
         // settings hint is main's. Neither reads the other, and the renderer takes them all.
         bodyLineSuffixes,
         bodyLineSpans,
+        bodyLineUnmarkable,
         plainMarks,
         sectionRemovalArmed: current.sectionRemovalArmed,
+        removableSectionTop,
         settingsHint: settingsHint(),
       },
     );

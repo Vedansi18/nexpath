@@ -18,7 +18,10 @@ import {
   renderPromptEnhancementPopupFrameV1,
   type PromptEnhancementCliPopupViewV1,
 } from './cli-submit-popup.js';
-import { SECTION_REMOVAL_PREFIX_KEY_V1 } from './popup-section-removal.js';
+import {
+  SECTION_REMOVAL_PREFIX_KEY_V1,
+  promptEnhancementRemovableSectionTopV1,
+} from './popup-section-removal.js';
 import type { PromptEnhancementSectionMapInputV1 } from './popup-section-map.js';
 import type { PromptEnhancementPopupRenderModelV1 } from './popup-render-model.js';
 
@@ -194,5 +197,75 @@ describe('the shortcut line', () => {
       Object.defineProperty(process, 'platform', { value: original, configurable: true });
       vi.resetModules();
     }
+  });
+});
+
+/**
+ * The range in that question, which used to read `1–9` on every popup ever drawn.
+ *
+ * `1–9` is what the CHORD takes. The body decides how many of those digits name anything, and a
+ * reader counting five numbers on screen while being asked for one of nine concluded the popup
+ * did not know its own body (owner 2026-09-27). The tests above pass no count at all, so they go
+ * on pinning the fallback — which is the shipped line, unchanged.
+ */
+describe('the armed line names the range the body actually has', () => {
+  const m = model();
+  const body = rowIndex(m, 'editor_heading');
+
+  const armedWith = (top?: number, text?: string): string => renderPromptEnhancementPopupFrameV1(
+    { model: m, editedBodyText: text ?? 'Goal:\n  the body', additionalDetailsText: '' },
+    {
+      focusIndex: body,
+      helpExpanded: false,
+      sectionRemovalArmed: true,
+      ...(top === undefined ? {} : { removableSectionTop: top }),
+    },
+  );
+  /**
+   * The question as drawn, from its first word to the end of its line — so the range is pinned
+   * with nothing allowed to follow it, and the frame's own left border and hint indent are left
+   * where they are rather than asserted on here.
+   */
+  const asked = (frame: string): string => {
+    const line = lines(frame).find((l) => l.includes('Remove which section?')) ?? '';
+    return line.slice(line.indexOf('Remove')).trimEnd();
+  };
+
+  it('asks for one of five when five is what is on screen', () => {
+    expect(asked(armedWith(5))).toBe('Remove which section? 1–5');
+  });
+
+  it('asks for 1 rather than 1–1 on a body with a single section', () => {
+    expect(asked(armedWith(1))).toBe('Remove which section? 1');
+  });
+
+  it('keeps the full span when the count is not known', () => {
+    expect(asked(armedWith())).toBe(ARMED);
+  });
+
+  it('changes the digits and NOTHING else — same sentence, same frame, same height', () => {
+    const fallback = armedWith();
+    const five = armedWith(5);
+    expect(lines(five)).toHaveLength(lines(fallback).length);
+    expect(lines(five).filter((l) => l.includes('Remove which section?'))).toHaveLength(1);
+    // Substituting the range back gives the other frame byte for byte: the words, the colour,
+    // the indent and every other row are untouched.
+    expect(five.replace('Remove which section? 1–5', ARMED)).toBe(fallback);
+  });
+
+  it('is the number the cut would accept, on a body composed as the popup composes one', () => {
+    const sections: PromptEnhancementSectionMapInputV1[] = [
+      { title: 'My original request (verbatim)', bodyText: 'Add a retry to the client.' },
+      { title: 'Context and constraints', bodyText: '- Keep the timeout unchanged.' },
+      { title: 'Best practices and standards', bodyText: '- Cover it with a test.' },
+    ];
+    const text = sections.map((s) => s.title + ':\n' + s.bodyText).join('\n\n');
+    expect(asked(armedWith(promptEnhancementRemovableSectionTopV1(text, sections), text)))
+      .toBe('Remove which section? 1–3');
+
+    // A title edited away in the field, and the question follows the text the reader sees.
+    const edited = text.replace('Context and constraints:', 'and also');
+    expect(asked(armedWith(promptEnhancementRemovableSectionTopV1(edited, sections), edited)))
+      .toBe('Remove which section? 1–2');
   });
 });
