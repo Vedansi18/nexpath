@@ -26,6 +26,15 @@ import { collectPromptEnhancementEmphasisUserTermsV1 } from './emphasis-sources.
 export type PromptEnhancementEmphasisClassV1 = 1 | 2 | 3 | 4 | 5;
 
 export interface PromptEnhancementEmphasisCandidateV1 {
+  /**
+   * Which of the input's sections this candidate was read from.
+   *
+   * ⚠️ Optional, and a caller that ignores it gets the older behaviour — the phrase is placed in the
+   * first section whose text happens to hold it. That is what produced a blank section on a real
+   * popup: a term read from section 5 was placed in section 2, where the same words also appear,
+   * and the section that asked for it drew nothing.
+   */
+  sectionIndex?: number;
   /** The phrase as it reads in the body — the next phase re-finds it there. */
   text: string;
   emphasisClass: PromptEnhancementEmphasisClassV1;
@@ -104,6 +113,15 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
   'i should',
   'i can',
   "let's",
+  // Sequencing words. They put the steps in order; they are not someone doing something, so a verb
+  // behind one still opens its clause — the same reading a list marker gets. The composer writes
+  // step lists this way almost every time: `First, … Next, … Then, … Finally, …`.
+  'first,',
+  'next,',
+  'then,',
+  'after that,',
+  'finally,',
+  'lastly,',
 ];
 
 /**
@@ -118,6 +136,12 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * censused and only **14** matched any shipped list; these five are the verbs that turned up and that
  * name WORK.
  *
+ * ⏪ **Widened again 2026-09-28** by `design`, `implement`, `embed`, `calculate`, `display` — the
+ * verbs a step list uses. They were worth nothing on their own and are only worth something beside
+ * the sentence scan in {@link classOneOfLine}: a step list is written as one line, and until that
+ * line was read sentence by sentence none of its verbs could open a clause. Measured together:
+ * sections drawing 43 → 44, marks 96 → 98, densest body and section unmoved.
+ *
  * ⛔ **The widening stopped there, and both further steps were declined on measurement.**
  * `make`, `include`, `name`, `add` added **no marks at all** — risk with no benefit.
  * `ensure`, `start`, `calculate`, `display`, `implement` traded two actions for two conditions, a
@@ -131,10 +155,36 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * ⚠️ They rank BELOW writes when the cap bites, which is what {@link
  * PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries.
  */
-const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|cover|document|gather|define|specify)\b/i;
+const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|cover|document|gather|define|specify|design|implement|embed|calculate|display)\b/i;
 
 /** Words that end a phrase: the next clause has started, so the object has finished. */
 const CLAUSE_BOUNDARY = /[,.;:!?]|\bbefore\b|\bafter\b|\bonce\b|\bunless\b|\buntil\b|\bonly if\b|\brather than\b/i;
+
+/**
+ * The longest a boundary or a condition may run and still be a mark.
+ *
+ * Both classes take the word plus the clause it governs, and a clause can be a whole sentence: the
+ * longest measured was twenty-two words. Emphasis works by contrast, and a sentence in bold is a
+ * paragraph a reader skips rather than a phrase they catch (owner, 2026-09-27).
+ *
+ * ⛔ Eight, and the number was found rather than picked. Seven was tried first, from a reading that
+ * kept `do not affect unrelated files or behaviors` (7 words) — and a test then caught
+ * `Do not delete the audit log while refactoring` (8 words) being dropped. Those are the SAME shape,
+ * and splitting them on one word is arbitrary; worse, the section holding the second went entirely
+ * blank, because its boundary went to the ceiling and its lone remaining condition then went to the
+ * "a condition alone is dropped" rule below.
+ *
+ * Measured: of the class 3 and 4 marks that survive, 55 of 62 are two to five words and only four
+ * are seven. Nothing crowds this line, so where it sits decides very little except whether one
+ * shape is cut in half.
+ *
+ * ⛔ **Classes 1, 2 and 5 are deliberately outside this.** Class 2 has never produced a mark over
+ * four words and class 5 never over four, so a ceiling there has nothing to do. Class 1 is the
+ * instruction — the mark a reader most needs — and it builds `verb + clause` where class 2 builds a
+ * noun phrase, so every ceiling measured took nearly all of them away. Shortening class 1 is a
+ * change to how its phrase is BUILT, and it is a separate question.
+ */
+const CLASS_3_AND_4_MAX_WORDS_V1 = 8 as const;
 
 /** A hard negation or scope limiter. */
 const CLASS_3_BOUNDARY_WORDS: readonly string[] = ['do not', 'must not', 'never', 'without', 'only', 'not'];
@@ -233,6 +283,47 @@ export function maskInsertedText(sectionText: string, sensitiveActionName?: stri
   return masked;
 }
 
+/**
+ * Where a second thought begins. A class-1 mark stops here.
+ *
+ * The instruction is the verb and the thing it acts on; everything after one of these is the body
+ * explaining, qualifying or adding — *"List out the exact steps **that lead to** hitting this null
+ * error"*. Keeping the explanation makes the mark a sentence, and a sentence in bold is a paragraph
+ * a reader skips.
+ */
+const CLASS_1_SECOND_THOUGHT: readonly string[] = [
+  'that', 'which', 'so', 'to', 'for', 'while', 'when', 'after', 'before', 'and', 'because', 'since', 'if', 'whether',
+];
+
+/**
+ * The fewest words a shortened instruction may keep: a verb and something to act on.
+ *
+ * ⚠️ Load-bearing, and the reason the rule is not simply "stop at the first one of those". `that`
+ * can introduce the object itself — *"Check **that** the app's home page will respect…"* — and
+ * stopping there leaves `Check` alone, which tells a reader nothing. Below this, the search goes on
+ * to the next one.
+ */
+const CLASS_1_MIN_WORDS = 3 as const;
+
+/**
+ * An instruction cut back to the verb and its object.
+ *
+ * Measured over every class-1 mark the recorded bodies produce, plus a real popup's: median 13 → 7
+ * words, longest 21 → 10, none left under three, and none cut mid-phrase — the stop is always a word
+ * boundary the language itself provides.
+ *
+ * ⛔ A hard word ceiling was measured beside this and rejected: it produced `gather proof of what the
+ * payments module currently` and `Check what specific diff files or changes are` — shorter, and
+ * broken. A whole phrase reads better than a truncated one.
+ */
+function instructionObjectOnly(phrase: string): string {
+  const words = phrase.trim().split(/\s+/);
+  for (let index = CLASS_1_MIN_WORDS; index < words.length; index++) {
+    if (CLASS_1_SECOND_THOUGHT.includes(words[index]!.toLowerCase())) return words.slice(0, index).join(' ');
+  }
+  return phrase;
+}
+
 /** The clause a word governs: the word, plus what follows it up to the clause's end. */
 function clauseFrom(line: string, startIndex: number, wordLength: number): string {
   const rest = line.slice(startIndex + wordLength);
@@ -258,6 +349,26 @@ function classOneApplies(input: PromptEnhancementEmphasisInputV1): boolean {
 
 /** The class-1 candidates of one line: an instruction, with an object that traces. */
 function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhancementEmphasisCandidateV1[] {
+  // A list marker is punctuation, not a word, so a verb behind one still OPENS its clause. The
+  // composer writes almost every instruction as `- Check that …`, and without this the marker sat in
+  // front of every verb and the "only a verb that opens the clause counts" test below refused all of
+  // them: measured on a real body, three verbs fire without the marker and none with it.
+  //
+  // The offsets the marks are placed at are found again in the FULL text later, so trimming here
+  // costs nothing downstream — it only decides what the phrase is.
+  line = line.replace(/^\s*[-•*]\s+/, '');
+
+  // A composed line usually holds SEVERAL sentences, and each one is its own instruction. Judged as
+  // one line, the first execution verb anywhere in it decides the fate of all of them: on a real
+  // body, `- First, design the layout … Then, embed functionality that lets users update quantities
+  // and delete items.` was refused whole, because `delete` sits in the third sentence with words in
+  // front of it. Five instructions, none of them ever looked at.
+  //
+  // The offsets are found again in the FULL text later, so splitting costs nothing downstream — it
+  // only decides which words are weighed against "does a verb open this clause".
+  const sentences = line.split(/(?<=[.;!?])\s+/).filter((part) => part.trim().length > 0);
+  if (sentences.length > 1) return sentences.flatMap((sentence) => classOneOfLine(sentence, userTerms));
+
   const lower = line.toLowerCase();
   // The verb has to head a clause — sentence-initial, or straight after one of the known heads.
   const heads: number[] = [0];
@@ -277,11 +388,18 @@ function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhan
     const beforeVerb = rest.slice(0, verb.index).trim();
     if (beforeVerb.length > 0) continue;
 
-    const phrase = cutBeforeSecret(clauseFrom(rest, verb.index, verb[0].length));
+    // The WHOLE clause, which is what the gate below reads: whether this instruction concerns
+    // something the developer named is a property of the instruction, not of how much of it is
+    // drawn. ⚠️ Asking the gate about the shortened form instead cost four of six instructions —
+    // measured — because a term living in the clause's tail could no longer be seen.
+    const clause = cutBeforeSecret(clauseFrom(rest, verb.index, verb[0].length));
+    if (clause.length === 0) continue;
+    // …and the mark itself, cut back to the verb and its object.
+    const phrase = instructionObjectOnly(clause);
     if (phrase.length === 0) continue;
     // The object has to trace to something the developer or the project supplied. A verb with an
     // object nobody named is the body inventing work.
-    const object = phrase.slice(verb[0].length).trim();
+    const object = clause.slice(verb[0].length).trim();
     if (object.length === 0) continue;
     if (!userTerms.some((term) => object.toLowerCase().includes(term.toLowerCase()))) continue;
 
@@ -305,7 +423,11 @@ function boundaryAndConditionOfLine(line: string): PromptEnhancementEmphasisCand
       if (word === BARE_NOT && !bareNotIsGoverned(line, at)) continue;
       const phrase = cutBeforeSecret(clauseFrom(line, at, word.length));
       if (phrase.length === 0) continue;
+      // Claimed whether or not it is drawn, so the "a longer limiter wins" test above keeps
+      // working: `do not` must still stop a bare `not` marking the same words, even on a clause
+      // too long to show.
       claimed.push(phrase);
+      if (phrase.trim().split(/\s+/).length > CLASS_3_AND_4_MAX_WORDS_V1) continue;
       found.push({ text: phrase, emphasisClass });
     }
   };
@@ -347,21 +469,33 @@ export function classifyPromptEnhancementEmphasisCandidatesV1(
   input: PromptEnhancementEmphasisInputV1,
 ): readonly PromptEnhancementEmphasisCandidateV1[] {
   const candidates: PromptEnhancementEmphasisCandidateV1[] = [];
+  /**
+   * What has already been kept in this BODY.
+   *
+   * ⏪ Made per-section on 2026-09-27 and put back the same day. A phrase is marked where it FIRST
+   * appears, and that is a ruling rather than an accident — `emphasis-locate.test.ts` states its
+   * reason: *"a body that repeated the same six words in five sections would spend four and stop,
+   * which is right."* Per-section dedupe reverses it, and a body that says `home page` in every
+   * section would spend the whole budget on those two words.
+   */
   const seen = new Set<string>();
+  /** The section being read, stamped on every candidate it produces. */
+  let currentSectionIndex = 0;
   const keep = (candidate: PromptEnhancementEmphasisCandidateV1): void => {
     const text = cutBeforeSecret(candidate.text).trim();
     if (text.length === 0) return;
     const key = `${candidate.emphasisClass}:${text.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
-    candidates.push({ ...candidate, text });
+    candidates.push({ ...candidate, text, sectionIndex: currentSectionIndex });
   };
 
   const classOneOn = classOneApplies(input);
 
-  for (const section of input.sections) {
+  for (const [sectionIndex, section] of input.sections.entries()) {
     if (NEVER_MARKED_SECTION_KINDS.has(section.sectionKind)) continue;
     const sectionStartedAt = candidates.length;
+    currentSectionIndex = sectionIndex;
 
     const userTerms = collectPromptEnhancementEmphasisUserTermsV1({
       originalPromptText: input.originalPromptText,
@@ -402,6 +536,27 @@ export function classifyPromptEnhancementEmphasisCandidatesV1(
     // The standard's own worked example already reads this way: its "before reporting done" is
     // kept because it sits in the same section as "run the project's test suite", which is the
     // thing it qualifies.
+    // A term the developer supplied that sits wholly inside an instruction IN THIS SECTION is
+    // already marked by it. Two nested marks read as one ragged one, and they would spend this
+    // section's cap twice for a single span.
+    //
+    // ⚠️ **In this section, and no further.** The test ran over the whole body until 2026-09-27, and
+    // both halves of its reason are about ONE span: marks in different sections are not ragged and
+    // are capped separately. Measured on a real popup, `home page` in section 5 was dropped because
+    // an instruction in section 2 contained those words, and section 5 drew nothing at all.
+    const actionsHere = candidates.slice(sectionStartedAt).filter((candidate) => candidate.emphasisClass === 1);
+    if (actionsHere.length > 0) {
+      const kept = candidates.slice(sectionStartedAt).filter((candidate) => {
+        if (candidate.emphasisClass !== 2) return true;
+        const nested = actionsHere.some((action) => action.text.toLowerCase().includes(candidate.text.toLowerCase()));
+        // The key goes back with it, so a later section may still mark the same words.
+        if (nested) seen.delete(`${candidate.emphasisClass}:${candidate.text.toLowerCase()}`);
+        return !nested;
+      });
+      candidates.length = sectionStartedAt;
+      candidates.push(...kept);
+    }
+
     const fromThisSection = candidates.slice(sectionStartedAt);
     if (fromThisSection.length > 0 && fromThisSection.every((candidate) => candidate.emphasisClass === 4)) {
       // The dedupe keys go back too, so the same words can still be marked in a later section
@@ -411,11 +566,5 @@ export function classifyPromptEnhancementEmphasisCandidatesV1(
     }
   }
 
-  // A term the developer supplied that sits wholly inside an instruction is already marked by it.
-  // Two nested marks read as one ragged one, and they would spend the cap twice for a single span.
-  const actions = candidates.filter((candidate) => candidate.emphasisClass === 1);
-  return candidates.filter((candidate) => {
-    if (candidate.emphasisClass !== 2) return true;
-    return !actions.some((action) => action.text.toLowerCase().includes(candidate.text.toLowerCase()));
-  });
+  return candidates;
 }

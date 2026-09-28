@@ -183,10 +183,46 @@ export function locatePromptEnhancementEmphasisOffsetsV1(input: {
 }
 
 /**
+ * The stretches the CONTRAST must leave at full weight: every title line, the applied-details block,
+ * and the section that quotes the developer's prompt back.
+ *
+ * ⚠️ **Deliberately narrower than {@link ineligibleRanges}.** That answers "may a mark land here",
+ * and it also covers `source_signal_guidance` — the practices section. Using it for the contrast too
+ * left that section as the only full-brightness prose in a frame of dimmed prose, and full beside dim
+ * reads as emphasis: on a reported body, the whole of `Best practices and standards` looked bold
+ * while every other body row was dim. It carries no marks and it is the body's own prose, so it
+ * should read like the body's own prose.
+ *
+ * What stays exempt is what the reason was always about: a title is structure the reader navigates
+ * by, and the verbatim section and the applied-details block are the developer's own words rather
+ * than the body's — fading either says nothing true about them.
+ */
+function contrastExemptRanges(input: {
+  readonly text: string;
+  readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
+}): readonly OffsetRange[] {
+  const map = buildPromptEnhancementSectionMapV1(input.text, input.sections);
+  const lines = logicalLineRanges(input.text);
+  const out: OffsetRange[] = [];
+  for (const entry of map.entries) {
+    const title = lines[entry.titleLine];
+    if (title) out.push(title);
+    const kind = typeof entry.source === 'number' ? input.sections[entry.source]?.sectionKind : undefined;
+    const ownWords = entry.source === 'details' || kind === 'original_request_or_goal';
+    if (!ownWords) continue;
+    const first = lines[entry.titleLine];
+    const last = lines[entry.endLine - 1];
+    if (first && last) out.push({ start: first.start, end: last.end });
+  }
+  return out;
+}
+
+/**
  * The stretches of the buffer that carry no markable text, as offsets.
  *
- * ⛔ **Not a second rule** — it is {@link ineligibleRanges} itself: every found title line, every
- * line of the two sections the standard never marks, and the applied-details block. The row-shaped
+ * ⛔ **Not a second rule about MARKING** — nothing here decides what may be marked. It is
+ * {@link contrastExemptRanges}: every found title line, the verbatim section and the applied-details
+ * block, read out as offsets. The row-shaped
  * answer below serves the CLI, which wraps at a fixed width inside a window; this one serves a
  * surface that wraps with CSS and has neither, exactly as
  * {@link locatePromptEnhancementEmphasisOffsetsV1} does beside
@@ -200,21 +236,22 @@ export function promptEnhancementUnmarkableOffsetsV1(input: {
   readonly text: string;
   readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
 }): readonly { start: number; end: number }[] {
-  return ineligibleRanges(input).map((range) => ({ start: range.start, end: range.end }));
+  return contrastExemptRanges(input).map((range) => ({ start: range.start, end: range.end }));
 }
 
 /**
  * Which displayed rows carry no markable text at all.
  *
- * ⛔ **Not a second rule.** It is {@link ineligibleRanges} — every found title line, every line of
- * the two sections the standard never marks, and the applied-details block — read out per row
- * instead of per offset. The set is the same one the spans builder skips, which is the point: a
- * surface that draws unmarked text differently must agree with the surface that decides what may be
- * marked, or the two will disagree about a row.
+ * ⛔ **Not a second rule about MARKING.** It is {@link contrastExemptRanges} read out per row instead
+ * of per offset — every found title line, the verbatim section and the applied-details block.
  *
  * Its first caller is the CLI popup, which draws the rest of the body lighter so the marks carry.
  * These rows are excluded from that: a title is structure the reader navigates by, and the verbatim
  * section is the developer's own prompt quoted back — fading either says nothing true about them.
+ *
+ * ⚠️ The practices section is NOT excluded, though no mark may land in it either. It is the body's
+ * own prose, and exempting it made it the only full-brightness prose in a dimmed frame — which reads
+ * as emphasis on a section that has none.
  *
  * Length equals the number of rows the window shows, so a renderer can index it by the row it is
  * drawing, exactly as it indexes the spans.
@@ -224,7 +261,7 @@ export function buildPromptEnhancementUnmarkableRowsV1(
 ): readonly boolean[] {
   const visual = buildPromptEnhancementVisualLineMapV1(input.text, input.fieldWidth);
   const shownRows = Math.min(input.windowRows, Math.max(0, visual.length - input.windowStart));
-  const ineligible = ineligibleRanges(input);
+  const ineligible = contrastExemptRanges(input);
   const out: boolean[] = new Array(shownRows).fill(false);
   for (let row = 0; row < shownRows; row++) {
     const line = visual[row + input.windowStart];

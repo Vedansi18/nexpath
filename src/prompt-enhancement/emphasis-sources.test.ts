@@ -221,3 +221,25 @@ describe("the developer's own terms", () => {
     expect(found.filter((t) => t.toLowerCase() === 'cart drawer')).toHaveLength(1);
   });
 });
+
+describe('a term already inside a term this section offered', () => {
+  it('offers the fuller reading only', () => {
+    // `food delivery app`, `food delivery` and `delivery app` are three marks on seventeen
+    // characters, and between them they take three of the section's four.
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'build a food delivery app',
+      sectionText: 'The food delivery app needs a home page.',
+      groundedFactValues: ['food delivery app', 'food delivery', 'delivery app'],
+    })).toEqual(['food delivery app']);
+  });
+
+  it('still offers a term that merely shares a word', () => {
+    // Overlapping is not containing. `delivery time` is its own thing and has to survive the rule
+    // above, or the rule is just "keep the first one".
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'build a food delivery app',
+      sectionText: 'The food delivery app shows a delivery time.',
+      groundedFactValues: ['food delivery app', 'delivery time'],
+    })).toEqual(['food delivery app', 'delivery time']);
+  });
+});

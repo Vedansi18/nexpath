@@ -324,3 +324,45 @@ describe('the rows no mark may land on', () => {
     expect(rows()).toHaveLength(text.split('\n').length);
   });
 });
+
+describe('which rows the contrast leaves at full weight', () => {
+  // ⚠️ A different question from "where may a mark land". Both sections below are never marked, but
+  // only one of them is the developer's own words — and exempting the other from the dim made it the
+  // only full-brightness prose in a dimmed frame, which reads as emphasis on a section that has none.
+  const SECTIONS: readonly PromptEnhancementEmphasisOverlaySectionV1[] = [
+    { sectionKind: 'original_request_or_goal', title: 'My original request (verbatim)', bodyText: 'add a retry to the payment gateway client' },
+    { sectionKind: 'context_and_constraints', title: 'Context and constraints', bodyText: 'Keep the payment gateway client as it is.' },
+    { sectionKind: 'source_signal_guidance', title: 'Best practices and standards', bodyText: 'According to the signal, retries should be bounded.' },
+  ];
+  const text = SECTIONS.map((section) => `${section.title}:\n${section.bodyText}`).join('\n\n');
+  const exempt = () => buildPromptEnhancementUnmarkableRowsV1({
+    text,
+    sections: SECTIONS,
+    fieldWidth: 200,
+    windowStart: 0,
+    windowRows: text.split('\n').length,
+    markerAbove: false,
+    markerBelow: false,
+  });
+  const rowFor = (needle: string) => text.split('\n').findIndex((line) => line.includes(needle));
+
+  it('leaves the developer’s own words alone', () => {
+    expect(exempt()[rowFor('add a retry to the payment')]).toBe(true);
+  });
+
+  it('leaves every title alone, because a title is structure', () => {
+    expect(exempt()[rowFor('My original request')]).toBe(true);
+    expect(exempt()[rowFor('Best practices and standards')]).toBe(true);
+  });
+
+  it('does NOT exempt the practices section, though no mark may land there either', () => {
+    // The body's own prose, so it reads like the body's own prose. Exempted, it was the brightest
+    // thing on screen while carrying nothing.
+    expect(NEVER_MARKED_SECTION_KINDS.has('source_signal_guidance')).toBe(true);
+    expect(exempt()[rowFor('According to the signal')]).toBe(false);
+  });
+
+  it('still leaves an ordinary body row to be dimmed', () => {
+    expect(exempt()[rowFor('Keep the payment gateway client')]).toBe(false);
+  });
+});
