@@ -159,6 +159,17 @@ export function collectPromptEnhancementEmphasisUserTermsV1(
     // It has to be on screen to be worth marking.
     if (!sectionLower.includes(value.toLowerCase())) return;
     if (has(found, value)) return;
+    // A term already inside a term this section offered is the same thing named twice, and it costs
+    // a mark of the section's four. `food delivery app`, `food delivery` and `delivery app` were
+    // three marks on seventeen characters, and between them they pushed `price range` and
+    // `delivery time` out of the frame (owner, 2026-09-27).
+    //
+    // ⚠️ Only WITHIN this list. A term sitting inside a boundary or a condition is two marks the
+    // standard asks for, and those are different classes decided elsewhere — nothing here can or
+    // should reach them.
+    //
+    // The sources arrive longest-first, so the fuller reading is the one already here.
+    if (found.some((kept) => kept.toLowerCase().includes(value.toLowerCase()))) return;
     found.push(value);
   };
 

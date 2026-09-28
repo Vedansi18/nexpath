@@ -15,6 +15,7 @@
  */
 import {
   classifyPromptEnhancementEmphasisCandidatesV1,
+  NEVER_MARKED_SECTION_KINDS,
   type PromptEnhancementEmphasisCandidateV1,
   type PromptEnhancementEmphasisClassV1,
 } from './emphasis-classes.js';
@@ -143,6 +144,12 @@ function withoutDuplicateSpans(phrases: readonly LocatedPhrase[]): LocatedPhrase
 /**
  * Spend the budget: four marks in one section, twelve across the body, in the order given.
  *
+ * ⏪ Spending it in ROUNDS — every section offered its next-best before any section's next — was
+ * tried on 2026-09-27 and withdrawn the same day. It fails the guard above: the safety line is
+ * spent first BECAUSE the order is the caller's, and rounds put a later section's condition ahead of
+ * it. Measured on the recorded bodies the two were identical anyway; it only differed where the
+ * budget binds, and there it traded a guard for a fuller last section.
+ *
  * Exported because the optional model pass is capped by **this** rule and not by a copy of it —
  * its phrases are appended after the floor's and run through the same loop, so the floor can never
  * be displaced by the model and the two can never drift apart. The caller orders the list; this
@@ -187,11 +194,34 @@ export function buildPromptEnhancementEmphasisPhrasesV1(
     ...(named ? { sensitiveActionName: named } : {}),
   });
 
-  // Locate: the first occurrence in the first section that holds it. A phrase the composer
-  // paraphrased away is simply dropped — emphasis never causes a rewrite.
+  // Locate: the first occurrence in the first section that holds it AND can draw it. A phrase the
+  // composer paraphrased away is simply dropped — emphasis never causes a rewrite.
+  //
+  // ⚠️ A phrase charged to a section that cannot show a mark is a mark the reader never gets, paid
+  // for out of a budget whose effect they CAN see. The verbatim section holds the developer's whole
+  // prompt, so it holds nearly every term taken from it — and measured on a real popup, 6 of 9
+  // candidates landed there, spent its four-mark budget, and left every later section with none.
+  //
+  // What fixes that is the section each candidate carries, a few lines below. The
+  // `NEVER_MARKED_SECTION_KINDS` skip beside it is a SECOND guard and nothing more: the classifier
+  // never reads those sections either (`emphasis-classes.ts`), so every candidate already carries a
+  // section that can draw it. Removing the skip and re-running all 35 recorded bodies gives output
+  // identical mark for mark — so no input reaches it, and no test here can. It stays because
+  // neither this file nor the reader's budget should depend on that other skip remaining in place.
   const located: LocatedPhrase[] = [];
   for (const candidate of candidates) {
-    for (const [sectionIndex, section] of input.sections.entries()) {
+    // The section the candidate was READ from comes first: a term read in section 5 belongs to
+    // section 5, even where section 2 happens to contain the same words. Without this, every
+    // candidate naming the same thing is placed in the earliest section that holds it, the
+    // duplicate-span collapse keeps one, and the section that asked for it is left blank.
+    const own = candidate.sectionIndex;
+    const order = own === undefined
+      ? [...input.sections.keys()]
+      : [own, ...[...input.sections.keys()].filter((index) => index !== own)];
+    for (const sectionIndex of order) {
+      const section = input.sections[sectionIndex];
+      if (section === undefined) continue;
+      if (NEVER_MARKED_SECTION_KINDS.has(section.sectionKind)) continue;
       const found = firstOccurrence(section.bodyText, candidate.text);
       if (found === undefined) continue;
       located.push({ candidate, sectionIndex, at: found.at, text: found.text });

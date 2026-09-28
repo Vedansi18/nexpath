@@ -377,3 +377,110 @@ describe('the patterns this phase only made visible', () => {
     expect(ALWAYS_ESCALATE_PATTERN.flags).toBe('i');
   });
 });
+
+describe('how much of a line a mark takes', () => {
+  // Emphasis works by contrast, so every rule here is about making a mark SHORTER than the line it
+  // sits on. Each one is stated in both directions: the shape that is cut, and the shape beside it
+  // that must survive the cut — a rule with only its cutting half tested would pass if it cut
+  // everything.
+
+  describe('a list marker is punctuation, not a word', () => {
+    it('marks the instruction on a line a bullet opens', () => {
+      expect(pairs(one(
+        '- Check the auth middleware before wrapping up.',
+        { groundedFactValues: ['auth middleware'] },
+      ))).toContainEqual([1, 'Check the auth middleware']);
+    });
+
+    it('still refuses a verb that is genuinely buried in the line', () => {
+      // The marker is stripped; nothing else is. A verb with words of its own in front of it is the
+      // body describing work, not instructing it, and that reading has to survive the strip.
+      expect(pairs(one(
+        '- The reviewer will check the auth middleware before wrapping up.',
+        { groundedFactValues: ['auth middleware'] },
+      )).filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
+    });
+  });
+
+  describe('an instruction is the verb and its object', () => {
+    it('stops where the sentence turns to explaining itself', () => {
+      const found = pairs(one(
+        'List out the exact steps that lead to hitting this null error.',
+        { groundedFactValues: ['null error'] },
+      ));
+      expect(found).toContainEqual([1, 'List out the exact steps']);
+      // …and the sentence it was cut out of is not also a mark.
+      expect(found).not.toContainEqual([1, 'List out the exact steps that lead to hitting this null error']);
+    });
+
+    it('keeps going when stopping would leave the verb with nothing to act on', () => {
+      // `that` can introduce the object rather than a second thought. Stopping at it would mark
+      // `Check` alone, which tells a reader nothing.
+      expect(pairs(one(
+        'Check that the home page still loads.',
+        { groundedFactValues: ['home page'] },
+      ))).toContainEqual([1, 'Check that the home page still loads']);
+    });
+  });
+
+  describe('a boundary or a condition stops at eight words', () => {
+    it('marks one of eight words, because it reads as a single thing', () => {
+      expect(pairs(one(
+        'Do not modify the shared billing rate limiter.',
+        { groundedFactValues: ['billing rate limiter'] },
+      ))).toContainEqual([3, 'Do not modify the shared billing rate limiter']);
+    });
+
+    it('drops the same shape once it runs to nine', () => {
+      const found = pairs(one(
+        'Do not modify the shared billing rate limiter configuration.',
+        { groundedFactValues: ['billing rate limiter'] },
+      ));
+      expect(found).not.toContainEqual([3, 'Do not modify the shared billing rate limiter configuration']);
+      // Named so a mutation cannot pass by shortening the phrase to something else instead.
+      expect(found.filter(([emphasisClass]) => emphasisClass === 3)).toEqual([]);
+    });
+
+    it('leaves the classes that build a noun phrase alone', () => {
+      // Classes 1, 2 and 5 are deliberately outside the ceiling. A nine-word instruction is still
+      // an instruction, and shortening it is the rule above, not this one.
+      expect(pairs(one(
+        'Check the exact rollout order for the billing rate limiter.',
+        { groundedFactValues: ['billing rate limiter'] },
+      )).some(([emphasisClass]) => emphasisClass === 1)).toBe(true);
+    });
+  });
+
+  describe('a term already inside an instruction is not marked twice — in that section', () => {
+    it('drops the term where the instruction marking it stands', () => {
+      const found = pairs(one(
+        '- Check the home page layout, then stop.',
+        { groundedFactValues: ['home page'] },
+      ));
+      expect(found).toContainEqual([1, 'Check the home page layout']);
+      expect(found).not.toContainEqual([2, 'home page']);
+    });
+
+    it('marks it again in a later section, which is a different span', () => {
+      // Two marks in two sections are not one ragged mark, and the cap counts them separately. Read
+      // over the whole body instead, the later section is left with nothing at all.
+      const found = pairs(classify({
+        originalPromptText: 'fix the home page',
+        sections: [
+          {
+            sectionKind: 'context_and_constraints',
+            sectionText: '- Check the home page layout, then stop.',
+            groundedFactValues: ['home page'],
+          },
+          {
+            sectionKind: 'acceptance_or_output_expectation',
+            sectionText: 'The home page must stay responsive.',
+            groundedFactValues: ['home page'],
+          },
+        ],
+      }));
+      expect(found).toContainEqual([1, 'Check the home page layout']);
+      expect(found).toContainEqual([2, 'home page']);
+    });
+  });
+});

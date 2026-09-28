@@ -268,3 +268,64 @@ describe('the confirmation sentence’s named action', () => {
     expect(found.some((phrase) => phrase.emphasisClass === 5 && phrase.text === named)).toBe(true);
   });
 });
+
+describe('which section a phrase is charged to', () => {
+  // The paint-time guard — a mark never drawn on a never-marked section — is `popup-emphasis-overlay`'s
+  // business and is tested there. What this file answers is the other half, and it is about the
+  // BUDGET: a phrase charged to a section the reader cannot see marks costs one of that section's
+  // four, and the section that asked for it comes out blank.
+
+  it('draws all six terms two sections named, which is more than one section may hold', () => {
+    // The verbatim section quotes the whole prompt, so it shows all six of these words — and it
+    // still costs nothing: the four-mark budget belongs to the two sections that named them, three
+    // each. Six marks cannot have come out of one section's four.
+    const found = build({
+      originalPromptText: 'add a home page with a search bar, rating cards, a price range filter, a delivery time estimate and a restaurant list',
+      sections: [
+        {
+          sectionKind: 'original_request_or_goal',
+          bodyText: 'add a home page with a search bar, rating cards, a price range filter, a delivery time estimate and a restaurant list',
+        },
+        {
+          sectionKind: 'context_and_constraints',
+          bodyText: 'The home page shows the search bar and the rating cards.',
+          groundedFactValues: ['home page', 'search bar', 'rating cards'],
+        },
+        {
+          sectionKind: 'acceptance_or_output_expectation',
+          bodyText: 'The price range filter, the delivery time estimate and the restaurant list are ready.',
+          groundedFactValues: ['price range filter', 'delivery time estimate', 'restaurant list'],
+        },
+      ],
+    });
+    expect(found.map((phrase) => phrase.text)).toEqual([
+      'home page', 'search bar', 'rating cards',
+      'price range filter', 'delivery time estimate', 'restaurant list',
+    ]);
+    // The point of the assertion above: six is more than any ONE section is allowed, so they cannot
+    // all have been charged to the same one.
+    expect(found.length).toBeGreaterThan(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1);
+  });
+
+  it('charges a phrase to the section it was read from, not the first section holding the words', () => {
+    // The first section is already at its four. The second names a term of its own that the first
+    // happens to mention in passing — and charged to the first, it is the fifth of four and dies.
+    const found = build({
+      originalPromptText: 'ship the home page',
+      sections: [
+        {
+          sectionKind: 'context_and_constraints',
+          bodyText: 'The home page, the search bar, the rating cards and the price range filter are ready. The delivery time estimate is ready too.',
+          groundedFactValues: ['home page', 'search bar', 'rating cards', 'price range filter'],
+        },
+        {
+          sectionKind: 'acceptance_or_output_expectation',
+          bodyText: 'The delivery time estimate must be accurate.',
+          groundedFactValues: ['delivery time estimate'],
+        },
+      ],
+    });
+    expect(found.map((phrase) => phrase.text)).toContain('delivery time estimate');
+    expect(found).toHaveLength(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 + 1);
+  });
+});
