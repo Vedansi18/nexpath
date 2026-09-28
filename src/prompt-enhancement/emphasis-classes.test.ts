@@ -484,3 +484,49 @@ describe('how much of a line a mark takes', () => {
     });
   });
 });
+
+describe('a composed line holds several instructions', () => {
+  // The composer writes a step list as ONE line: `First, design … Next, implement … Then, embed …`.
+  // Read whole, the first execution verb anywhere in the line decided the whole line, so a real body
+  // full of steps carried no instruction at all.
+
+  it('finds the instruction in the second sentence, past a verb that blocked the first', () => {
+    const found = pairs(one(
+      '- We will deploy it later. Check the auth middleware for the null error.',
+      { groundedFactValues: ['auth middleware'] },
+    ));
+    expect(found).toContainEqual([1, 'Check the auth middleware']);
+  });
+
+  it('still refuses the sentence whose verb does not open it', () => {
+    // Splitting must not turn every verb into an instruction — `deploy` has `We will` in front of it
+    // in its own sentence, and that is the body describing work, not instructing it.
+    expect(pairs(one(
+      '- We will deploy it later. Check the auth middleware for the null error.',
+      { groundedFactValues: ['auth middleware'] },
+    )).filter(([, text]) => text.toLowerCase().includes('deploy'))).toEqual([]);
+  });
+
+  it('reads a sequencing word as punctuation, not as someone doing something', () => {
+    expect(pairs(one(
+      '- First, review the auth middleware.',
+      { groundedFactValues: ['auth middleware'] },
+    ))).toContainEqual([1, 'review the auth middleware']);
+  });
+
+  it('marks the verbs a step list is written with', () => {
+    expect(pairs(one(
+      '- Design the layout of the cart drawer.',
+      { groundedFactValues: ['cart drawer'] },
+    ))).toContainEqual([1, 'Design the layout of the cart drawer']);
+  });
+
+  it('leaves a single-sentence line exactly as it was', () => {
+    // The split only applies where there is something to split; one sentence must take the same path
+    // it always did, or every earlier rule in this file is being re-decided by accident.
+    expect(pairs(one(
+      '- Check the auth middleware before wrapping up.',
+      { groundedFactValues: ['auth middleware'] },
+    ))).toContainEqual([1, 'Check the auth middleware']);
+  });
+});

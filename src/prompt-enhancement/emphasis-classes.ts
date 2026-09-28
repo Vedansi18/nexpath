@@ -113,6 +113,15 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
   'i should',
   'i can',
   "let's",
+  // Sequencing words. They put the steps in order; they are not someone doing something, so a verb
+  // behind one still opens its clause — the same reading a list marker gets. The composer writes
+  // step lists this way almost every time: `First, … Next, … Then, … Finally, …`.
+  'first,',
+  'next,',
+  'then,',
+  'after that,',
+  'finally,',
+  'lastly,',
 ];
 
 /**
@@ -127,6 +136,12 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * censused and only **14** matched any shipped list; these five are the verbs that turned up and that
  * name WORK.
  *
+ * ⏪ **Widened again 2026-09-28** by `design`, `implement`, `embed`, `calculate`, `display` — the
+ * verbs a step list uses. They were worth nothing on their own and are only worth something beside
+ * the sentence scan in {@link classOneOfLine}: a step list is written as one line, and until that
+ * line was read sentence by sentence none of its verbs could open a clause. Measured together:
+ * sections drawing 43 → 44, marks 96 → 98, densest body and section unmoved.
+ *
  * ⛔ **The widening stopped there, and both further steps were declined on measurement.**
  * `make`, `include`, `name`, `add` added **no marks at all** — risk with no benefit.
  * `ensure`, `start`, `calculate`, `display`, `implement` traded two actions for two conditions, a
@@ -140,7 +155,7 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * ⚠️ They rank BELOW writes when the cap bites, which is what {@link
  * PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries.
  */
-const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|cover|document|gather|define|specify)\b/i;
+const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|cover|document|gather|define|specify|design|implement|embed|calculate|display)\b/i;
 
 /** Words that end a phrase: the next clause has started, so the object has finished. */
 const CLAUSE_BOUNDARY = /[,.;:!?]|\bbefore\b|\bafter\b|\bonce\b|\bunless\b|\buntil\b|\bonly if\b|\brather than\b/i;
@@ -342,6 +357,18 @@ function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhan
   // The offsets the marks are placed at are found again in the FULL text later, so trimming here
   // costs nothing downstream — it only decides what the phrase is.
   line = line.replace(/^\s*[-•*]\s+/, '');
+
+  // A composed line usually holds SEVERAL sentences, and each one is its own instruction. Judged as
+  // one line, the first execution verb anywhere in it decides the fate of all of them: on a real
+  // body, `- First, design the layout … Then, embed functionality that lets users update quantities
+  // and delete items.` was refused whole, because `delete` sits in the third sentence with words in
+  // front of it. Five instructions, none of them ever looked at.
+  //
+  // The offsets are found again in the FULL text later, so splitting costs nothing downstream — it
+  // only decides which words are weighed against "does a verb open this clause".
+  const sentences = line.split(/(?<=[.;!?])\s+/).filter((part) => part.trim().length > 0);
+  if (sentences.length > 1) return sentences.flatMap((sentence) => classOneOfLine(sentence, userTerms));
+
   const lower = line.toLowerCase();
   // The verb has to head a clause — sentence-initial, or straight after one of the known heads.
   const heads: number[] = [0];
