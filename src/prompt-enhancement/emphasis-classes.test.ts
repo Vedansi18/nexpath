@@ -617,9 +617,15 @@ describe('a mark does not end mid-thought', () => {
   });
 
   it('drops a hanging conjunction', () => {
-    const found = pairs(one('- Note what options are present before and after pressing that button.'));
-    expect(found.filter(([emphasisClass]) => emphasisClass === 4).map(([, text]) => text))
-      .not.toContain('before and');
+    // ⚠️ The section needs something for the condition to qualify, or it offers only conditions and
+    // they are all dropped — which is how the first draft of this test came to assert nothing at all:
+    // `not.toContain` passed because the list was empty either way.
+    const found = pairs(one(
+      '- Do not touch the export button. Note what options are present before and after pressing it.',
+      { groundedFactValues: ['export button'] },
+    ));
+    expect(found).toContainEqual([4, 'before']);
+    expect(found.map(([, text]) => text)).not.toContain('before and');
   });
 
   it('leaves a phrase that legitimately ends on a pronoun', () => {
