@@ -155,15 +155,74 @@ function withoutDuplicateSpans(phrases: readonly LocatedPhrase[]): LocatedPhrase
  * be displaced by the model and the two can never drift apart. The caller orders the list; this
  * only counts.
  */
+/**
+ * The most of one section that may be drawn heavy, as a percentage of that section's own characters.
+ *
+ * The two caps above count MARKS; this one measures how much of the reader's paragraph is bold, which
+ * is the thing that actually decides whether emphasis still reads as emphasis. A section with four
+ * short marks is fine; a section with two marks that between them cover half of it is not.
+ *
+ * ⛔ **A word ceiling is not this rule and was measured to be the wrong instrument.** At eight words
+ * it moved no density at all; at six it dropped `design the layout of the cart drawer`, an
+ * instruction a real popup was missing. Length is not the complaint — share is.
+ *
+ * Set to 50 by the owner, 2026-09-28. At that value it refuses 2 marks across the 35 recorded bodies
+ * and leaves 3 sections of 73 in the 41–50 % band: a guard against the pathological body rather than
+ * a shaper of ordinary ones.
+ */
+export const PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1 = 50 as const;
+
+/**
+ * The shortest section the share ceiling applies to, in characters.
+ *
+ * ⚠️ **A share is the right instrument for a paragraph and the wrong one for a line.**
+ * `Limit applies to POST /api/upload only.` is 74 characters; marking `POST /api/upload` and `only`
+ * inside it is 27 % of the section and is precisely what the standard asks for. Applied flat, the
+ * ceiling refused the standard's own worked example — nine tests failed at once and were right to.
+ *
+ * Below this, a section is a line and the mark COUNT caps already govern it: four per section, and a
+ * short line cannot hold four marks unless they are tiny. Above it, share is what decides whether a
+ * paragraph still reads as prose with marks in it rather than as a wall.
+ *
+ * 160 is about two popup lines. Measured: at 160 the worked example is untouched and the recorded
+ * bodies are identical to a flat ceiling; at 200 paragraphs start getting through again.
+ */
+export const PROMPT_ENHANCEMENT_EMPHASIS_SHARE_APPLIES_OVER_CHARS_V1 = 160 as const;
+
 export function applyPromptEnhancementEmphasisCapV1<T extends { sectionIndex: number }>(
   ordered: readonly T[],
+  /**
+   * How much of each section is already text, and how long a given mark is — supplied only by callers
+   * that can answer both. Omitted, the share ceiling simply does not apply, which is what the model
+   * tier's caller needs: it ranks phrase handles that carry no text of their own.
+   */
+  share?: {
+    readonly sectionLengths: readonly number[];
+    readonly markLength: (phrase: T) => number;
+  },
 ): T[] {
   const perSection = new Map<number, number>();
+  const perSectionChars = new Map<number, number>();
   const kept: T[] = [];
   for (const phrase of ordered) {
     if (kept.length >= PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_BODY_V1) break;
     const used = perSection.get(phrase.sectionIndex) ?? 0;
     if (used >= PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1) continue;
+
+    // …and the section may not go over its share. Tested in the SAME walk as the count, so a mark
+    // refused here does not spend a count the next mark could have used, and the priority order
+    // decides what survives: the safety line first, then the instruction, then the developer's own
+    // term. When a section fills up, what it keeps is what the reader most needs to see.
+    if (share !== undefined) {
+      const sectionLength = share.sectionLengths[phrase.sectionIndex] ?? 0;
+      if (sectionLength > PROMPT_ENHANCEMENT_EMPHASIS_SHARE_APPLIES_OVER_CHARS_V1) {
+        const drawn = perSectionChars.get(phrase.sectionIndex) ?? 0;
+        const after = drawn + share.markLength(phrase);
+        if ((after / sectionLength) * 100 > PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1) continue;
+        perSectionChars.set(phrase.sectionIndex, after);
+      }
+    }
+
     perSection.set(phrase.sectionIndex, used + 1);
     kept.push(phrase);
   }
@@ -231,7 +290,10 @@ export function buildPromptEnhancementEmphasisPhrasesV1(
 
   // Cap: priority order, overlaps collapsed, then four per section and twelve in all.
   const ordered = withoutDuplicateSpans([...located].sort(byPriority));
-  const kept = applyPromptEnhancementEmphasisCapV1(ordered);
+  const kept = applyPromptEnhancementEmphasisCapV1(ordered, {
+    sectionLengths: input.sections.map((section) => section.bodyText.length),
+    markLength: (phrase) => phrase.text.length,
+  });
 
   return kept.map((phrase) => ({
     text: phrase.text,

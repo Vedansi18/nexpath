@@ -131,6 +131,23 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * do, and a developer scanning the popup needs to see it as plainly as a write. The list is the
  * approved starting set; it can still be edited.
  *
+ * ⏪ **Widened again 2026-09-28** by `create`, `develop`, `establish`, `outline`, `assess`,
+ * `determine`, `clarify`, `prioritize`, `provide`, `break`, `tie` and `set up` — each seen opening a
+ * real instruction in the recorded bodies, counted by an audit of every sentence in every markable
+ * section. Measured together: class 1 46 → 69, sections carrying a mark 65 → 75 of 129, and the
+ * densest body unmoved at 43.5 %.
+ *
+ * ⛔ `name` was in that list and was left out. All four of its marks were
+ * `Name risky or irreversible actions, ask for required confirmation…`, the composer's own template
+ * line for the risk section — the same shape as `cover` below, and refused for the same reason.
+ *
+ * ⏪ **`cover` was removed again 2026-09-28.** Every mark it produced across the recorded bodies was
+ * the composer's own template sentence — `Cover Scope and non-goals for this request with concrete,
+ * source-backed specifics…` — which is Nexpath instructing itself, not anything about the developer's
+ * request. It survived the 2026-09-27 census because the object gate was refusing it in every body,
+ * so the census counted a verb whose marks never reached a screen. Removing it costs 4 marks and
+ * nothing else.
+ *
  * ⏪ **Widened 2026-09-27** by `cover`, `document`, `gather`, `define`, `specify` — counted, not
  * chosen. Across 35 recorded bodies, 273 clause openings outside the never-marked sections were
  * censused and only **14** matched any shipped list; these five are the verbs that turned up and that
@@ -155,7 +172,7 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * ⚠️ They rank BELOW writes when the cap bites, which is what {@link
  * PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries.
  */
-const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|cover|document|gather|define|specify|design|implement|embed|calculate|display)\b/i;
+const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|document|gather|define|specify|design|implement|embed|calculate|display|create|develop|establish|outline|assess|determine|clarify|prioritize|provide|break|tie|set up)\b/i;
 
 /** Words that end a phrase: the next clause has started, so the object has finished. */
 const CLAUSE_BOUNDARY = /[,.;:!?]|\bbefore\b|\bafter\b|\bonce\b|\bunless\b|\buntil\b|\bonly if\b|\brather than\b/i;
@@ -185,6 +202,22 @@ const CLAUSE_BOUNDARY = /[,.;:!?]|\bbefore\b|\bafter\b|\bonce\b|\bunless\b|\bunt
  * change to how its phrase is BUILT, and it is a separate question.
  */
 const CLASS_3_AND_4_MAX_WORDS_V1 = 8 as const;
+
+/**
+ * The longest an instruction may run and still be a mark.
+ *
+ * ⏪ **Class 1 had no ceiling until 2026-09-28, and that was right while it had six marks in the whole
+ * corpus** — nothing to control. Opening the object gate took it to 57, and eight of those ran past
+ * eight words: `Verify if there are any specific libraries or frameworks we should use or avoid`,
+ * `confirm that we have backups of the current state in case reversion is necessary`. A popup line is
+ * about twelve words wide, so those are the full line in bold.
+ *
+ * Measured at eight: class 1 keeps 50 of 57, sections drawing 73 → 69, and no mark anywhere runs past
+ * the line. The shortening in {@link instructionObjectOnly} does the work first and this only catches
+ * what it cannot — which is why it drops rather than truncates: a truncated phrase was measured and
+ * rejected once already.
+ */
+const CLASS_1_MAX_WORDS_V1 = 8 as const;
 
 /** A hard negation or scope limiter. */
 const CLASS_3_BOUNDARY_WORDS: readonly string[] = ['do not', 'must not', 'never', 'without', 'only', 'not'];
@@ -293,6 +326,13 @@ export function maskInsertedText(sectionText: string, sensitiveActionName?: stri
  */
 const CLASS_1_SECOND_THOUGHT: readonly string[] = [
   'that', 'which', 'so', 'to', 'for', 'while', 'when', 'after', 'before', 'and', 'because', 'since', 'if', 'whether',
+  // ⏪ Added 2026-09-28, once the gate above stopped refusing most instructions and the long ones
+  // became visible: `run user testing sessions WHERE participants will interact with the button`,
+  // `Document these potential residual risks BASED on the evaluation of the diff`, `Identify the
+  // dependencies AMONG the tasks defined in the previous section`. Each of those turns from the work
+  // to the circumstances of the work. Measured: marks over eight words 12 → 8, median 6 → 5, and not
+  // one mark lost — they are shortened, never dropped.
+  'where', 'based', 'among',
 ];
 
 /**
@@ -316,6 +356,37 @@ const CLASS_1_MIN_WORDS = 3 as const;
  * payments module currently` and `Check what specific diff files or changes are` — shorter, and
  * broken. A whole phrase reads better than a truncated one.
  */
+/**
+ * Words a phrase cannot END on: a conjunction, an article, a preposition or a bare auxiliary. Each
+ * one promises something after it, and a mark that keeps the promise unkept reads as a cut sentence.
+ *
+ * ⛔ **Pronouns are deliberately absent.** `Without this`, `After that` and `after I refactor it` end
+ * on one and are all complete; trimming them would make the mark worse, not better.
+ */
+const CANNOT_END_A_PHRASE: readonly string[] = [
+  'and', 'or', 'but', 'the', 'a', 'an',
+  'of', 'to', 'in', 'on', 'at', 'for', 'with', 'from', 'into', 'by', 'as',
+  'is', 'are', 'was', 'were', 'be', 'been',
+];
+
+/**
+ * A phrase with any hanging tail removed.
+ *
+ * Applied to every class, because every class has a rule that can cut: the clause boundary, the
+ * eight-word ceilings, and the instruction's second-thought stop. Measured over the 35 recorded
+ * bodies: 8 marks ended on such a word and 4 of them were plainly cut — `before and`,
+ * `verify if these requirements are`, `Verify the filtering functionality is`.
+ */
+function withoutHangingTail(phrase: string): string {
+  let words = phrase.trim().split(/\s+/);
+  while (words.length > 1) {
+    const last = (words[words.length - 1] ?? '').toLowerCase().replace(/[^a-z']/g, '');
+    if (!CANNOT_END_A_PHRASE.includes(last)) break;
+    words = words.slice(0, -1);
+  }
+  return words.join(' ');
+}
+
 function instructionObjectOnly(phrase: string): string {
   const words = phrase.trim().split(/\s+/);
   for (let index = CLASS_1_MIN_WORDS; index < words.length; index++) {
@@ -347,8 +418,23 @@ function classOneApplies(input: PromptEnhancementEmphasisInputV1): boolean {
   return language === 'en' || language.startsWith('en-');
 }
 
-/** The class-1 candidates of one line: an instruction, with an object that traces. */
-function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhancementEmphasisCandidateV1[] {
+/**
+ * The verb that comes FIRST in a clause, whichever list holds it.
+ *
+ * All three lists are consulted and the earliest match wins. A tie cannot happen on the same span —
+ * the patterns match whole words — and where two lists would match the same word the execution
+ * reading is taken, because {@link PromptEnhancementEmphasisCandidateV1.isWriteVerb} is read off the
+ * matched text afterwards and a write must never be ranked as a read.
+ */
+function earliestVerbIn(rest: string): RegExpExecArray | null {
+  const matches = [EXECUTION_VERB.exec(rest), ALWAYS_ESCALATE_PATTERN.exec(rest), READ_VERB.exec(rest)]
+    .filter((match): match is RegExpExecArray => match !== null);
+  if (matches.length === 0) return null;
+  return matches.reduce((best, match) => (match.index < best.index ? match : best));
+}
+
+/** The class-1 candidates of one line: an instruction, with something it acts on. */
+function classOneOfLine(line: string): PromptEnhancementEmphasisCandidateV1[] {
   // A list marker is punctuation, not a word, so a verb behind one still OPENS its clause. The
   // composer writes almost every instruction as `- Check that …`, and without this the marker sat in
   // front of every verb and the "only a verb that opens the clause counts" test below refused all of
@@ -367,7 +453,7 @@ function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhan
   // The offsets are found again in the FULL text later, so splitting costs nothing downstream — it
   // only decides which words are weighed against "does a verb open this clause".
   const sentences = line.split(/(?<=[.;!?])\s+/).filter((part) => part.trim().length > 0);
-  if (sentences.length > 1) return sentences.flatMap((sentence) => classOneOfLine(sentence, userTerms));
+  if (sentences.length > 1) return sentences.flatMap((sentence) => classOneOfLine(sentence));
 
   const lower = line.toLowerCase();
   // The verb has to head a clause — sentence-initial, or straight after one of the known heads.
@@ -380,8 +466,19 @@ function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhan
   const found: PromptEnhancementEmphasisCandidateV1[] = [];
   for (const head of heads) {
     const rest = line.slice(head);
-    // Writes, the shapes that are dangerous on sight, and the reads that are still instructions.
-    const verb = EXECUTION_VERB.exec(rest) ?? ALWAYS_ESCALATE_PATTERN.exec(rest) ?? READ_VERB.exec(rest);
+    // Writes, the shapes that are dangerous on sight, and the reads that are still instructions —
+    // and whichever of them stands FIRST is the one this clause is about.
+    //
+    // ⚠️ It used to be `EXECUTION_VERB ?? ALWAYS_ESCALATE ?? READ_VERB`, which chooses by list rather
+    // than by position. In `embed functionality that lets users update quantities and delete items`,
+    // `embed` opens the sentence and `delete` stands eight words in — execution answered first, the
+    // test below then found words in front of `delete`, and the whole sentence was thrown away with
+    // a good verb sitting at position 0.
+    //
+    // Which list a verb is in says how dangerous it is, and that is what {@link
+    // PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries into the ranking below. It was never
+    // meant to say which verb the clause is about.
+    const verb = earliestVerbIn(rest);
     if (verb === null) continue;
     // Only a verb that opens the clause counts; one buried further in is the body describing
     // something, not instructing.
@@ -397,12 +494,29 @@ function classOneOfLine(line: string, userTerms: readonly string[]): PromptEnhan
     // …and the mark itself, cut back to the verb and its object.
     const phrase = instructionObjectOnly(clause);
     if (phrase.length === 0) continue;
-    // The object has to trace to something the developer or the project supplied. A verb with an
-    // object nobody named is the body inventing work.
+    // The verb has to be acting ON something. An instruction with no object is not one.
     const object = clause.slice(verb[0].length).trim();
     if (object.length === 0) continue;
-    if (!userTerms.some((term) => object.toLowerCase().includes(term.toLowerCase()))) continue;
 
+    // ⏪ **The object no longer has to trace to a named term** (2026-09-28). It used to: *"a verb with
+    // an object nobody named is the body inventing work"*. That was written when the corpus of the
+    // developer's own words was EMPTY, where refusing everything was the only safe reading.
+    //
+    // With the corpus fed, the rule stopped telling invented work from real work and started telling
+    // work the corpus had heard of from work it had not. MEASURED on the recorded bodies: it found 47
+    // instructions and threw them away — `identify` nine times, `confirm` five, `gather` five,
+    // `cover` four, `verify` four — and left seven standing in the whole corpus. A reader looking for
+    // what the body is telling the agent to do was being shown almost none of it.
+    //
+    // ⛔ The reader's protection did not go away, it moved to where it belongs: {@link
+    // PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1} limits how much of a section may be
+    // heavy however many instructions it holds, and the cap's priority order decides what survives
+    // when a section fills — the safety line, then the instruction, then the developer's own term.
+
+    // An instruction is a phrase, not a sentence. A popup line is about twelve words wide, so a
+    // mark past this is the whole line drawn heavy — which is the one thing emphasis must never be.
+    // Same ceiling as classes 3 and 4, and for the same reason.
+    if (phrase.trim().split(/\s+/).length > CLASS_1_MAX_WORDS_V1) continue;
     found.push({ text: phrase, emphasisClass: 1, isWriteVerb: EXECUTION_VERB.test(verb[0]) });
   }
   return found;
@@ -482,7 +596,7 @@ export function classifyPromptEnhancementEmphasisCandidatesV1(
   /** The section being read, stamped on every candidate it produces. */
   let currentSectionIndex = 0;
   const keep = (candidate: PromptEnhancementEmphasisCandidateV1): void => {
-    const text = cutBeforeSecret(candidate.text).trim();
+    const text = withoutHangingTail(cutBeforeSecret(candidate.text).trim());
     if (text.length === 0) return;
     const key = `${candidate.emphasisClass}:${text.toLowerCase()}`;
     if (seen.has(key)) return;
@@ -521,7 +635,7 @@ export function classifyPromptEnhancementEmphasisCandidatesV1(
     // The line scan never sees what the pipeline wrote itself — those spans have their own marks.
     for (const line of maskInsertedText(section.sectionText, input.sensitiveActionName).split('\n')) {
       if (line.trim().length === 0) continue;
-      if (classOneHere) for (const action of classOneOfLine(line, userTerms)) keep(action);
+      if (classOneHere) for (const action of classOneOfLine(line)) keep(action);
       for (const bound of boundaryAndConditionOfLine(line)) keep(bound);
     }
 

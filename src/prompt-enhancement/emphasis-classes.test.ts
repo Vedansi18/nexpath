@@ -105,10 +105,17 @@ describe('class 1 — the instruction the body gives', () => {
     expect(action?.isWriteVerb).toBe(false);
   });
 
-  it('does NOT mark a verb whose object traces to nothing', () => {
-    // Nobody named a staging cluster. A mark here would be the body inventing work.
-    expect(one("I'll deploy the staging cluster.", grounded)
-      .some((candidate) => candidate.emphasisClass === 1)).toBe(false);
+  it('marks a verb whose object traces to nothing — which it did NOT until 2026-09-28', () => {
+    // ⏪ Nobody named a staging cluster, and this used to be refused: "a verb with an object nobody
+    // named is the body inventing work". Measured over the recorded bodies, that rule found 47
+    // instructions and threw them away, leaving seven in the whole corpus — a reader was being shown
+    // almost nothing of what the body tells the agent to do.
+    //
+    // What replaced it is not nothing: the instruction must still be a verb at the head of its
+    // clause with an object, it may not run past eight words, and no section may end up more than
+    // half drawn heavy. The protection moved from WHOSE words to HOW MUCH of the paragraph.
+    expect(pairs(one("I'll deploy the staging cluster.", grounded)))
+      .toContainEqual([1, 'deploy the staging cluster']);
   });
 
   it('does NOT mark a verb that is not at the head of its clause', () => {
@@ -271,7 +278,11 @@ describe('a condition qualifies something, so it is not marked alone', () => {
   // composer happened to put one.
 
   it('marks nothing in a section that offers only a condition', () => {
-    expect(one('Run the migration once the backup finishes.')).toEqual([]);
+    // ⏪ The fixture was `Run the migration once the backup finishes.` until 2026-09-28. Once an
+    // instruction no longer had to name something already known, `Run the migration` became a mark
+    // of its own and the section stopped offering only a condition — so the fixture, not the rule,
+    // had to change. This one states nothing for the condition to qualify: no verb heads its clause.
+    expect(one('The rollout happens once the backup finishes.')).toEqual([]);
   });
 
   it('marks it once the same section carries a limit it can qualify', () => {
@@ -528,5 +539,130 @@ describe('a composed line holds several instructions', () => {
       '- Check the auth middleware before wrapping up.',
       { groundedFactValues: ['auth middleware'] },
     ))).toContainEqual([1, 'Check the auth middleware']);
+  });
+});
+
+describe('which verb a clause is about', () => {
+  it('takes the verb that comes first, not the one from the more dangerous list', () => {
+    // `Embed` opens the clause and is a read; `delete` stands further in and is a write. Choosing by
+    // list rather than by position took `delete`, found words in front of it, and threw the whole
+    // instruction away.
+    expect(pairs(one(
+      '- Embed the auth middleware, then delete the old ones.',
+      { groundedFactValues: ['auth middleware'] },
+    ))).toContainEqual([1, 'Embed the auth middleware']);
+  });
+
+  it('still records a write as a write, which is what the cap ranks on', () => {
+    const found = classify({
+      originalPromptText: 'do the work',
+      sections: [{
+        sectionKind: 'context_and_constraints',
+        sectionText: '- Delete the auth middleware cache.',
+        groundedFactValues: ['auth middleware'],
+      }],
+    });
+    const action = found.find((candidate) => candidate.emphasisClass === 1);
+    expect(action?.text).toBe('Delete the auth middleware cache');
+    expect(action?.isWriteVerb).toBe(true);
+  });
+});
+
+describe('an instruction no longer has to name something already known', () => {
+  it('marks an instruction whose object the corpus has never heard of', () => {
+    // ⏪ This was refused until 2026-09-28 — "a verb with an object nobody named is the body inventing
+    // work". Measured over the recorded bodies, that rule found 47 instructions and threw them away,
+    // leaving seven standing in the whole corpus.
+    expect(pairs(one('- Identify the dependencies between the queue workers.'))).toContainEqual(
+      [1, 'Identify the dependencies between the queue workers'],
+    );
+  });
+
+  it('still refuses a verb with nothing to act on', () => {
+    // The rule that went is about WHOSE words the object is, not about whether there is one.
+    expect(pairs(one('- Check.')).filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
+  });
+});
+
+describe('an instruction is a phrase, not a sentence', () => {
+  it('drops one that runs past the line', () => {
+    const found = pairs(one(
+      '- Verify if there are any specific libraries or frameworks we should use or avoid.',
+    ));
+    expect(found.filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
+  });
+
+  it('keeps one of exactly eight words, and drops the same shape at nine', () => {
+    expect(pairs(one('- Check the auth middleware cache inside queue workers.')))
+      .toContainEqual([1, 'Check the auth middleware cache inside queue workers']);
+    expect(pairs(one('- Check the auth middleware cache inside the queue workers.'))
+      .filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
+  });
+
+  it('stops where the sentence turns to the circumstances of the work', () => {
+    // `where`, `based` and `among` each turn an instruction into its own explanation.
+    expect(pairs(one('- Run user testing sessions where participants interact with the button.')))
+      .toContainEqual([1, 'Run user testing sessions']);
+  });
+});
+
+describe('a mark does not end mid-thought', () => {
+  it('drops a hanging auxiliary left behind by the shortening', () => {
+    // `Verify the filtering functionality is based on the restaurant's name` stops at `based`, which
+    // used to leave `…functionality is` — a sentence someone cut, not a phrase.
+    expect(pairs(one(
+      "- Verify the filtering functionality is based on the restaurant's name.",
+      { groundedFactValues: ['filtering functionality'] },
+    ))).toContainEqual([1, 'Verify the filtering functionality']);
+  });
+
+  it('drops a hanging conjunction', () => {
+    const found = pairs(one('- Note what options are present before and after pressing that button.'));
+    expect(found.filter(([emphasisClass]) => emphasisClass === 4).map(([, text]) => text))
+      .not.toContain('before and');
+  });
+
+  it('leaves a phrase that legitimately ends on a pronoun', () => {
+    // ⛔ `Without this` is complete. Trimming pronouns would turn it into `Without`, which is worse
+    // than the thing being fixed — so pronouns are deliberately not trimmed.
+    expect(pairs(one('- Without this, the import cannot be traced.')))
+      .toContainEqual([3, 'Without this']);
+  });
+});
+
+describe('the composer’s own scaffolding earns no instruction mark', () => {
+  // ⛔ The owner's rule: "aeva je nexpath contain add karu hoy aeva contain bold karva na" — what the
+  // body adds about ITSELF is not what the reader came to check. `cover` was in the verb list until
+  // 2026-09-28 and every mark it ever produced was this one template sentence.
+  const TEMPLATE = 'Cover Scope and non-goals for this request with concrete, source-backed specifics — state what is in and what is deliberately out.';
+
+  it('marks no instruction in the template sentence', () => {
+    expect(pairs(one(`- ${TEMPLATE}`)).filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
+  });
+
+  it('still marks a real instruction in the same section', () => {
+    // The guard is about that sentence, not about the section it sits in — a section carrying both
+    // must still show the developer's own work.
+    expect(pairs(one(`- ${TEMPLATE}\n- Identify the source of the requirements.`)))
+      .toContainEqual([1, 'Identify the source of the requirements']);
+  });
+});
+
+describe('the verbs a plan is written with', () => {
+  it('marks the instruction a planning line gives', () => {
+    expect(pairs(one('- Develop the initial mockups for the checkout page.')))
+      .toContainEqual([1, 'Develop the initial mockups']);
+  });
+
+  it('marks one written as two words', () => {
+    expect(pairs(one('- Set up checks that target the payment gateway client.')))
+      .toContainEqual([1, 'Set up checks']);
+  });
+
+  it('still refuses the composer’s own template line for the risk section', () => {
+    // ⛔ `name` opens this and is deliberately in no verb list: every mark it produced was this one
+    // sentence, in body after body — the same shape as `cover`, and the same reason.
+    expect(pairs(one('- Name risky or irreversible actions, ask for required confirmation, and include rollback steps.'))
+      .filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
   });
 });

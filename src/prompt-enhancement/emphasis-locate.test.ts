@@ -10,6 +10,7 @@ import {
   buildPromptEnhancementEmphasisPhrasesV1,
   PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_BODY_V1,
   PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1,
+  PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1,
   type PromptEnhancementEmphasisBodyInputV1,
 } from './emphasis-locate.js';
 
@@ -164,12 +165,39 @@ describe('the budget', () => {
   });
 
   it('marks a repeated phrase where it first appears, not again in a later section', () => {
+    // ⚠️ **This rule stands, and NOT for the reason it was written.** Built and measured on
+    // 2026-09-28: marking the phrase in every section that names it reads BETTER — sections carrying
+    // a mark go 65 → 88 of 129, blank sections in a popup fall from 37 % to 27 % at the median, and
+    // the densest section moves only 48 % → 51 %.
+    //
+    // ⛔ It cannot be DRAWN. Both surfaces place a phrase by finding its first eligible occurrence in
+    // the buffer, so two identical phrases take the same one: **40 of 183 marks landed on a span
+    // already taken** — nothing on screen for the reader, and duplicate ranges handed to the panel.
+    // The mark would exist in the data and nowhere a reader could see it.
+    //
+    // Lifting it needs the SECTION to travel with the phrase into both surfaces, which changes the
+    // shape held in the store. That is a separate piece of work, and not one to begin by loosening a
+    // rule whose replacement cannot be rendered.
     const sections = [
       { sectionKind: 'a', bodyText: 'Uses alpha-one.', groundedFactValues: ['alpha-one'] },
       { sectionKind: 'b', bodyText: 'Also uses alpha-one.', groundedFactValues: ['alpha-one'] },
     ];
     expect(build({ originalPromptText: 'do the work', sections })
       .filter((phrase) => phrase.text === 'alpha-one')).toHaveLength(1);
+  });
+
+  it('still marks it ONCE inside one section, however often the words appear there', () => {
+    // ⛔ The half that did not change, and the one a reader actually feels: nothing repeats inside the
+    // block they are reading. Across paragraphs is anchoring; within a paragraph would be noise.
+    const found = build({
+      originalPromptText: 'do the work',
+      sections: [{
+        sectionKind: 'a',
+        bodyText: 'Uses alpha-one. Still uses alpha-one. Always uses alpha-one.',
+        groundedFactValues: ['alpha-one'],
+      }],
+    });
+    expect(found.filter((phrase) => phrase.text === 'alpha-one')).toHaveLength(1);
   });
 
   it('spends on the instruction before the developer’s own term', () => {
@@ -327,5 +355,52 @@ describe('which section a phrase is charged to', () => {
     });
     expect(found.map((phrase) => phrase.text)).toContain('delivery time estimate');
     expect(found).toHaveLength(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 + 1);
+  });
+});
+
+describe('how much of one section may be drawn heavy', () => {
+  // The two caps above count MARKS. This one measures how much of the reader's paragraph is bold,
+  // which is what actually decides whether emphasis still reads as emphasis.
+  // The same two boundaries, in a short paragraph and in a longer one. Together they are 89
+  // characters: half of the first section and under a third of the second.
+  const TWO_LIMITS = 'Do not modify the shared billing rate limiter. Never restart the nightly reconciliation run.';
+
+  it('refuses the mark that would take a section past its share', () => {
+    const found = build({
+      originalPromptText: 'ship it',
+      sections: [{
+        sectionKind: 'context_and_constraints',
+        bodyText: `${TWO_LIMITS} These two systems are connected through the invoicing job and the checkout service.`,
+      }],
+    });
+    expect(found.map((phrase) => phrase.text)).toEqual(['Do not modify the shared billing rate limiter']);
+  });
+
+  it('keeps both once the paragraph is long enough to carry them', () => {
+    const found = build({
+      originalPromptText: 'ship it',
+      sections: [{
+        sectionKind: 'context_and_constraints',
+        bodyText: `${TWO_LIMITS} These two systems are connected through the invoicing job and the checkout service, and a change in either one reaches the other within a single billing cycle, so both need the same care.`,
+      }],
+    });
+    expect(found.map((phrase) => phrase.text)).toEqual([
+      'Do not modify the shared billing rate limiter',
+      'Never restart the nightly reconciliation run',
+    ]);
+  });
+
+  it('leaves a short section to the mark COUNT caps, where a share says nothing useful', () => {
+    // `Limit applies to POST /api/upload only.` is a line, and two marks in it are the point rather
+    // than a wall. A flat ceiling refused the standard's own worked example.
+    const found = one('Limit applies to POST /api/upload only.', { groundedFactValues: ['POST /api/upload'] });
+    expect(found.map((phrase) => phrase.text)).toContain('POST /api/upload');
+    expect(found.map((phrase) => phrase.text)).toContain('only');
+  });
+
+  it('spends the share on what the reader most needs, because the order decides', () => {
+    // When a section fills, the priority order says what survives: the safety line, then the
+    // instruction, then the developer's own term — never whichever happened to come first in the text.
+    expect(PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1).toBe(50);
   });
 });
