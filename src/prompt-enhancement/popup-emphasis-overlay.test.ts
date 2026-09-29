@@ -366,3 +366,81 @@ describe('which rows the contrast leaves at full weight', () => {
     expect(exempt()[rowFor('Keep the payment gateway client')]).toBe(false);
   });
 });
+
+/**
+ * Which SECTION a mark lands in (2026-09-29).
+ *
+ * The cap spends four marks per section and decides which section each phrase belongs to. A surface
+ * that then searches the whole body for the phrase's first occurrence quietly overrules that: the
+ * budget the reader sees is not the budget the cap computed, and two phrases can land on overlapping
+ * stretches the cap never compared — which {@link merged} then draws as one long heavy run.
+ *
+ * So the phrase carries its section. Both halves are tested: it is used when it is there, and its
+ * absence still places the mark rather than losing it.
+ */
+describe('a mark lands in the section it was charged to', () => {
+  /** The SAME words in two markable sections — the case where placement can go wrong. */
+  const REPEATED = 'the retry queue';
+  const TWO_SECTIONS: readonly PromptEnhancementEmphasisOverlaySectionV1[] = [
+    { title: 'Context and constraints', bodyText: `- Leave ${REPEATED} alone for now.`, sectionKind: 'context_and_constraints' },
+    { title: 'How to verify', bodyText: `- Drain ${REPEATED} and count what is left.`, sectionKind: 'verification_or_test_plan' },
+  ];
+  const TWO_TEXT = [
+    `${TWO_SECTIONS[0]!.title}:`,
+    TWO_SECTIONS[0]!.bodyText,
+    '',
+    `${TWO_SECTIONS[1]!.title}:`,
+    TWO_SECTIONS[1]!.bodyText,
+  ].join('\n');
+
+  const rowsFor = (phrases: readonly PromptEnhancementEmphasisPhraseV1[]) =>
+    buildPromptEnhancementEmphasisSpansV1({
+      text: TWO_TEXT,
+      sections: TWO_SECTIONS,
+      phrases,
+      fieldWidth: 100,
+      windowStart: 0,
+      windowRows: TWO_TEXT.split('\n').length,
+      markerAbove: false,
+      markerBelow: false,
+    });
+
+  /** Which display rows carry a mark. Row 1 is the first section's line, row 4 the second's. */
+  const markedRows = (rows: readonly (readonly { startColumn: number }[])[]): number[] =>
+    rows.flatMap((spans, index) => (spans.length > 0 ? [index] : []));
+
+  it('places the mark in the later section when that is the one it was charged to', () => {
+    const rows = rowsFor([{ text: REPEATED, emphasisClass: 2, source: 'floor', sectionIndex: 1 }]);
+    expect(markedRows(rows)).toEqual([4]);
+  });
+
+  it('places it in the first section when THAT is the one it was charged to', () => {
+    // The other direction, so the test above cannot pass by the mark simply moving.
+    const rows = rowsFor([{ text: REPEATED, emphasisClass: 2, source: 'floor', sectionIndex: 0 }]);
+    expect(markedRows(rows)).toEqual([1]);
+  });
+
+  it('still places it when no section travelled with it — an old row, or the model tier', () => {
+    // ⛔ Backward compatibility is the load-bearing half: a stored row written before the field existed
+    // must draw exactly as it always did, which is the first occurrence anywhere in the body.
+    const rows = rowsFor([{ text: REPEATED, emphasisClass: 2, source: 'floor' }]);
+    expect(markedRows(rows)).toEqual([1]);
+  });
+
+  it('falls back to the whole body when the phrase is not in its own section', () => {
+    // The developer edited that section, or the composer never put those words there. A mark placed a
+    // little wrong is better than a mark the reader never gets.
+    const rows = rowsFor([{ text: 'Drain', emphasisClass: 1, source: 'floor', sectionIndex: 0 }]);
+    expect(markedRows(rows)).toEqual([4]);
+  });
+
+  it('marks each section once when both sections were charged for the same words', () => {
+    // What the seam was costing: two phrases charged to two sections were both landing in the first,
+    // where the overlay's merge drew them as one run and the second section drew nothing.
+    const rows = rowsFor([
+      { text: REPEATED, emphasisClass: 2, source: 'floor', sectionIndex: 0 },
+      { text: REPEATED, emphasisClass: 2, source: 'floor', sectionIndex: 1 },
+    ]);
+    expect(markedRows(rows)).toEqual([1, 4]);
+  });
+});

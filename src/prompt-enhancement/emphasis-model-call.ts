@@ -273,7 +273,20 @@ export function mergePromptEnhancementEmphasisPhrasesV1(input: {
     return at < 0 ? input.sections.length : at;
   };
   // What the floor already spent, so the model competes for the remainder and nothing else.
-  const spent = input.floor.map((phrase) => ({ phrase, sectionIndex: sectionOf(phrase.text) }));
+  //
+  // ⚠️ **The floor's own attribution is used when it has one.** Re-deriving it by searching the body
+  // finds the FIRST section containing those words, which is not necessarily the section the cap
+  // charged — the same mistake the surfaces were making until the section began travelling with the
+  // phrase (2026-09-29). With two sections holding the same words, a re-derived attribution puts both
+  // of the floor's marks in the first of them and then reports that section as full, so the model is
+  // refused a slot the floor never actually spent there.
+  //
+  // Falls back to the search for a phrase that carries no section: an older stored row, or a caller
+  // that built the list itself.
+  const spent = input.floor.map((phrase) => ({
+    phrase,
+    sectionIndex: phrase.sectionIndex ?? sectionOf(phrase.text),
+  }));
   const offered = input.model
     .filter((text) => !input.floor.some((phrase) => phrase.text.toLowerCase() === text.toLowerCase()))
     .map((text) => ({

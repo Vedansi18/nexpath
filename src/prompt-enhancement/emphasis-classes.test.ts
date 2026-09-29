@@ -292,7 +292,14 @@ describe('a condition qualifies something, so it is not marked alone', () => {
   });
 
   it('marks it once the same section carries one of the developer’s own words', () => {
-    const found = one('Rebuild the search index after the import completes.', { groundedFactValues: ['the search index'] });
+    // ⏪ The line was `Rebuild the search index after the import completes.` until 2026-09-29, when
+    // the inverted opener rule made `Rebuild the search index` an instruction in its own right — and
+    // the developer's term then sat wholly INSIDE it, where the nesting rule drops it as one mark for
+    // one span. That is the designed behaviour, so the fixture had to stop asking the question through
+    // a line that now answers a different one. Stated as prose, the term is the section's only anchor
+    // again, which is what this test is about. (The same correction is recorded at `The rollout
+    // happens once the backup finishes.` above, for the same reason.)
+    const found = one('The search index is stale after the import completes.', { groundedFactValues: ['the search index'] });
     expect(pairs(found)).toContainEqual([2, 'the search index']);
     expect(pairs(found)).toContainEqual([4, 'after the import completes']);
   });
@@ -303,10 +310,15 @@ describe('a condition qualifies something, so it is not marked alone', () => {
     const found = classify({
       originalPromptText: 'do the work',
       sections: [
-        { sectionKind: 'context_and_constraints', sectionText: 'Ship it once the backup finishes.' },
+        // ⏪ Was `Ship it once the backup finishes.`, which the inverted opener rule now reads as the
+        // instruction it is — so the section was no longer BARE and had nothing left to prove. Stated
+        // as prose, it offers a condition and nothing else, which is the case this test needs.
+        { sectionKind: 'context_and_constraints', sectionText: 'The rollout happens once the backup finishes.' },
         {
+          // ⏪ Was `Rebuild the search index once the backup finishes.` — see the test above: the term
+          // now sits inside an instruction, and one span earns one mark.
           sectionKind: 'verification_or_test_plan',
-          sectionText: 'Rebuild the search index once the backup finishes.',
+          sectionText: 'The search index is rebuilt once the backup finishes.',
           groundedFactValues: ['the search index'],
         },
       ],
@@ -510,10 +522,18 @@ describe('a composed line holds several instructions', () => {
   });
 
   it('still refuses the sentence whose verb does not open it', () => {
-    // Splitting must not turn every verb into an instruction — `deploy` has `We will` in front of it
-    // in its own sentence, and that is the body describing work, not instructing it.
+    // Splitting must not turn every verb into an instruction — a verb with a SUBJECT in front of it is
+    // the body describing work, not instructing it.
+    //
+    // ⏪ The subject here was `We will` until 2026-09-29, and that was the wrong example for this
+    // ruling. `We will deploy it` is the composer writing as the agent, exactly like the `I'll run the
+    // project's test suite` the standard's own worked example marks — and refusing it did not leave the
+    // line plain. MEASURED on a recorded body, without the wrapper peel the mark became
+    // `We'll judge it on our ability`: the wrapper itself in bold, which is worse than either answer.
+    // So the first-person plural is peeled like the singular, and the ruling keeps the example it was
+    // always about — a real subject, which no peel touches.
     expect(pairs(one(
-      '- We will deploy it later. Check the auth middleware for the null error.',
+      '- The release team will deploy it later. Check the auth middleware for the null error.',
       { groundedFactValues: ['auth middleware'] },
     )).filter(([, text]) => text.toLowerCase().includes('deploy'))).toEqual([]);
   });
@@ -666,9 +686,141 @@ describe('the verbs a plan is written with', () => {
   });
 
   it('still refuses the composer’s own template line for the risk section', () => {
-    // ⛔ `name` opens this and is deliberately in no verb list: every mark it produced was this one
-    // sentence, in body after body — the same shape as `cover`, and the same reason.
-    expect(pairs(one('- Name risky or irreversible actions, ask for required confirmation, and include rollback steps.'))
+    // ⛔ Every mark this sentence produced was this one sentence, in body after body — nexpath's own
+    // suggestion drawn louder than anything the developer asked for.
+    //
+    // ⏪ It used to be refused by keeping `name` out of every verb list, which cost that verb
+    // everywhere else and only worked while the rule was "a verb from a list". Since 2026-09-29 the
+    // LINE is refused by name — see `composer-own-lines.ts`, whose own test reads the composer's source
+    // so the list cannot go stale — and the paraphrase this test used (`include rollback steps`) no
+    // longer stands in for the real thing. The composer's actual line is asserted instead, which is
+    // what the ruling was always about.
+    expect(pairs(one('- Name risky or irreversible actions, ask for required confirmation, and include rollback or recovery checks.'))
       .filter(([emphasisClass]) => emphasisClass === 1)).toEqual([]);
+  });
+});
+
+/**
+ * The instruction rule, inverted (2026-09-29).
+ *
+ * An instruction is no longer "a verb from an approved list" but "a clause whose opener is not one of
+ * the words that plainly do not instruct". Every test here shows BOTH halves, because a rule that only
+ * ever says yes would double the marks and halve their worth.
+ */
+describe('a clause opens an instruction unless its opener says otherwise', () => {
+  it('marks an instruction whose verb no list holds', () => {
+    // The three the reported popups were missing. None of these verbs is in any shipped list, and
+    // counting the corpus said no list could ever hold them: 71 % of the misses appeared exactly once.
+    expect(pairs(one('- Integrate the Stripe API for card payments.'))).toContainEqual([1, 'Integrate the Stripe API']);
+    expect(pairs(one('- Trigger the confirmation message on success.'))).toContainEqual([1, 'Trigger the confirmation message on success']);
+    expect(pairs(one('- Clear the cart afterwards.'))).toContainEqual([1, 'Clear the cart afterwards']);
+  });
+
+  it('refuses a clause that opens on a subject', () => {
+    expect(pairs(one('- The checkout page loads in two seconds.')).filter(([klass]) => klass === 1)).toEqual([]);
+    expect(pairs(one('- Every order reaches the database.')).filter(([klass]) => klass === 1)).toEqual([]);
+  });
+
+  it('refuses an opener carrying a third-person -s, and the subject in front of one', () => {
+    // `Uses alpha-one` — the opener itself. An English imperative never ends in -s.
+    expect(pairs(one('- Uses the upload endpoint heavily.')).filter(([klass]) => klass === 1)).toEqual([]);
+    // `Limit applies to POST /api/upload only` — the standard's own worked example. `Limit` is a
+    // perfectly good imperative verb as a word; `applies` is what says it is not one here.
+    expect(pairs(one('- Limit applies to the upload endpoint only.')).filter(([klass]) => klass === 1)).toEqual([]);
+  });
+
+  it('lets a real imperative keep its -ss and -us ending', () => {
+    // The exemption that makes the rule above safe to ship.
+    expect(pairs(one('- Process the retry queue before the deploy.'))).toContainEqual([1, 'Process the retry queue']);
+    expect(pairs(one('- Focus on the upload endpoint.'))).toContainEqual([1, 'Focus on the upload endpoint']);
+  });
+
+  it('refuses a gerund or a participle, which an imperative can never be', () => {
+    expect(pairs(one('- Adding test cases to the suite takes a while.')).filter(([klass]) => klass === 1)).toEqual([]);
+    expect(pairs(one('- Limited by what the upload endpoint allows.')).filter(([klass]) => klass === 1)).toEqual([]);
+    // …and the handful of real imperatives that end in -eed or -ead are exempt.
+    expect(pairs(one('- Proceed with the migration.'))).toContainEqual([1, 'Proceed with the migration']);
+  });
+
+  it('refuses a clause whose object is a sentence rather than a thing', () => {
+    // `I'll know it's done when …` — measured on a reported popup, where it drew `know it's done`.
+    expect(pairs(one("- I'll know it's done when the bar appears.")).filter(([klass]) => klass === 1)).toEqual([]);
+  });
+
+  it('refuses a subject followed by a modal', () => {
+    expect(pairs(one('- Task 2 must be wrapped up before Task 3 can begin.')).filter(([klass]) => klass === 1)).toEqual([]);
+  });
+
+  it('keeps an instruction whose OBJECT carries the modal', () => {
+    // The relative-pronoun stop. Without it the modal inside the object was read as the modal after a
+    // subject, and this mark was refused.
+    expect(pairs(one('- Enumerate the checks that must pass before release.')))
+      .toContainEqual([1, 'Enumerate the checks']);
+  });
+
+  it('admits a listed verb even where a guard above would refuse it', () => {
+    // 🔑 The superset rule the whole change rests on: the test is `a known verb OR not a known
+    // non-instruction`, so no mark the approved lists produced can stop working. `Check` is listed, and
+    // `results` would trip the -s guard if it were ever asked.
+    expect(pairs(one('- Check results against the captured baseline.')))
+      .toContainEqual([1, 'Check results against the captured baseline']);
+  });
+});
+
+describe('what a clause is wearing comes off before its verb is looked for', () => {
+  it('peels several wrappers at once', () => {
+    // Read one head at a time, `first,` leaves `I'll need to check…` and `i'll` leaves `need to
+    // check…` — words in front of the verb both times, and the clause refused with a good verb in it.
+    expect(pairs(one("- First, I'll need to check the auth middleware.")))
+      .toContainEqual([1, 'check the auth middleware']);
+  });
+
+  it('peels a modal run left standing behind a clause head', () => {
+    expect(pairs(one("- If any APIs are needed, I'll need to gather that info too.")))
+      .toContainEqual([1, 'gather that info too']);
+  });
+
+  it('peels a wrapper written with a typographic apostrophe', () => {
+    // Measured on a recorded body: with U+2019 the wrapper stayed on and the mark was
+    // `Let’s break this epic into clear` — a wrapper, a verb and a cut object, all in bold.
+    const found = pairs(one('- Let’s break this epic into clear deliverables.'));
+    expect(found).toContainEqual([1, 'break this epic into clear deliverables']);
+    expect(found.some(([, text]) => text.toLowerCase().includes('let'))).toBe(false);
+  });
+
+  it('does not peel a word that is doing the negating', () => {
+    // `I cannot check the file` starts with `i can`. Peeling it would leave `not check the file`.
+    expect(pairs(one('- I cannot check the auth middleware yet.')).filter(([klass]) => klass === 1)).toEqual([]);
+  });
+});
+
+describe('a mark does not end on a promise it cannot keep', () => {
+  it('trims a relational participle', () => {
+    expect(pairs(one('- Review the privacy policies related to stored sessions.')))
+      .toContainEqual([1, 'Review the privacy policies']);
+  });
+
+  it('trims a participle left holding a determiner with no noun', () => {
+    expect(pairs(one('- Check the results against the captured, then report done.')))
+      .toContainEqual([1, 'Check the results']);
+  });
+
+  it('leaves a NOUN that happens to end in -ing alone', () => {
+    // ⛔ The reason the wider rule was withdrawn, pinned so it cannot come back. A trim of
+    // `<preposition> <word ending -ing>` was built to mend `ensure stakeholder satisfaction by
+    // confirming`, and on the owner's own reported popup it turned `sort them by rating` into
+    // `sort them` — `rating` is a noun. `setting`, `warning`, `pricing`, `listing` and `training` are
+    // all the same trap, which is why only `-ed`, and only after a determiner, is trimmed.
+    expect(pairs(one('- The rating or delivery time decides the order.', { groundedFactValues: ['sort them by rating'] })))
+      .not.toContainEqual([2, 'sort them']);
+    expect(pairs(one('- Sort them by rating, then show the list.')))
+      .toContainEqual([1, 'Sort them by rating']);
+  });
+
+  it('leaves a phrasal verb alone', () => {
+    // ⛔ `about`, `like`, `over`, `through` and `under` were trimmed for one measurement and taken back
+    // out: `Only change what we talked about` became `…we talked`, and this became `…success looks`.
+    expect(pairs(one('- Define what success looks like for this change.')))
+      .toContainEqual([1, 'Define what success looks like']);
   });
 });

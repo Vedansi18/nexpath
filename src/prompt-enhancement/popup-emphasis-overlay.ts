@@ -78,16 +78,38 @@ function logicalLineRanges(text: string): readonly OffsetRange[] {
 }
 
 /**
+ * The section map and the line ranges, read once per call.
+ *
+ * ⚠️ **Built once on purpose.** `buildPromptEnhancementEmphasisSpansV1` runs on EVERY frame of the
+ * popup's render loop, and it needs two of the three answers below — where a mark may not start, and
+ * where each section's body sits. Asking for them separately built the map and re-split the text twice
+ * a frame, which is work the reader never sees. It also risked the two answers being derived from two
+ * different maps, which is the drift the shared definition exists to prevent.
+ */
+interface BodyLayout {
+  readonly map: ReturnType<typeof buildPromptEnhancementSectionMapV1>;
+  readonly lines: readonly OffsetRange[];
+  readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
+}
+
+function bodyLayout(input: {
+  readonly text: string;
+  readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
+}): BodyLayout {
+  return {
+    map: buildPromptEnhancementSectionMapV1(input.text, input.sections),
+    lines: logicalLineRanges(input.text),
+    sections: input.sections,
+  };
+}
+
+/**
  * The stretches of the buffer no mark may start in: every found title line, every line of the two
  * sections the standard never marks, and every line of the block the developer's applied details
  * were merged into.
  */
-function ineligibleRanges(input: {
-  readonly text: string;
-  readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
-}): readonly OffsetRange[] {
-  const map = buildPromptEnhancementSectionMapV1(input.text, input.sections);
-  const lines = logicalLineRanges(input.text);
+function ineligibleRanges(input: BodyLayout): readonly OffsetRange[] {
+  const { map, lines } = input;
   const out: OffsetRange[] = [];
   for (const entry of map.entries) {
     const title = lines[entry.titleLine];
@@ -108,23 +130,63 @@ function ineligibleRanges(input: {
 }
 
 /**
+ * Where each input section's body sits in the composed text, by input index.
+ *
+ * Built from the same section map `ineligibleRanges` uses, so the two cannot disagree about where a
+ * section is. A section the map could not find — the developer edited its body in the popup — is
+ * simply absent, and a phrase charged to it falls back to the whole-body search.
+ */
+function sectionBodyRanges(input: BodyLayout): ReadonlyMap<number, OffsetRange> {
+  const { map, lines } = input;
+  const out = new Map<number, OffsetRange>();
+  for (const entry of map.entries) {
+    if (typeof entry.source !== 'number') continue;
+    // The body is everything after the title line, up to the line before the next section's title.
+    const first = lines[entry.titleLine + 1];
+    const last = lines[entry.endLine - 1];
+    if (first && last && last.end >= first.start) out.set(entry.source, { start: first.start, end: last.end });
+  }
+  return out;
+}
+
+/**
  * The first occurrence of a phrase that may actually be marked: matched case-insensitively, the
  * way the phrases were located in the first place, and skipping any that begins inside one of the
  * stretches above.
+ *
+ * 🔑 **`within` is the section the cap charged the phrase to.** Searching the whole body instead put
+ * marks in sections that never asked for them: the cap spends four per SECTION and decided which one
+ * each phrase belongs to, and a surface that re-finds the phrase by its own first-occurrence rule
+ * quietly overrules that. Measured on a reported popup, two terms landed on overlapping stretches the
+ * cap had never compared and {@link merged} drew the pair as one long heavy run.
+ *
+ * ⚠️ When `within` is absent — an old stored row, or a phrase from the optional model tier — the
+ * search is the whole body, exactly as before. And when the phrase is not inside its own section (the
+ * developer edited that section's text), the whole body is searched rather than the phrase being lost:
+ * a mark placed a little wrong is better than a mark the reader never gets.
  */
 function firstEligibleOccurrence(
   text: string,
   phrase: string,
   ineligible: readonly OffsetRange[],
+  within?: OffsetRange,
 ): OffsetRange | undefined {
   if (phrase.length === 0) return undefined;
   const haystack = text.toLowerCase();
   const needle = phrase.toLowerCase();
-  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
-    if (ineligible.some((range) => at >= range.start && at < range.end)) continue;
-    return { start: at, end: at + phrase.length };
+  const scan = (from: number, until: number): OffsetRange | undefined => {
+    for (let at = haystack.indexOf(needle, from); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+      if (at + needle.length > until) return undefined;
+      if (ineligible.some((range) => at >= range.start && at < range.end)) continue;
+      return { start: at, end: at + phrase.length };
+    }
+    return undefined;
+  };
+  if (within !== undefined) {
+    const inside = scan(within.start, within.end);
+    if (inside !== undefined) return inside;
   }
-  return undefined;
+  return scan(0, text.length);
 }
 
 /**
@@ -171,12 +233,15 @@ function merged(spans: readonly PromptEnhancementEmphasisSpanV1[]): PromptEnhanc
 export function locatePromptEnhancementEmphasisOffsetsV1(input: {
   readonly text: string;
   readonly sections: readonly PromptEnhancementEmphasisOverlaySectionV1[];
-  readonly phrases: readonly { readonly text: string }[];
+  readonly phrases: readonly { readonly text: string; readonly sectionIndex?: number }[];
 }): readonly { start: number; end: number }[] {
-  const ineligible = ineligibleRanges(input);
+  const layout = bodyLayout(input);
+  const ineligible = ineligibleRanges(layout);
+  const bodies = sectionBodyRanges(layout);
   const out: { start: number; end: number }[] = [];
   for (const phrase of input.phrases) {
-    const at = firstEligibleOccurrence(input.text, phrase.text, ineligible);
+    const own = phrase.sectionIndex === undefined ? undefined : bodies.get(phrase.sectionIndex);
+    const at = firstEligibleOccurrence(input.text, phrase.text, ineligible, own);
     if (at !== undefined) out.push({ start: at.start, end: at.end });
   }
   return out;
@@ -279,9 +344,12 @@ export function buildPromptEnhancementEmphasisSpansV1(
   const rows: PromptEnhancementEmphasisSpanV1[][] = Array.from({ length: shownRows }, () => []);
   if (input.phrases.length === 0 || shownRows === 0) return rows;
 
-  const ineligible = ineligibleRanges(input);
+  const layout = bodyLayout(input);
+  const ineligible = ineligibleRanges(layout);
+  const bodies = sectionBodyRanges(layout);
   for (const phrase of input.phrases) {
-    const painted = firstEligibleOccurrence(input.text, phrase.text, ineligible);
+    const own = phrase.sectionIndex === undefined ? undefined : bodies.get(phrase.sectionIndex);
+    const painted = firstEligibleOccurrence(input.text, phrase.text, ineligible, own);
     if (painted === undefined) continue;
     // A painted range that crosses a wrap becomes one sub-range per row it touches — arithmetic
     // off the map's offsets, never a guess about where the wrap fell.

@@ -179,7 +179,16 @@ export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
       locatePromptEnhancementEmphasisOffsetsV1({
         text,
         sections,
-        phrases: phrases.map((phrase) => ({ text: phrase })),
+        // The section each phrase was charged to travels beside the list, index for index — see
+        // `PePanelViewV1.emphasisPhraseSections`. Used only when the two line up: a worker older than
+        // that field sends no sections at all, and a misaligned pair is worse than none, so both cases
+        // fall back to placing each phrase by its first eligible occurrence.
+        phrases: phrases.map((phrase, index) => {
+          const sectionIndex = view.emphasisPhraseSections?.length === phrases.length
+            ? view.emphasisPhraseSections[index]
+            : undefined;
+          return sectionIndex === undefined ? { text: phrase } : { text: phrase, sectionIndex };
+        }),
       });
   const bodyRow: SurfaceRow = {
     kind: 'field',

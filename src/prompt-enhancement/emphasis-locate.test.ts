@@ -133,11 +133,32 @@ describe('finding a phrase in the body', () => {
     expect(found.some((phrase) => phrase.text.includes('/api/upload'))).toBe(false);
   });
 
-  it('keeps no positions — only the phrase, its class and where it came from', () => {
+  it('keeps no positions — only the phrase, its class, where it came from and which section', () => {
     const found = one('Limit applies to POST /api/upload only.', { groundedFactValues: ['POST /api/upload'] });
     expect(found.length).toBeGreaterThan(0);
-    for (const phrase of found) expect(Object.keys(phrase).sort()).toEqual(['emphasisClass', 'source', 'text']);
+    for (const phrase of found) {
+      expect(Object.keys(phrase).sort()).toEqual(['emphasisClass', 'sectionIndex', 'source', 'text']);
+    }
     expect(found.every((phrase) => phrase.source === 'floor')).toBe(true);
+  });
+
+  it('keeps no OFFSET, which is the thing the rule above is about', () => {
+    // ⚠️ The ruling is about offsets, not about the key count, so it is asserted as the ruling rather
+    // than as a list. An offset is a lie the moment the developer edits the body — the phrase is
+    // re-located at render, which is why `text` carries the wording and nothing carries a position.
+    //
+    // ⏪ `sectionIndex` joined the shape on 2026-09-29 and is NOT an offset: it names a section, and a
+    // section is re-found by its title line. Where that fails — the developer edited that section — the
+    // surfaces fall back to searching the whole body, so a stale section costs placement accuracy and
+    // never a lost mark. It is there because the cap spends per SECTION and the surfaces were placing
+    // marks in sections the cap never charged, which drew two terms as one heavy run.
+    const found = one('Limit applies to POST /api/upload only.', { groundedFactValues: ['POST /api/upload'] });
+    expect(found.length).toBeGreaterThan(0);
+    for (const phrase of found) {
+      for (const positional of ['at', 'start', 'end', 'offset', 'startColumn', 'endColumn']) {
+        expect(phrase).not.toHaveProperty(positional);
+      }
+    }
   });
 });
 
@@ -402,5 +423,69 @@ describe('how much of one section may be drawn heavy', () => {
     // When a section fills, the priority order says what survives: the safety line, then the
     // instruction, then the developer's own term — never whichever happened to come first in the text.
     expect(PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1).toBe(50);
+  });
+});
+
+/**
+ * One stretch of text, one mark (2026-09-29).
+ *
+ * The collapse used to fire only when two spans matched EXACTLY — same start, same length. Two other
+ * shapes got through it, and both were measured on real bodies:
+ *
+ *   PARTIAL   `account if the email` [123,143) and `email matches` [138,151) — they share `email`, so
+ *             between them they cover 123 to 151 with a seam in the middle, and the overlay's range
+ *             merge drew the pair as one heavy run.
+ *   NESTED, SAME CLASS
+ *             `null error after login`, `null error` and `after login` — three of one section's four
+ *             marks spent on one stretch. That body was the densest in the corpus.
+ *
+ * ⚠️ Nested across DIFFERENT classes stays, and the worked example above is the test for it: `auth`
+ * inside `Do not modify the auth middleware` is the developer's word and a boundary, and the standard
+ * shows both.
+ */
+describe('one stretch of text earns one mark', () => {
+  it('collapses two terms that overlap without either containing the other', () => {
+    const found = one('The null error after login shows up on the checkout page.', {
+      groundedFactValues: ['the null error', 'error after login'],
+    });
+    // ⚠️ Compared lower-cased: a mark carries the BODY's casing, so `the null error` comes back as
+    // `The null error`. A case-sensitive filter here returned an empty list and read as a collapse.
+    const texts = found.map((phrase) => phrase.text.toLowerCase());
+    // Exactly one of the pair survives; which one is the priority order's business, not this test's.
+    expect(texts.filter((text) => text === 'the null error' || text === 'error after login')).toHaveLength(1);
+  });
+
+  it('collapses a term nested inside another term of the SAME class, keeping the fuller reading', () => {
+    // ⚠️ The grounded values are given SHORTEST FIRST on purpose. Longest-first, the term merge's own
+    // nesting guard (`emphasis-sources.ts`) refuses the pieces before they ever reach this layer — so a
+    // longest-first fixture passed with this rule switched off, and proved nothing about it. Shortest
+    // first is the order that actually happens across the five merged sources, and it is the order that
+    // used to leave the FRAGMENT standing.
+    const found = one('The null error after login shows up on the checkout page.', {
+      groundedFactValues: ['null error', 'after login', 'null error after login'],
+    });
+    const texts = found.map((phrase) => phrase.text.toLowerCase());
+    expect(texts).toContain('null error after login');
+    expect(texts).not.toContain('null error');
+    expect(texts).not.toContain('after login');
+  });
+
+  it('keeps a term nested inside a BOUNDARY, which is two marks the standard asks for', () => {
+    // ⛔ The direction that must not regress. Collapsing this would silently drop a range the worked
+    // example requires, which is what a first draft of the nesting rule did.
+    const found = one('Do not modify the auth middleware.', { groundedFactValues: ['auth middleware'] });
+    const pairs = found.map((phrase) => [phrase.emphasisClass, phrase.text] as const);
+    expect(pairs).toContainEqual([2, 'auth middleware']);
+    expect(pairs).toContainEqual([3, 'Do not modify the auth middleware']);
+  });
+
+  it('leaves two marks on two separate stretches alone', () => {
+    // So the rules above cannot pass by collapsing everything.
+    const found = one('The retry queue is drained and the audit log is kept.', {
+      groundedFactValues: ['the retry queue', 'the audit log'],
+    });
+    const texts = found.map((phrase) => phrase.text.toLowerCase());
+    expect(texts).toContain('the retry queue');
+    expect(texts).toContain('the audit log');
   });
 });

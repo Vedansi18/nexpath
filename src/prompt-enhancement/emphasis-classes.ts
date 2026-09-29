@@ -16,6 +16,7 @@
 import { EXECUTION_VERB, ALWAYS_ESCALATE_PATTERN } from './safety-sendability.js';
 import { SECRET_IN_TEXT } from '../classifier/mistake-categories.js';
 import { collectPromptEnhancementEmphasisUserTermsV1 } from './emphasis-sources.js';
+import { isPromptEnhancementComposerOwnLineV1 } from './composer-own-lines.js';
 
 /**
  * 1 action · 2 the developer's own term · 3 a boundary · 4 a condition · 5 a safety line.
@@ -97,13 +98,31 @@ export const NEVER_MARKED_SECTION_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The clause heads a class-1 verb must follow, in full.
+ * The openers a clause may start after when one appears in the MIDDLE of a line.
  *
- * A verb anywhere else — mid-sentence, inside the developer's restated prompt, inside a sentence
- * the pipeline inserted — is not an instruction to the agent; it is the body talking about
- * something. The first-person heads are here because the composer writes as the agent.
+ * A verb anywhere else — mid-sentence, inside the developer's restated prompt, inside a sentence the
+ * pipeline inserted — is not an instruction to the agent; it is the body talking about something. The
+ * first-person heads are here because the composer writes as the agent.
+ *
+ * ⚠️ **Deliberately a SUBSET of {@link CLASS_1_WRAPPERS}, and the two jobs are different.** That list is
+ * everything a clause can wear, peeled off the FRONT; this one is where a NEW clause can begin after a
+ * comma. `emphasis-classes-list-agreement.test.ts` pins the containment so the two cannot contradict
+ * each other.
+ *
+ * ⏪ **Merging them was built on 2026-09-29 and withdrawn on measurement.** The gap was real: on a
+ * reported popup, `If anything goes wrong in this sequence, we gotta consider it a fail.` drew nothing,
+ * because `we gotta` is a wrapper and was not a head. Merging finds it — and costs far more than it
+ * names, because the per-section cap is already binding:
+ *
+ *   merged, all 76 wrappers   class 1  118 → 144  ·  class 4  33 → 25  ·  class 3  18 → 15  (222 marks)
+ *   narrowed to 22 heads      class 1  118 → 130  ·  conditions and boundaries still spent  (216 marks)
+ *
+ * Eleven of the reader's "what must not happen" and "what comes first" marks buy twenty-six more
+ * actions. That is a CAP-PRIORITY ruling, not a bug fix — the cap spends 5→1→2→3→4 and this decides how
+ * much of a section class 1 may take — and it belongs to the owner. Recorded in the plan's §5L for that
+ * decision rather than taken here.
  */
-const CLASS_1_CLAUSE_HEADS: readonly string[] = [
+const CLASS_1_MIDSENTENCE_HEADS: readonly string[] = [
   'you must',
   'i need you to',
   'make sure to',
@@ -123,6 +142,92 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
   'finally,',
   'lastly,',
 ];
+
+/**
+ * What a clause can WEAR in front of its verb, peeled off before the verb is looked for.
+ *
+ * {@link CLASS_1_CLAUSE_HEADS} finds one head at a time, anywhere in the line. That is the right
+ * mechanism for a head in the MIDDLE of a sentence, and the wrong one for what the composer actually
+ * writes, which is several of these stacked: `First, I'll need to check the logs`. Read head by head,
+ * `first,` leaves `I'll need to check…` — words in front of the verb — and `i'll` leaves
+ * `need to check…`, words in front of the verb again. The clause is refused with a good verb in it.
+ *
+ * So the front of the clause is peeled REPEATEDLY until nothing more comes off, and whatever is left
+ * is what gets asked "does a verb open this".
+ *
+ * ⛔ **Nothing here may itself be a verb the lists hold.** Peeling a verb would hand the clause to the
+ * word behind it — `ensure the data is clean` would become `the data is clean`, which instructs
+ * nobody. That is why the modals appear only in a pronoun-led run (`i need to`, never a bare `need`)
+ * and why `make sure that` is here while a bare `make` is not.
+ *
+ * Sorted longest-first at use, because the short ones are prefixes of the long ones: peeling
+ * `make sure` out of `make sure to verify` would leave `to verify` and refuse it.
+ */
+const CLASS_1_WRAPPERS: readonly string[] = [
+  // A pronoun and its modal. The composer writes as the agent, so these open most of its sentences.
+  "i'll need to", "we'll need to", "i need to", "we need to", "you need to", 'i need you to',
+  'i have to', 'we have to', "i'm going to", 'i am going to', "we're going to", 'we are going to',
+  'i want to', "i'd like to", 'i should', 'we should', 'you should', 'you must', 'i can', 'we can',
+  'i will', 'we will', "i'll", "we'll", "i'm", "we're", "let's", 'let us',
+  // The modal run on its own, for when a clause head above already took the pronoun off. `I'll` is one
+  // of {@link CLASS_1_CLAUSE_HEADS}, so `…, I'll need to gather that info too.` arrives here as
+  // `need to gather…` — measured on a reported popup, where the instruction drew nothing at all.
+  // ⚠️ Every one of these ends in `to`, which is what makes them safe: `plan to run the tests` is
+  // peeled and `plan a dry run` is untouched.
+  'need to', 'needs to', 'have to', 'has to', 'had to', 'going to', 'want to', 'wants to',
+  'would like to', 'like to', 'try to', 'tries to', 'trying to', 'ought to', 'able to',
+  'plan to', 'plans to', 'intend to', 'aim to', 'hope to', 'expect to', 'continue to',
+  'gotta', 'we gotta', 'i gotta', 'you gotta',
+  // Insistence and politeness.
+  'make sure to', 'make sure that', 'make sure', 'ensure that', 'be sure to', 'please',
+  // Sequencing. These put the steps in order; they are not someone doing something.
+  'first,', 'firstly,', 'second,', 'secondly,', 'third,', 'next,', 'next up,', 'then,', 'after that,',
+  'finally,', 'lastly,', 'additionally,', 'also,', 'importantly,', 'specifically,',
+];
+
+/**
+ * The same text with a typographic apostrophe read as a plain one.
+ *
+ * ⚠️ **Not cosmetic — it decided whether a wrapper came off at all.** The composer writes `Let’s` and
+ * `I’ll` with U+2019, the lists here are written with U+0027, and `startsWith` compares bytes. Measured
+ * on the recorded bodies, `Let’s break this epic into clear milestones` kept its wrapper and produced
+ * the mark `Let’s break this epic into clear` — a wrapper, a verb and a cut object, all in bold.
+ *
+ * Length is preserved (one character for one character), so an offset taken from the normalised text
+ * still points at the same place in the original.
+ */
+function withPlainApostrophes(text: string): string {
+  return text.replace(/[‘’ʼ`´]/g, "'");
+}
+
+/** The wrappers longest-first, so a short one cannot peel the front off a long one. */
+const CLASS_1_WRAPPERS_LONGEST_FIRST: readonly string[] = [...CLASS_1_WRAPPERS].sort(
+  (left, right) => right.length - left.length,
+);
+
+/**
+ * A clause with every wrapper peeled off its front.
+ *
+ * A wrapper only comes off at a word boundary: `I cannot check the file` starts with `i can`, and
+ * peeling it would leave `not check the file` — which the verb test would then refuse for the right
+ * reason by accident. Requiring the boundary refuses it for the right reason on purpose.
+ */
+function withoutClauseWrappers(clause: string): string {
+  let text = clause.trim();
+  for (let peeled = true; peeled; ) {
+    peeled = false;
+    const lower = withPlainApostrophes(text.toLowerCase());
+    for (const wrapper of CLASS_1_WRAPPERS_LONGEST_FIRST) {
+      if (!lower.startsWith(wrapper)) continue;
+      const next = text.charAt(wrapper.length);
+      if (next.length > 0 && /[A-Za-z]/.test(next) && /[a-z]$/.test(wrapper)) continue;
+      text = text.slice(wrapper.length).replace(/^[\s,]+/, '');
+      peeled = true;
+      break;
+    }
+  }
+  return text;
+}
 
 /**
  * The read verbs that are instructions too.
@@ -173,6 +278,199 @@ const CLASS_1_CLAUSE_HEADS: readonly string[] = [
  * PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries.
  */
 const READ_VERB = /\b(?:check|compare|look at|inspect|report|confirm|find|read|review|verify|test|investigate|identify|list|document|gather|define|specify|design|implement|embed|calculate|display|create|develop|establish|outline|assess|determine|clarify|prioritize|provide|break|tie|set up)\b/i;
+
+/**
+ * The words that open a clause WITHOUT instructing: a subject, an article, a connective, a question
+ * word, or one of the nouns the composer's own sections are named after.
+ *
+ * 🔑 **This is the list the standard now depends on being complete, and it replaces one that could not
+ * be.** Until 2026-09-29 an instruction was "a verb from an approved list at the head of its clause",
+ * and the list had been widened five times. Counted over every clause opening in every body available
+ * — the 35 recorded and 3 reported — with the wrappers above peeled off:
+ *
+ *   352 sentences · 164 open on a subject (a description, rightly unmarked) · 188 open on a word that
+ *   could be a verb · the shipped lists hold 77 of those (41 %) · 55 distinct verbs they do not hold ·
+ *   **39 of those 55 appear exactly ONCE (71 %)**
+ *
+ * A tail that shape does not get shorter by being sampled. Adding the four verbs the three reported
+ * popups needed — `integrate`, `trigger`, `clear`, `link` — fixes those three popups and leaves the
+ * tail exactly as long, because the vocabulary is the DEVELOPER'S and there is no reason it should
+ * ever be enumerable.
+ *
+ * So the question is inverted. The words a reader must be right about are no longer the verbs the
+ * world can write — unbounded — but the openers that are plainly not instructions, which is a closed
+ * class of the language plus the handful of nouns this product's own section headings use. That list
+ * can be finished, and this is it.
+ *
+ * ⛔ **A word in one of the verb lists is admitted whether or not it is here.** The test is built as
+ * `a known verb OR not a known non-instruction`, so every mark the approved lists produced before this
+ * change still survives it, and `emphasis-classes.test.ts` pins that direction. An accidental entry
+ * here can therefore narrow nothing that used to work.
+ */
+const NOT_AN_INSTRUCTION_OPENER: ReadonlySet<string> = new Set([
+  // Subjects and determiners. A clause that opens on one of these is telling, not asking.
+  'i', 'we', 'you', 'they', 'it', 'he', 'she', 'this', 'that', 'these', 'those', 'there', 'here',
+  'the', 'a', 'an', 'my', 'our', 'its', 'their', 'his', 'her', 'your',
+  // ⚠️ Contracted, because the opener is read as a WORD and an apostrophe is part of one. Without
+  // these, `We'll judge it on our ability` was admitted with `We'll` as its verb and drew the wrapper
+  // in bold — measured, on a recorded body. The peel above normally takes them off first; this is the
+  // second line of defence, for a contraction the peel does not know.
+  "i'll", "we'll", "you'll", "they'll", "it'll", "i'm", "we're", "you're", "they're", "he's", "she's",
+  "it's", "that's", "there's", "here's", "who's", "what's", "let's", "i've", "we've", "you've",
+  "i'd", "we'd", "you'd", "they'd", "don't", "doesn't", "didn't", "won't", "can't", "shouldn't",
+  "wouldn't", "couldn't", "isn't", "aren't", "wasn't", "weren't", "hasn't", "haven't", "hadn't",
+  // ⚠️ `not` and `neither` were missing until a test of this very rule caught them: `I cannot check
+  // the auth middleware yet` reaches the opener test as `not check the auth middleware yet` — the
+  // clause head `i can` takes `I can` off and leaves the negation standing — and drew exactly that.
+  'any', 'all', 'each', 'both', 'no', 'not', 'neither', 'none', 'nothing', 'everything', 'anything', 'something',
+  'someone', 'anyone', 'everyone', 'some', 'most', 'many', 'few', 'several', 'one', 'two',
+  // Connectives and subordinators. They join clauses; they do not start work.
+  'if', 'when', 'while', 'once', 'after', 'before', 'without', 'unless', 'until', 'since', 'because',
+  'though', 'although', 'whereas', 'therefore', 'thus', 'hence', 'otherwise', 'meanwhile',
+  'for', 'to', 'in', 'on', 'at', 'by', 'as', 'so', 'and', 'but', 'or', 'nor', 'from', 'with',
+  'about', 'into', 'onto', 'over', 'under', 'per', 'via', 'within', 'across', 'between', 'during',
+  // Question words. A body asking itself something is not instructing the agent.
+  'what', 'how', 'why', 'where', 'which', 'who', 'whom', 'whose', 'whether',
+  // Participles and gerunds. `Looking at the diff, …` and `Based on the evaluation, …` are the body
+  // framing what follows — the instruction, if there is one, comes after the comma and is reached by
+  // the clause heads.
+  'based', 'looking', 'given', 'considering', 'regarding', 'according', 'using', 'assuming',
+  'gathering', 'understanding', 'depending', 'including', 'following', 'starting', 'being', 'having',
+  // Bare modals and auxiliaries left standing when a wrapper peeled only part of a run.
+  'is', 'are', 'was', 'were', 'be', 'been', 'am', 'has', 'have', 'had', 'does', 'do', 'did',
+  'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must', 'need', 'gotta',
+  // Adverbs and fillers that survive the peel.
+  'just', 'only', 'even', 'still', 'also', 'again', 'already', 'always', 'never', 'often',
+  'currently', 'right', 'now', 'then', 'next', 'first', 'finally', 'basically', 'actually', 'really',
+  'yes', 'no-op', 'ok', 'okay', 'maybe', 'perhaps', 'ideally', 'preferably', 'likely', 'possibly',
+  // Adjectives that open a fragment the composer writes as a label.
+  'expected', 'possible', 'manual', 'open', 'finished', 'current', 'every', 'same', 'other', 'new',
+  'previous', 'existing', 'available', 'necessary', 'important', 'critical', 'key', 'main', 'overall',
+  // Nouns this product's own headings and lines are built from. These open a DESCRIPTION of the
+  // section, which is the composer talking about its own structure rather than about the request.
+  'success', 'completion', 'risk', 'risks', 'safety', 'scope', 'goal', 'goals', 'context', 'baseline',
+  'user', 'users', 'data', 'email', 'session', 'orders', 'order', 'ui', 'backend', 'frontend',
+  'behavior', 'behaviour', 'output', 'input', 'result', 'results', 'state', 'steps', 'step',
+  'criteria', 'assumptions', 'constraints', 'dependencies', 'requirements', 'note', 'notes',
+]);
+
+/**
+ * A finite verb, which is what a SUBJECT has and an imperative does not.
+ *
+ * `Task 2 must be wrapped up before Task 3` opens on a word no list holds and that is not a known
+ * non-instruction opener, so the inverted test admits it — and it is a description of the plan, not an
+ * instruction to anybody. What gives it away is not the opener but what comes after: a subject is
+ * followed by a modal or a form of *be* or *have*, and an imperative is followed by its object.
+ *
+ * ⛔ **Applied only where the inverted test did the admitting.** `Check that the app's home page WILL
+ * respect the new breakpoint` is an instruction with a modal in its object, and it has been a mark
+ * since the first version of this module. The test below never sees it, because `check` is a listed
+ * verb and a listed verb is admitted before this is asked — which is the same superset rule the rest of
+ * this change is built on.
+ *
+ * ⛔ **The search stops at a relative pronoun**, and that is load-bearing rather than tidy. An
+ * imperative's OBJECT may carry a relative clause with a modal in it — `enumerate the checks THAT MUST
+ * pass before release` — and without the stop the modal inside the object was read as the modal after a
+ * subject, and a good mark was refused. Measured: it cost `enumerate the checks`, and nothing else
+ * changed when the stop was added.
+ */
+const FINITE_VERB_AFTER_SUBJECT =
+  /^\s*(?:(?!(?:that|which|who|whom|whose|where|when|if|unless|because)\b)[A-Za-z0-9'’-]+\s+){0,3}?(?:must|should|shall|will|would|can|could|may|might|is|are|was|were|has|have|had)\b/i;
+
+/**
+ * Does this word carry a third-person `-s`?
+ *
+ * 🔑 **An English imperative never does**, and that one fact settles the shape the inverted rule could
+ * not otherwise tell from an instruction: a clause whose subject is a bare noun.
+ * `Limit applies to POST /api/upload only` is the standard's own worked example, and it is a
+ * CONSTRAINT being stated — its marks are the developer's term and the limiter, never an action. Read
+ * as grammar, `Limit` is a fine imperative verb and no opener list can say otherwise. `applies` can.
+ *
+ * Two shapes, both answered here:
+ *   `Uses alpha-one`            — the OPENER carries the `-s`, so the opener is not an imperative.
+ *   `Cache reads go through …`  — the word AFTER it does, so the opener is that verb's subject.
+ *
+ * ⛔ `-ss` and `-us` are exempt, because a real imperative can end that way: `process the queue`,
+ * `address the warning`, `discuss the trade-off`, `focus on the endpoints`. Words under four letters are
+ * exempt too (`ops`, `abs`), and so is anything already named a non-instruction opener — which is what
+ * lets `capture this output` and `carry forward the requirements` keep their marks, since `this` and
+ * `requirements` are listed there.
+ *
+ * ⚠️ **The cost, stated plainly.** An UNLISTED verb followed straight by a bare plural —
+ * `capture screenshots`, `draft notes` — is refused, because nothing in the words themselves separates
+ * it from `Cache reads`. A listed verb never reaches this test, so `run tests`, `review findings`,
+ * `gather requirements` and `check logs` are unaffected; measured over the recorded bodies, the shape
+ * costs no mark that was there before.
+ */
+function carriesThirdPersonS(word: string): boolean {
+  const lower = withPlainApostrophes(word.toLowerCase());
+  if (lower.length < 4) return false;
+  if (NOT_AN_INSTRUCTION_OPENER.has(lower)) return false;
+  return /(?<![su])s$/.test(lower);
+}
+
+/**
+ * Is this word a participle or a gerund — a form an imperative can never take?
+ *
+ * The same kind of fact as the `-s` above, and it closes the other two shapes the inverted rule was
+ * marking. Both were measured on the reported popups:
+ *
+ *   `Adding test cases to the suite…`          — a gerund NAMING the work, in a sentence about it.
+ *   `limited by what the Stripe API allows`    — a past participle, describing a constraint.
+ *
+ * ⛔ `-eed` and `-ead` are exempt, because a handful of real imperatives end that way: `proceed`,
+ * `exceed`, `succeed`, `feed`, `read`, `spread`, `lead`. Nothing else has to be, since no English
+ * imperative ends in `-ing` at all — and a verb the approved lists hold never reaches this test, so
+ * `embed` keeps its marks through the same superset rule everything else here relies on.
+ *
+ * ⚠️ **Under five letters is exempt too**, which keeps `used`, `made`, `need` and `feed` out of it: a
+ * four-letter word ending in `-ed` is far more often the verb itself than a participle, and the shape
+ * this is here to refuse — `Adding test cases`, `limited by what …` — is never that short.
+ */
+function isParticipleOrGerund(word: string): boolean {
+  const lower = withPlainApostrophes(word.toLowerCase());
+  if (lower.length < 5) return false;
+  if (NOT_AN_INSTRUCTION_OPENER.has(lower)) return false;
+  if (lower.endsWith('ing')) return true;
+  return lower.endsWith('ed') && !lower.endsWith('eed') && !lower.endsWith('ead');
+}
+
+/**
+ * A contracted subject-and-verb. What follows one is a CLAUSE, not an object.
+ *
+ * `I'll know it's done when the bar appears` — measured on a reported popup, where it drew
+ * `know it's done`. An instruction acts on a thing; `it's done` is a sentence, so the word in front of
+ * it is reporting rather than instructing.
+ *
+ * ⛔ Only reached on the inverted path, so `confirm it's saved` and `verify it's working` keep their
+ * marks — `confirm` and `verify` are listed verbs and are admitted before this is asked.
+ */
+const CONTRACTED_SUBJECT_AND_VERB: ReadonlySet<string> = new Set([
+  "it's", "that's", "there's", "he's", "she's", "they're", "we're", "you're", "i'm", "what's", "who's",
+]);
+
+/**
+ * Whether this clause opens the way an instruction opens.
+ *
+ * Read as: a verb one of the approved lists already holds — so nothing that worked before can stop
+ * working — **or** any word that is not one of the openers above, does not carry a third-person `-s`,
+ * is not a participle or a gerund, and is not the subject of a sentence that is merely describing.
+ */
+function opensAnInstruction(rest: string, knownVerbAtStart: boolean): boolean {
+  if (knownVerbAtStart) return true;
+  const opener = /^[A-Za-z][A-Za-z'-]*/.exec(rest);
+  if (opener === null) return false;
+  if (NOT_AN_INSTRUCTION_OPENER.has(opener[0].toLowerCase())) return false;
+  if (carriesThirdPersonS(opener[0])) return false;
+  if (isParticipleOrGerund(opener[0])) return false;
+  const after = rest.slice(opener[0].length);
+  const second = /^[^A-Za-z]*([A-Za-z][A-Za-z'’-]*)/.exec(after);
+  if (second !== null) {
+    if (carriesThirdPersonS(second[1]!)) return false;
+    if (CONTRACTED_SUBJECT_AND_VERB.has(withPlainApostrophes(second[1]!.toLowerCase()))) return false;
+  }
+  return !FINITE_VERB_AFTER_SUBJECT.test(after);
+}
 
 /** Words that end a phrase: the next clause has started, so the object has finished. */
 const CLAUSE_BOUNDARY = /[,.;:!?]|\bbefore\b|\bafter\b|\bonce\b|\bunless\b|\buntil\b|\bonly if\b|\brather than\b/i;
@@ -367,7 +665,62 @@ const CANNOT_END_A_PHRASE: readonly string[] = [
   'and', 'or', 'but', 'the', 'a', 'an',
   'of', 'to', 'in', 'on', 'at', 'for', 'with', 'from', 'into', 'by', 'as',
   'is', 'are', 'was', 'were', 'be', 'been',
+  // ⏪ Added 2026-09-29. The same closed class as the prepositions above, and each one turned up
+  // holding a mark open: `check the results against the captured`, `compare the outcomes between`.
+  'against', 'between', 'within', 'across', 'during', 'upon', 'onto', 'than', 'that', 'which', 'such',
+  // ⛔ `about`, `like`, `over`, `through` and `under` were in this list for one measurement and taken
+  // back out. They finish a PHRASAL VERB, so trimming them broke the phrase it was meant to mend:
+  // `Only change what we talked about` became `…we talked`, and `Define what success looks like` became
+  // `…success looks`. A preposition at the end of a phrase is not always a promise unkept.
+  // Relational participles. They introduce what the thing relates TO, and the mark stops before it:
+  // `Review the privacy policies related`, `ensure we clarify any concerns related`, `judge success
+  // based`, `confirm what the expected behavior is compared`.
+  'related', 'based', 'compared', 'regarding', 'concerning', 'associated', 'coming', 'due',
 ];
+
+/**
+ * ⏪ **The dangling-participle trim was built on 2026-09-29 and REMOVED the same day.** It is recorded
+ * here rather than deleted, because the reason it failed is the reason not to try it again.
+ *
+ * It trimmed a phrase ending `<preposition> <word ending in -ing or -ed>`, to mend
+ * `ensure stakeholder satisfaction by confirming` — one mark, where the clause boundary had taken the
+ * gerund's own object with it.
+ *
+ * ⛔ `-ing` does not mean gerund. English is full of ordinary NOUNS that end in it, and the rule cut
+ * every one of them off a phrase: measured on the owner's own reported popup, `sort them by rating`
+ * became `sort them` — `rating` read as a participle, then `by` went as a hanging preposition, and two
+ * words of nothing were left in bold. `setting`, `building`, `warning`, `listing`, `pricing`,
+ * `training`, `shipping`, `heading`, `timing` and `meeting` are all the same trap.
+ *
+ * It also had to be taught, in its one day, that the preposition may not be the phrase's FIRST word —
+ * a class-4 condition IS a preposition and its object, and `After linking` was being cut to `After`.
+ * Two corrections for one mark's worth of tidiness, against a whole class of nouns, is a bad trade.
+ *
+ * What remains for that one mark: nothing. It reads `ensure stakeholder satisfaction by confirming`,
+ * and a slightly long mark is better than a broken short one — which is the ruling §5C already made
+ * when a hard word ceiling was measured and rejected for producing
+ * `gather proof of what the payments module currently`.
+ */
+
+/**
+ * A participle left holding a determiner with no noun behind it.
+ *
+ * `check the results against the captured` — the clause boundary took the noun after `captured`, and
+ * what is left promises something the reader never gets.
+ *
+ * ⛔ **Narrow on purpose, and narrower than the rule above that had to be withdrawn.** Only `-ed`, never
+ * `-ing`: nouns ending in `-ing` are everywhere (`rating`, `setting`, `warning`, `pricing`) and cutting
+ * them broke real phrases. And only after a DETERMINER, never after a preposition: `the captured` has
+ * lost its noun, while `sort them by rating` and `focus on the changes made` have not — in both of those
+ * the `-ed`/`-ing` word is the phrase's own last noun or its complete modifier.
+ *
+ * ⛔ **A VOWEL before the `-ed` is exempt**, which is what `[^aeiou\s-]` says. It covers the reason
+ * {@link isParticipleOrGerund} lists `-eed` and `-ead` — `the feed`, `the spread`, `the lead` are nouns
+ * — and covers `agreed` and `succeed` with it. The two rules therefore reach the same answer by
+ * different means, and neither is derived from the other.
+ */
+const DETERMINER_THEN_BARE_PARTICIPLE =
+  /\b(?:the|a|an|this|that|these|those)\s+[A-Za-z-]*[^aeiou\s-]ed$/i;
 
 /**
  * A phrase with any hanging tail removed.
@@ -381,7 +734,8 @@ function withoutHangingTail(phrase: string): string {
   let words = phrase.trim().split(/\s+/);
   while (words.length > 1) {
     const last = (words[words.length - 1] ?? '').toLowerCase().replace(/[^a-z']/g, '');
-    if (!CANNOT_END_A_PHRASE.includes(last)) break;
+    const phrase = words.join(' ');
+    if (!CANNOT_END_A_PHRASE.includes(last) && !DETERMINER_THEN_BARE_PARTICIPLE.test(phrase)) break;
     words = words.slice(0, -1);
   }
   return words.join(' ');
@@ -433,8 +787,33 @@ function earliestVerbIn(rest: string): RegExpExecArray | null {
   return matches.reduce((best, match) => (match.index < best.index ? match : best));
 }
 
+/**
+ * The first word of a clause, and where it sits.
+ *
+ * Used when no approved list holds it — the clause is admitted on its opener not being one of the
+ * non-instruction openers, and the mark is then built from that word exactly as it would be from a
+ * listed verb.
+ */
+function openerOf(rest: string): { index: number; length: number; word: string } | null {
+  const match = /[A-Za-z][A-Za-z'-]*/.exec(rest);
+  if (match === null || match.index !== rest.search(/[A-Za-z]/)) return null;
+  return { index: match.index, length: match[0].length, word: match[0] };
+}
+
 /** The class-1 candidates of one line: an instruction, with something it acts on. */
 function classOneOfLine(line: string): PromptEnhancementEmphasisCandidateV1[] {
+  // 🔑 **A line nexpath wrote about the section earns nothing.** `Name risky or irreversible actions…`
+  // and `Cover Scope and non-goals…` are flawless instructions as language — imperative verb,
+  // concrete object — so the grammar below cannot tell them from the developer's work, and the
+  // loudest thing on the screen would be nexpath's own suggestion. The verb list used to keep them out
+  // by refusing `cover` and `name` outright, which cost those verbs everywhere else; naming the LINES
+  // costs nothing else.
+  //
+  // Tested before the sentence split so a line whose own punctuation divides it — `Ask only for
+  // missing decisions…; otherwise proceed…` — is recognised whole, and again on each sentence through
+  // the recursion below, so one appended to a developer's sentence is still caught.
+  if (isPromptEnhancementComposerOwnLineV1(line)) return [];
+
   // A list marker is punctuation, not a word, so a verb behind one still OPENS its clause. The
   // composer writes almost every instruction as `- Check that …`, and without this the marker sat in
   // front of every verb and the "only a verb that opens the clause counts" test below refused all of
@@ -455,17 +834,22 @@ function classOneOfLine(line: string): PromptEnhancementEmphasisCandidateV1[] {
   const sentences = line.split(/(?<=[.;!?])\s+/).filter((part) => part.trim().length > 0);
   if (sentences.length > 1) return sentences.flatMap((sentence) => classOneOfLine(sentence));
 
-  const lower = line.toLowerCase();
-  // The verb has to head a clause — sentence-initial, or straight after one of the known heads.
-  const heads: number[] = [0];
-  for (const head of CLASS_1_CLAUSE_HEADS) {
+  // Normalised, so `I’ll` and `I'll` are the same head. Length is preserved, so the offsets below
+  // still index `line`.
+  const lower = withPlainApostrophes(line.toLowerCase());
+  // The verb has to head a clause — sentence-initial, or straight after one of the mid-sentence heads.
+  const heads = new Set<number>([0]);
+  for (const head of CLASS_1_MIDSENTENCE_HEADS) {
     const at = lower.indexOf(head);
-    if (at >= 0) heads.push(at + head.length);
+    if (at >= 0) heads.add(at + head.length);
   }
 
   const found: PromptEnhancementEmphasisCandidateV1[] = [];
   for (const head of heads) {
-    const rest = line.slice(head);
+    // …and whatever the clause is still WEARING comes off before the verb is looked for, however many
+    // layers of it there are. See {@link CLASS_1_WRAPPERS}: the head list finds one at a time, and the
+    // composer stacks them.
+    const rest = withoutClauseWrappers(line.slice(head));
     // Writes, the shapes that are dangerous on sight, and the reads that are still instructions —
     // and whichever of them stands FIRST is the one this clause is about.
     //
@@ -479,23 +863,28 @@ function classOneOfLine(line: string): PromptEnhancementEmphasisCandidateV1[] {
     // PromptEnhancementEmphasisCandidateV1.isWriteVerb} carries into the ranking below. It was never
     // meant to say which verb the clause is about.
     const verb = earliestVerbIn(rest);
-    if (verb === null) continue;
     // Only a verb that opens the clause counts; one buried further in is the body describing
     // something, not instructing.
-    const beforeVerb = rest.slice(0, verb.index).trim();
-    if (beforeVerb.length > 0) continue;
+    const knownVerbAtStart = verb !== null && rest.slice(0, verb.index).trim().length === 0;
+    // 🔑 …and a word NO list holds still opens an instruction, unless it is one of the openers that
+    // plainly does not. See {@link NOT_AN_INSTRUCTION_OPENER} for why the test runs this way round.
+    if (!opensAnInstruction(rest, knownVerbAtStart)) continue;
+    const opener = knownVerbAtStart
+      ? { index: verb!.index, length: verb![0].length, word: verb![0] }
+      : openerOf(rest);
+    if (opener === null) continue;
 
     // The WHOLE clause, which is what the gate below reads: whether this instruction concerns
     // something the developer named is a property of the instruction, not of how much of it is
     // drawn. ⚠️ Asking the gate about the shortened form instead cost four of six instructions —
     // measured — because a term living in the clause's tail could no longer be seen.
-    const clause = cutBeforeSecret(clauseFrom(rest, verb.index, verb[0].length));
+    const clause = cutBeforeSecret(clauseFrom(rest, opener.index, opener.length));
     if (clause.length === 0) continue;
     // …and the mark itself, cut back to the verb and its object.
     const phrase = instructionObjectOnly(clause);
     if (phrase.length === 0) continue;
     // The verb has to be acting ON something. An instruction with no object is not one.
-    const object = clause.slice(verb[0].length).trim();
+    const object = clause.slice(opener.length).trim();
     if (object.length === 0) continue;
 
     // ⏪ **The object no longer has to trace to a named term** (2026-09-28). It used to: *"a verb with
@@ -517,7 +906,7 @@ function classOneOfLine(line: string): PromptEnhancementEmphasisCandidateV1[] {
     // mark past this is the whole line drawn heavy — which is the one thing emphasis must never be.
     // Same ceiling as classes 3 and 4, and for the same reason.
     if (phrase.trim().split(/\s+/).length > CLASS_1_MAX_WORDS_V1) continue;
-    found.push({ text: phrase, emphasisClass: 1, isWriteVerb: EXECUTION_VERB.test(verb[0]) });
+    found.push({ text: phrase, emphasisClass: 1, isWriteVerb: EXECUTION_VERB.test(opener.word) });
   }
   return found;
 }

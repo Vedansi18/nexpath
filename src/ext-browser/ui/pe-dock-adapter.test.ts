@@ -1234,3 +1234,62 @@ describe('advisory rating (real dock + controller)', () => {
     expect(bodyField()).toBeTruthy();          // the PE body is back
   });
 });
+
+/**
+ * Which SECTION the panel draws a mark in (2026-09-29).
+ *
+ * The engine's cap spends four marks per section and decides which section each phrase belongs to. The
+ * panel used to be handed only the phrase TEXTS, so it placed every one at its first occurrence
+ * anywhere in the body — two phrases charged to two sections both landed in the first, where the
+ * overlay's range merge drew them as one heavy run and the second section drew nothing.
+ */
+describe('a mark the panel draws lands in the section it was charged to', () => {
+  /** The same words in two markable sections — the case where placement can go wrong. */
+  const REPEATED = 'the retry queue';
+  const SECTIONS = [
+    { title: 'Context and constraints', bodyText: `Leave ${REPEATED} alone for now.`, sectionKind: 'context_and_constraints' },
+    { title: 'How to verify', bodyText: `Drain ${REPEATED} and count what is left.`, sectionKind: 'verification_or_test_plan' },
+  ];
+  const BODY = [
+    `${SECTIONS[0]!.title}:`,
+    SECTIONS[0]!.bodyText,
+    '',
+    `${SECTIONS[1]!.title}:`,
+    SECTIONS[1]!.bodyText,
+  ].join('\n');
+  /** Where each section's copy of the repeated words sits, read off the fixture. */
+  const FIRST_AT = BODY.indexOf(REPEATED);
+  const SECOND_AT = BODY.indexOf(REPEATED, FIRST_AT + 1);
+
+  const boldOf = (overrides: Partial<PePanelViewV1>) => {
+    const row = peSurfaceModel(view({ bodyText: BODY, sections: SECTIONS, ...overrides })).rows[0]!;
+    if (row.kind !== 'field') throw new Error('body row is not a field');
+    const bold = row.boldRanges;
+    if (typeof bold !== 'function') throw new Error('the panel was given no bold rule');
+    return bold(BODY).map((range) => range.start);
+  };
+
+  it('draws it in the later section when that is the one it was charged to', () => {
+    expect(boldOf({ emphasisPhrases: [REPEATED], emphasisPhraseSections: [1] })).toEqual([SECOND_AT]);
+  });
+
+  it('draws it in the first section when THAT is the one it was charged to', () => {
+    // The other direction, so the test above cannot pass by the mark simply moving.
+    expect(boldOf({ emphasisPhrases: [REPEATED], emphasisPhraseSections: [0] })).toEqual([FIRST_AT]);
+  });
+
+  it('marks each section once when both were charged for the same words', () => {
+    expect(boldOf({ emphasisPhrases: [REPEATED, REPEATED], emphasisPhraseSections: [0, 1] }))
+      .toEqual([FIRST_AT, SECOND_AT]);
+  });
+
+  it('places it as before when no sections travelled — an older worker', () => {
+    // ⛔ The wire-compat half. Absent must mean exactly what it meant before the field existed.
+    expect(boldOf({ emphasisPhrases: [REPEATED] })).toEqual([FIRST_AT]);
+  });
+
+  it('ignores a misaligned sections array rather than guessing', () => {
+    expect(boldOf({ emphasisPhrases: [REPEATED, REPEATED], emphasisPhraseSections: [1] }))
+      .toEqual([FIRST_AT, FIRST_AT]);
+  });
+});

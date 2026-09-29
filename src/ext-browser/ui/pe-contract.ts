@@ -126,6 +126,25 @@ export interface PePanelViewV1 {
    * kind the standard excludes.
    */
   emphasisPhrases?: readonly string[];
+  /**
+   * Which composed section each of those phrases was charged to, index for index.
+   *
+   * The engine's cap spends four marks per SECTION and decides which section each phrase belongs to.
+   * A panel that then searches the whole body for a phrase's first occurrence overrules that: two
+   * phrases can land on overlapping stretches the cap never compared, and the overlay's range merge
+   * draws the pair as one long heavy run. Measured on a reported body, `account if the email` and
+   * `email matches` rendered as a single bold stretch across both.
+   *
+   * ⛔ **A SIBLING ARRAY rather than a richer `emphasisPhrases`, and that is the wire rule above, not
+   * a preference.** Turning the string list into objects would make an older panel render nothing for
+   * a newer worker's message. Absent here means what absent meant before: the panel places each phrase
+   * by its first eligible occurrence, exactly as it did. Same length as `emphasisPhrases` whenever it
+   * is present, and a panel that finds them misaligned should ignore it rather than guess.
+   *
+   * Display-only, like the list beside it — a section index is not part of `bodyText` and is never
+   * sent.
+   */
+  emphasisPhraseSections?: readonly number[];
   /** Additional-details field state (present only when the engine offers the action). */
   hasAdditionalDetails: boolean;
   additionalDetailsText: string;

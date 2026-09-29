@@ -134,9 +134,65 @@ function byPriority(left: LocatedPhrase, right: LocatedPhrase): number {
 function withoutDuplicateSpans(phrases: readonly LocatedPhrase[]): LocatedPhrase[] {
   const kept: LocatedPhrase[] = [];
   for (const phrase of phrases) {
-    const duplicate = kept.some((other) => other.sectionIndex === phrase.sectionIndex
-      && other.at === phrase.at && other.text.length === phrase.text.length);
-    if (!duplicate) kept.push(phrase);
+    const start = phrase.at;
+    const end = phrase.at + phrase.text.length;
+    /**
+     * A same-class span already kept that this one CONTAINS.
+     *
+     * ⚠️ The fuller reading has to win regardless of arrival order, and it cannot be left to that
+     * order. The term sources are five, merged in a fixed sequence, and only the last of them
+     * generates longest-first — so a short term from an earlier source arrives before the long one
+     * that contains it, and "keep the first" would then keep the fragment. Measured: `null error`
+     * standing while `null error after login` was dropped.
+     */
+    const shorterSameClass = kept.findIndex((other) => other.sectionIndex === phrase.sectionIndex
+      && other.candidate.emphasisClass === phrase.candidate.emphasisClass
+      && start <= other.at && end >= other.at + other.text.length
+      && !(start === other.at && end === other.at + other.text.length));
+    if (shorterSameClass >= 0) {
+      kept.splice(shorterSameClass, 1, phrase);
+      continue;
+    }
+    const clash = kept.some((other) => {
+      if (other.sectionIndex !== phrase.sectionIndex) return false;
+      const otherStart = other.at;
+      const otherEnd = other.at + other.text.length;
+      // Disjoint: two marks on two pieces of text, which is the ordinary case.
+      if (otherEnd <= start || end <= otherStart) return false;
+      // ⚠️ **Identical first.** This is the case the function was written for, and the nested test
+      // below swallows it — an identical span contains itself both ways round — so checking nested
+      // first let `only` be marked twice, once as a boundary and once as the developer's term. A test
+      // that had passed since the first version of this file caught it.
+      if (otherStart === start && otherEnd === end) return true;
+      // Nested, either way round.
+      const nested = (otherStart <= start && otherEnd >= end) || (start <= otherStart && end >= otherEnd);
+      if (nested) {
+        // ⚠️ **The reason above is about two DIFFERENT classes.** `auth` inside `Do not modify the auth
+        // middleware` is the developer's word AND a boundary, and the worked example shows both. Two
+        // marks of the SAME class, one inside the other, are not that: they are one stretch of text
+        // charged to the budget twice.
+        //
+        // Measured across the recorded bodies and the reported popups: 4 such pairs, every one class 2,
+        // against 1 cross-class pair. H1 was spending THREE of its four marks on one stretch —
+        // `null error after login`, `null error`, `after login` — which is why it was the densest body
+        // in the corpus.
+        //
+        // Reached only when the span already kept is the LONGER one — the other direction is handled
+        // above, by replacing the shorter with the fuller reading. So the answer here is simply: a
+        // second mark of the same class inside one already drawn earns nothing.
+        return other.candidate.emphasisClass === phrase.candidate.emphasisClass;
+      }
+      // ⛔ **Partial**: they intersect and neither contains the other, so between them they cover one
+      // stretch of text with a seam in the middle. Measured on a reported popup, `account if the email`
+      // [123,143) and `email matches` [138,151) drew the words `email` twice and read as a single
+      // ragged blob from 123 to 151 — which is the one thing a mark must never be.
+      //
+      // The list arrives in priority order, so the one already kept is the one that earned it. Nothing
+      // is lost that the standard asks for: no rule anywhere produces a pair like this deliberately,
+      // and the same span was already being collapsed when the two happened to match exactly.
+      return true;
+    });
+    if (!clash) kept.push(phrase);
   }
   return kept;
 }
@@ -300,5 +356,9 @@ export function buildPromptEnhancementEmphasisPhrasesV1(
     emphasisClass: phrase.candidate.emphasisClass,
     // Everything this pass produces is local, with no call behind it.
     source: 'floor' as const,
+    // 🔑 The section this phrase was CHARGED to, carried so the surfaces place it where the cap
+    // counted it. Without it they search the whole body and can land the mark in another section
+    // entirely — see {@link PromptEnhancementEmphasisPhraseV1.sectionIndex}.
+    sectionIndex: phrase.sectionIndex,
   }));
 }
