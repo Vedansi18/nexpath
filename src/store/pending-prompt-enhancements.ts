@@ -33,6 +33,23 @@ export interface PromptEnhancementEmphasisPhraseV1 {
    * locally, with no call. `'model'` marks one produced at runtime and is never persisted.
    */
   source: 'floor' | 'model';
+  /**
+   * Which of the body's sections this phrase was charged to, when that is known.
+   *
+   * 🔑 **Why a display-only phrase needs to remember its section.** The cap that chose these phrases
+   * spends four per SECTION, and it decided which section each one belongs to. A surface that then
+   * searches the whole body for the phrase's first occurrence can place it somewhere else entirely —
+   * so the per-section budget the cap computed is not the budget the reader sees, two phrases can land
+   * on overlapping stretches the cap never compared, and the overlay's range merge then draws the pair
+   * as one long bold blob. Measured on a reported popup: `account if the email` and `email matches`
+   * rendered as a single heavy run across both.
+   *
+   * ⚠️ **Optional, and every reader must work without it.** Rows written before this existed carry no
+   * section, and so do phrases from the optional model tier; a phrase without one is placed exactly as
+   * it always was — first eligible occurrence anywhere in the body. The store's validator asks only for
+   * a string `text`, so an old row still reads back whole and a new row still reads back on old code.
+   */
+  sectionIndex?: number;
 }
 
 export interface PendingPromptEnhancement {

@@ -10,6 +10,7 @@ import {
   buildPromptEnhancementEmphasisPhrasesV1,
   PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_BODY_V1,
   PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1,
+  PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1,
   type PromptEnhancementEmphasisBodyInputV1,
 } from './emphasis-locate.js';
 
@@ -132,11 +133,32 @@ describe('finding a phrase in the body', () => {
     expect(found.some((phrase) => phrase.text.includes('/api/upload'))).toBe(false);
   });
 
-  it('keeps no positions — only the phrase, its class and where it came from', () => {
+  it('keeps no positions — only the phrase, its class, where it came from and which section', () => {
     const found = one('Limit applies to POST /api/upload only.', { groundedFactValues: ['POST /api/upload'] });
     expect(found.length).toBeGreaterThan(0);
-    for (const phrase of found) expect(Object.keys(phrase).sort()).toEqual(['emphasisClass', 'source', 'text']);
+    for (const phrase of found) {
+      expect(Object.keys(phrase).sort()).toEqual(['emphasisClass', 'sectionIndex', 'source', 'text']);
+    }
     expect(found.every((phrase) => phrase.source === 'floor')).toBe(true);
+  });
+
+  it('keeps no OFFSET, which is the thing the rule above is about', () => {
+    // ⚠️ The ruling is about offsets, not about the key count, so it is asserted as the ruling rather
+    // than as a list. An offset is a lie the moment the developer edits the body — the phrase is
+    // re-located at render, which is why `text` carries the wording and nothing carries a position.
+    //
+    // ⏪ `sectionIndex` joined the shape on 2026-09-29 and is NOT an offset: it names a section, and a
+    // section is re-found by its title line. Where that fails — the developer edited that section — the
+    // surfaces fall back to searching the whole body, so a stale section costs placement accuracy and
+    // never a lost mark. It is there because the cap spends per SECTION and the surfaces were placing
+    // marks in sections the cap never charged, which drew two terms as one heavy run.
+    const found = one('Limit applies to POST /api/upload only.', { groundedFactValues: ['POST /api/upload'] });
+    expect(found.length).toBeGreaterThan(0);
+    for (const phrase of found) {
+      for (const positional of ['at', 'start', 'end', 'offset', 'startColumn', 'endColumn']) {
+        expect(phrase).not.toHaveProperty(positional);
+      }
+    }
   });
 });
 
@@ -164,12 +186,39 @@ describe('the budget', () => {
   });
 
   it('marks a repeated phrase where it first appears, not again in a later section', () => {
+    // ⚠️ **This rule stands, and NOT for the reason it was written.** Built and measured on
+    // 2026-09-28: marking the phrase in every section that names it reads BETTER — sections carrying
+    // a mark go 65 → 88 of 129, blank sections in a popup fall from 37 % to 27 % at the median, and
+    // the densest section moves only 48 % → 51 %.
+    //
+    // ⛔ It cannot be DRAWN. Both surfaces place a phrase by finding its first eligible occurrence in
+    // the buffer, so two identical phrases take the same one: **40 of 183 marks landed on a span
+    // already taken** — nothing on screen for the reader, and duplicate ranges handed to the panel.
+    // The mark would exist in the data and nowhere a reader could see it.
+    //
+    // Lifting it needs the SECTION to travel with the phrase into both surfaces, which changes the
+    // shape held in the store. That is a separate piece of work, and not one to begin by loosening a
+    // rule whose replacement cannot be rendered.
     const sections = [
       { sectionKind: 'a', bodyText: 'Uses alpha-one.', groundedFactValues: ['alpha-one'] },
       { sectionKind: 'b', bodyText: 'Also uses alpha-one.', groundedFactValues: ['alpha-one'] },
     ];
     expect(build({ originalPromptText: 'do the work', sections })
       .filter((phrase) => phrase.text === 'alpha-one')).toHaveLength(1);
+  });
+
+  it('still marks it ONCE inside one section, however often the words appear there', () => {
+    // ⛔ The half that did not change, and the one a reader actually feels: nothing repeats inside the
+    // block they are reading. Across paragraphs is anchoring; within a paragraph would be noise.
+    const found = build({
+      originalPromptText: 'do the work',
+      sections: [{
+        sectionKind: 'a',
+        bodyText: 'Uses alpha-one. Still uses alpha-one. Always uses alpha-one.',
+        groundedFactValues: ['alpha-one'],
+      }],
+    });
+    expect(found.filter((phrase) => phrase.text === 'alpha-one')).toHaveLength(1);
   });
 
   it('spends on the instruction before the developer’s own term', () => {
@@ -327,5 +376,116 @@ describe('which section a phrase is charged to', () => {
     });
     expect(found.map((phrase) => phrase.text)).toContain('delivery time estimate');
     expect(found).toHaveLength(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 + 1);
+  });
+});
+
+describe('how much of one section may be drawn heavy', () => {
+  // The two caps above count MARKS. This one measures how much of the reader's paragraph is bold,
+  // which is what actually decides whether emphasis still reads as emphasis.
+  // The same two boundaries, in a short paragraph and in a longer one. Together they are 89
+  // characters: half of the first section and under a third of the second.
+  const TWO_LIMITS = 'Do not modify the shared billing rate limiter. Never restart the nightly reconciliation run.';
+
+  it('refuses the mark that would take a section past its share', () => {
+    const found = build({
+      originalPromptText: 'ship it',
+      sections: [{
+        sectionKind: 'context_and_constraints',
+        bodyText: `${TWO_LIMITS} These two systems are connected through the invoicing job and the checkout service.`,
+      }],
+    });
+    expect(found.map((phrase) => phrase.text)).toEqual(['Do not modify the shared billing rate limiter']);
+  });
+
+  it('keeps both once the paragraph is long enough to carry them', () => {
+    const found = build({
+      originalPromptText: 'ship it',
+      sections: [{
+        sectionKind: 'context_and_constraints',
+        bodyText: `${TWO_LIMITS} These two systems are connected through the invoicing job and the checkout service, and a change in either one reaches the other within a single billing cycle, so both need the same care.`,
+      }],
+    });
+    expect(found.map((phrase) => phrase.text)).toEqual([
+      'Do not modify the shared billing rate limiter',
+      'Never restart the nightly reconciliation run',
+    ]);
+  });
+
+  it('leaves a short section to the mark COUNT caps, where a share says nothing useful', () => {
+    // `Limit applies to POST /api/upload only.` is a line, and two marks in it are the point rather
+    // than a wall. A flat ceiling refused the standard's own worked example.
+    const found = one('Limit applies to POST /api/upload only.', { groundedFactValues: ['POST /api/upload'] });
+    expect(found.map((phrase) => phrase.text)).toContain('POST /api/upload');
+    expect(found.map((phrase) => phrase.text)).toContain('only');
+  });
+
+  it('spends the share on what the reader most needs, because the order decides', () => {
+    // When a section fills, the priority order says what survives: the safety line, then the
+    // instruction, then the developer's own term — never whichever happened to come first in the text.
+    expect(PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1).toBe(50);
+  });
+});
+
+/**
+ * One stretch of text, one mark (2026-09-29).
+ *
+ * The collapse used to fire only when two spans matched EXACTLY — same start, same length. Two other
+ * shapes got through it, and both were measured on real bodies:
+ *
+ *   PARTIAL   `account if the email` [123,143) and `email matches` [138,151) — they share `email`, so
+ *             between them they cover 123 to 151 with a seam in the middle, and the overlay's range
+ *             merge drew the pair as one heavy run.
+ *   NESTED, SAME CLASS
+ *             `null error after login`, `null error` and `after login` — three of one section's four
+ *             marks spent on one stretch. That body was the densest in the corpus.
+ *
+ * ⚠️ Nested across DIFFERENT classes stays, and the worked example above is the test for it: `auth`
+ * inside `Do not modify the auth middleware` is the developer's word and a boundary, and the standard
+ * shows both.
+ */
+describe('one stretch of text earns one mark', () => {
+  it('collapses two terms that overlap without either containing the other', () => {
+    const found = one('The null error after login shows up on the checkout page.', {
+      groundedFactValues: ['the null error', 'error after login'],
+    });
+    // ⚠️ Compared lower-cased: a mark carries the BODY's casing, so `the null error` comes back as
+    // `The null error`. A case-sensitive filter here returned an empty list and read as a collapse.
+    const texts = found.map((phrase) => phrase.text.toLowerCase());
+    // Exactly one of the pair survives; which one is the priority order's business, not this test's.
+    expect(texts.filter((text) => text === 'the null error' || text === 'error after login')).toHaveLength(1);
+  });
+
+  it('collapses a term nested inside another term of the SAME class, keeping the fuller reading', () => {
+    // ⚠️ The grounded values are given SHORTEST FIRST on purpose. Longest-first, the term merge's own
+    // nesting guard (`emphasis-sources.ts`) refuses the pieces before they ever reach this layer — so a
+    // longest-first fixture passed with this rule switched off, and proved nothing about it. Shortest
+    // first is the order that actually happens across the five merged sources, and it is the order that
+    // used to leave the FRAGMENT standing.
+    const found = one('The null error after login shows up on the checkout page.', {
+      groundedFactValues: ['null error', 'after login', 'null error after login'],
+    });
+    const texts = found.map((phrase) => phrase.text.toLowerCase());
+    expect(texts).toContain('null error after login');
+    expect(texts).not.toContain('null error');
+    expect(texts).not.toContain('after login');
+  });
+
+  it('keeps a term nested inside a BOUNDARY, which is two marks the standard asks for', () => {
+    // ⛔ The direction that must not regress. Collapsing this would silently drop a range the worked
+    // example requires, which is what a first draft of the nesting rule did.
+    const found = one('Do not modify the auth middleware.', { groundedFactValues: ['auth middleware'] });
+    const pairs = found.map((phrase) => [phrase.emphasisClass, phrase.text] as const);
+    expect(pairs).toContainEqual([2, 'auth middleware']);
+    expect(pairs).toContainEqual([3, 'Do not modify the auth middleware']);
+  });
+
+  it('leaves two marks on two separate stretches alone', () => {
+    // So the rules above cannot pass by collapsing everything.
+    const found = one('The retry queue is drained and the audit log is kept.', {
+      groundedFactValues: ['the retry queue', 'the audit log'],
+    });
+    const texts = found.map((phrase) => phrase.text.toLowerCase());
+    expect(texts).toContain('the retry queue');
+    expect(texts).toContain('the audit log');
   });
 });

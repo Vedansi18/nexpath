@@ -295,4 +295,68 @@ describe('the pending row and its bold-phrase column', () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.emphasisPhrases).toBeUndefined();
   });
+
+  /**
+   * The section a phrase was charged to (2026-09-29).
+   *
+   * `sectionIndex` joined `PromptEnhancementEmphasisPhraseV1` so the surfaces place a mark in the section
+   * the cap counted it against. It is OPTIONAL, and the whole point of these two tests is that it is:
+   * every row written before it existed has to keep reading back whole.
+   */
+  describe('the section a phrase was charged to', () => {
+    it('round-trips through upsert → get', async () => {
+      const root = '/test/emphasis-section-roundtrip';
+      const { request: req, result } = await validPayload(root);
+      const withSections: readonly PromptEnhancementEmphasisPhraseV1[] = [
+        { text: 'add a retry with exponential backoff', emphasisClass: 1, source: 'floor', sectionIndex: 0 },
+        { text: 'payment gateway client', emphasisClass: 2, source: 'floor', sectionIndex: 3 },
+      ];
+
+      upsertPendingPromptEnhancement(store, {
+        projectRoot: root, sessionId: 's', promptCount: 1, request: req, result,
+        emphasisPhrases: withSections,
+      });
+
+      expect(getPendingPromptEnhancement(store, root)!.emphasisPhrases).toEqual(withSections);
+    });
+
+    it('reads back a row written BEFORE the field existed, unchanged', async () => {
+      // ⛔ The compatibility half, and it is what makes the field safe to add: every row a user already
+      // has was written without it. A reader that required a section would treat all of them as corrupt
+      // and the popup would draw no emphasis at all.
+      //
+      // ⚠️ Written through the real writer, which stringifies the list VERBATIM — so phrases with no
+      // section produce exactly the old bytes. The raw column is asserted below so that is checked
+      // rather than trusted.
+      // ⛔ **Do not name a project root in this file so that it ends in `row`, `sql`, `sqlite` or
+      // `table`.** This test was written with `/test/emphasis-section-old-row` and
+      // `getPendingPromptEnhancement` returned NULL for it while the raw column plainly held the row.
+      //
+      // The cause: `request()` above builds `requestId: emphasis-request-<projectRoot>`, the result's
+      // diagnosticId is `pe:<requestId>:diagnostic:1`, and `contracts.ts` refuses a diagnostic matching
+      // `/\b(?:table|row|sqlite|sql)\s*[:#=]\s*[a-z0-9_-]{4,}/i` — a confidentiality guard against a
+      // leaked SQL reference. `…-row:diagnostic:1` matches it, the whole result fails validation, and
+      // the row reads back as absent.
+      //
+      // ⚠️ Not a product defect: production requestIds are `pe:auto:<sessionId>:<n>:<flagType>` or a
+      // generated enhancementId, no absence-signal key ends in any of those four words, and the `\b`
+      // keeps `narrow` and `escrow` out of it. It is a trap for whoever writes the next fixture here,
+      // which is why it is written down rather than worked around silently.
+      const root = '/test/emphasis-section-legacy';
+      const { request: req, result } = await validPayload(root);
+      const oldShape = [{ text: 'payment gateway client', emphasisClass: 2 as const, source: 'floor' as const }];
+      upsertPendingPromptEnhancement(store, {
+        projectRoot: root, sessionId: 's', promptCount: 1, request: req, result,
+        emphasisPhrases: oldShape,
+      });
+
+      // …and the row still reads back whole, with the field simply absent.
+      const loaded = getPendingPromptEnhancement(store, root)!.emphasisPhrases;
+      expect(loaded).toEqual(oldShape);
+      expect(loaded![0]).not.toHaveProperty('sectionIndex');
+      // The bytes on disk carry no section…
+      expect(rawColumn(store, root)).toBe("[{\"text\":\"payment gateway client\",\"emphasisClass\":2,\"source\":\"floor\"}]");
+    });
+  });
+
 });

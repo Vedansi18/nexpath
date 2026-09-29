@@ -23,6 +23,7 @@ import {
   startPromptEnhancementEmphasisModelCallV1,
   type PromptEnhancementEmphasisModelClientV1,
 } from './emphasis-model-call.js';
+import { PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 } from './emphasis-locate.js';
 import { redactSecrets } from '../store/redact.js';
 import type { PromptEnhancementEmphasisPhraseV1 } from '../store/pending-prompt-enhancements.js';
 
@@ -375,5 +376,47 @@ describe('what it reports, and under whose name', () => {
       onOutcome: () => { throw new Error('sink'); },
     })).not.toThrow();
     await settle();
+  });
+});
+
+/**
+ * Where the floor's spend is charged (2026-09-29).
+ *
+ * The merge has to know which section each of the floor's marks occupied, so the model competes only for
+ * what is left. It used to work that out by SEARCHING the body — which finds the first section containing
+ * those words, not the section the cap actually charged. Since the section travels with the phrase, the
+ * floor's own answer is used when it has one.
+ */
+describe("the floor's spend is charged where the cap charged it", () => {
+  /** The same words in two sections, which is the only case where the two answers differ. */
+  const REPEATED = 'the retry queue';
+  const TWO = [
+    { sectionKind: 'context_and_constraints', bodyText: `Leave ${REPEATED} alone for now.` },
+    { sectionKind: 'verification_or_test_plan', bodyText: `Drain ${REPEATED} and count what is left.` },
+  ];
+  /** Five things the model proposes, all of them in the FIRST section. */
+  const MODEL = ['Leave the', 'alone for', 'for now', 'Leave the retry', 'the retry queue alone'];
+
+  const addedInFirstSection = (floor: readonly PromptEnhancementEmphasisPhraseV1[]): number =>
+    mergePromptEnhancementEmphasisPhrasesV1({ floor, model: MODEL, sections: TWO })
+      .filter((phrase) => phrase.source === 'model').length;
+
+  it('leaves the first section its whole budget when the floor spent in the second', () => {
+    // Charged by the carried section: section 0 has spent nothing, so all four of its marks are free.
+    expect(addedInFirstSection([{ text: REPEATED, emphasisClass: 2, source: 'floor', sectionIndex: 1 }]))
+      .toBe(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1);
+  });
+
+  it('charges the first section when THAT is where the floor spent', () => {
+    // The other direction, so the test above cannot pass by the cap simply being loose.
+    expect(addedInFirstSection([{ text: REPEATED, emphasisClass: 2, source: 'floor', sectionIndex: 0 }]))
+      .toBe(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 - 1);
+  });
+
+  it('falls back to searching the body for a phrase that carries no section', () => {
+    // ⛔ An older stored row, or a caller that built the list itself. The search finds the first section
+    // holding those words, which is section 0 — so one of its four is spent.
+    expect(addedInFirstSection([{ text: REPEATED, emphasisClass: 2, source: 'floor' }]))
+      .toBe(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 - 1);
   });
 });

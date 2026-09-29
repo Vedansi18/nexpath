@@ -454,6 +454,43 @@ describe('buildPePanelView — the sections the panel numbers from', () => {
       expect(new Set(phrases).size).toBe(phrases.length);
     });
 
+    it('draws one mark for a clause the body repeats in two sections — the engine says so, not this file', () => {
+      // ⏪ This test exists because of a change that was made here and reverted the same day: the dedupe
+      // was re-keyed on text AND section, reasoning that the same words in two sections are two marks.
+      // They would be — except the CLASSIFIER dedupes a candidate by class and text over the whole body,
+      // by a deliberate ruling, so a body never offers one text twice. Measured over the 35 recorded
+      // bodies: not one does.
+      //
+      // Pinned here so the next person reaches for the measurement instead of the reasoning.
+      const repeated = 'Do not delete the audit log';
+      const twoSections = [
+        { title: 'Scope', bodyText: `${repeated} while refactoring.`, sectionKind: 'context_and_constraints' },
+        { title: 'How to verify', bodyText: `${repeated} before reporting done.`, sectionKind: 'verification_or_test_plan' },
+      ];
+      const body = twoSections.flatMap((section) => [`${section.title}:`, section.bodyText, '']).join('\n');
+      const view = buildPePanelView(engineView(body, twoSections), 1, undefined, 'add a login page');
+      expect((view.emphasisPhrases ?? []).filter((phrase) => phrase === repeated)).toHaveLength(1);
+    });
+
+    it('carries a section for every phrase, index for index', () => {
+      const view = buildPePanelView(engineView(BOLD_BODY, BOLD_SECTIONS), 1, undefined, 'add a login page');
+      expect(view.emphasisPhraseSections).toBeDefined();
+      // ⛔ The alignment IS the contract: the panel indexes one array with the other's index and must
+      // ignore the pair entirely if the lengths disagree.
+      expect(view.emphasisPhraseSections!.length).toBe(view.emphasisPhrases!.length);
+      for (const index of view.emphasisPhraseSections!) {
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(BOLD_SECTIONS.length);
+      }
+    });
+
+    it('omits the sections when it omits the phrases', () => {
+      const plain = [{ title: 'Scope', bodyText: 'the login route.', sectionKind: 'context_and_constraints' }];
+      const view = buildPePanelView(engineView('Scope:\nthe login route.', plain), 1);
+      expect(view.emphasisPhrases).toBeUndefined();
+      expect(view.emphasisPhraseSections).toBeUndefined();
+    });
+
     it('still marks without the prompt — one class needs it, the others do not', () => {
       const withPrompt = buildPePanelView(engineView(BOLD_BODY, BOLD_SECTIONS), 1, undefined, 'add a login page');
       const without = buildPePanelView(engineView(BOLD_BODY, BOLD_SECTIONS), 1);

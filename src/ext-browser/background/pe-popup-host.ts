@@ -227,8 +227,31 @@ export function buildPePanelView(
           bodyText: section.bodyText,
         })),
       });
-      const texts = [...new Set(phrases.map((phrase) => phrase.text).filter((t) => t.length > 0))];
-      if (texts.length > 0) out.emphasisPhrases = texts;
+      // The dedupe is UNCHANGED and keyed on the text, as it always was. What changed on 2026-09-29 is
+      // only that both arrays below are built from ONE filtered list, because the section each phrase
+      // was charged to is useful only while it lines up with the phrase it belongs to, index for index.
+      //
+      // ⏪ **Keying it on text AND section was built here and reverted the same day.** The reasoning was
+      // that the same words in two sections are two stretches of text — true, and irrelevant: the
+      // classifier dedupes a candidate by class and text over the whole BODY, by a deliberate ruling
+      // (*"a body that repeated the same six words in five sections would spend four and stop"*), so the
+      // case cannot arise. Measured over the 35 recorded bodies: **no body produces one text twice**, so
+      // the wider key changed nothing and only added a reason to be wrong about later.
+      const seen = new Set<string>();
+      const kept = phrases.filter((phrase) => {
+        if (phrase.text.length === 0) return false;
+        if (seen.has(phrase.text)) return false;
+        seen.add(phrase.text);
+        return true;
+      });
+      if (kept.length > 0) {
+        out.emphasisPhrases = kept.map((phrase) => phrase.text);
+        // Only when every one of them has a section: a half-filled array cannot be indexed safely, and
+        // the panel's fallback — place by first occurrence — is exactly what it did before this existed.
+        if (kept.every((phrase) => phrase.sectionIndex !== undefined)) {
+          out.emphasisPhraseSections = kept.map((phrase) => phrase.sectionIndex as number);
+        }
+      }
     } catch {
       // no marks; the popup is unaffected
     }

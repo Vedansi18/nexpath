@@ -168,12 +168,25 @@ describe('the phrases beside the pending row', () => {
     expect(getPendingPromptEnhancement(store, root)!.emphasisPhrases).toEqual([]);
   });
 
-  it('carries only the phrase, its class and its source — no offsets reach the disk', async () => {
+  it('carries the phrase, its class, its source and its section — and no offsets reach the disk', async () => {
     const req = request('/test/emphasis-persistence-shape');
     const result = await preparePromptEnhancement(req);
-    for (const phrase of phrasesFor(result, req)) {
-      expect(Object.keys(phrase).sort()).toEqual(['emphasisClass', 'source', 'text']);
+    const phrases = phrasesFor(result, req);
+    expect(phrases.length).toBeGreaterThan(0);
+    for (const phrase of phrases) {
+      expect(Object.keys(phrase).sort()).toEqual(['emphasisClass', 'sectionIndex', 'source', 'text']);
       expect(phrase.source).toBe('floor');
+      // ⛔ The ruling, stated as the ruling: a POSITION must not reach the disk. It goes stale the
+      // moment the developer edits the body, and every surface re-locates the phrase by its wording.
+      //
+      // ⏪ `sectionIndex` joined the shape on 2026-09-29. It is not a position — it names a section,
+      // which is re-found by its title line, and a section that can no longer be found costs placement
+      // accuracy rather than the mark. It is there because the cap spends four per SECTION and the
+      // surfaces were re-placing marks into sections the cap had never charged: two of the developer's
+      // terms then landed on overlapping stretches and the overlay's merge drew them as one heavy run.
+      for (const positional of ['at', 'start', 'end', 'offset', 'startColumn', 'endColumn']) {
+        expect(phrase).not.toHaveProperty(positional);
+      }
     }
   });
 });

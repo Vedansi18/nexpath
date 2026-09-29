@@ -51,9 +51,50 @@ const TERM_EDGE_WORDS: ReadonlySet<string> = new Set([
   'lets', 'let', 'please', 'just', 'very', 'more', 'most',
 ]);
 
-/** A term is at least two words and at most four; shorter is a word, longer is a sentence. */
+/**
+ * Words that may not appear ANYWHERE in a term, edges or middle.
+ *
+ * {@link TERM_EDGE_WORDS} allows its members in the middle, and that is right for articles and
+ * prepositions — `the cart drawer` and `list of items` are exactly what a developer writes. It is wrong
+ * for the words that JOIN TWO CLAUSES, and the n-gram walk cannot see the join: segments are split on
+ * punctuation only, so a four-word window slides straight across a subordinator.
+ *
+ * Measured on the reported popups:
+ *
+ *   `account if the email` — from `link it to the existing account if the email matches`. Two clauses,
+ *                            and the mark names neither. It also drew alongside `email matches`, so the
+ *                            reader saw one stretch of text under two overlapping marks.
+ *   `order is saved`       — from `the order is saved in the database`. That is a sentence about the
+ *                            order, not a name for anything.
+ *
+ * ⛔ `and`, `or`, `so` and `then` are deliberately NOT here. `rating or delivery time` is one thing the
+ * developer named — the sort keys — and refusing it would cost a good mark to tidy a bad one.
+ */
+const TERM_FORBIDDEN_ANYWHERE: ReadonlySet<string> = new Set([
+  // Subordinators: each one starts a second clause.
+  'if', 'when', 'while', 'unless', 'until', 'because', 'since', 'whether', 'though', 'although',
+  'that', 'which', 'who', 'whom', 'whose', 'where', 'why', 'how',
+  // Finite verbs. A term is a noun phrase; these make it a sentence.
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
+  'do', 'does', 'did', 'has', 'have', 'had',
+  'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
+]);
+
+/**
+ * A term is at least two words and at most five; shorter is a word, longer is a sentence.
+ *
+ * ⏪ **Four until 2026-09-29.** The window slides one word at a time, so a five-word phrase could only
+ * ever be offered as a four-word piece of itself — and on a reported popup the piece it offered was
+ * `bar at the top`, out of `a fully functional category bar at the top of the listing page`. Four words
+ * that begin in the middle of `category bar` and name half a thing.
+ *
+ * At five, `category bar at the top` is offered first and the nesting guard in
+ * {@link collectPromptEnhancementEmphasisUserTermsV1} then refuses the piece inside it. Measured over
+ * the 35 recorded bodies: **not one mark changes** — no term grew, none was added, none was lost. The
+ * whole effect is on phrases that were being cut, which is what it was for.
+ */
 const TERM_MIN_WORDS = 2 as const;
-const TERM_MAX_WORDS = 4 as const;
+const TERM_MAX_WORDS = 5 as const;
 /** …and at least this many characters, so a pair of very short words is not offered as a name. */
 const TERM_MIN_LENGTH = 6 as const;
 
@@ -70,8 +111,12 @@ const TERM_MIN_LENGTH = 6 as const;
  *  - **Two words minimum.** Single words were measured against phrases on the same bodies: they do
  *    not add marks, because the per-section cap is spent either way — they *replace* the phrases a
  *    reader would have picked with fragments of those same phrases.
- *  - **Longest first.** A four-word term is offered before any phrase inside it, so when the cap
+ *  - **Longest first.** A five-word term is offered before any phrase inside it, so when the cap
  *    binds the fuller reading is the one that survives.
+ *
+ * ⚠️ That second rule holds WITHIN this function, which generates longest-first. It does not hold
+ * across the five sources {@link collectPromptEnhancementEmphasisUserTermsV1} merges — see the nesting
+ * guard there, which is what actually enforces it.
  *
  * Punctuation ends a phrase. Words on either side of a comma are two things the developer listed,
  * not one thing they named, and a phrase spanning the comma names neither.
@@ -87,6 +132,14 @@ export function promptEnhancementDeveloperTermsV1(originalPromptText: string): r
         const span = words.slice(start, start + size);
         if (TERM_EDGE_WORDS.has(span[0]!.toLowerCase())) continue;
         if (TERM_EDGE_WORDS.has(span[span.length - 1]!.toLowerCase())) continue;
+        // …and nothing that joins two clauses or makes the phrase a sentence, wherever it sits.
+        if (span.some((word) => TERM_FORBIDDEN_ANYWHERE.has(word.toLowerCase()))) continue;
+        // ⏪ **"A term must start right after an edge word" was measured here and REJECTED.** It was
+        // aimed at `bar at the top`, a four-word window sliding into the middle of
+        // `add a category bar at the top`. It works — and it also refused `dark mode`, `xlsx output` and
+        // `30 seconds`, because a noun phrase usually follows a VERB and verbs are not edge words.
+        // Three good terms for one bad one is the wrong trade, and telling a verb from a noun modifier
+        // needs a lexicon this module must not grow.
         const phrase = span.join(' ');
         if (phrase.length < TERM_MIN_LENGTH) continue;
         const key = phrase.toLowerCase();

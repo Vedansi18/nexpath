@@ -243,3 +243,60 @@ describe('a term already inside a term this section offered', () => {
     })).toEqual(['food delivery app', 'delivery time']);
   });
 });
+
+/**
+ * What a term may not be (2026-09-29).
+ *
+ * The n-gram walk splits the prompt on punctuation only, so a window slides straight across a
+ * subordinator and straight into the middle of a noun phrase. Both were drawing marks on real popups.
+ */
+describe('a term is a name, not a piece of a sentence', () => {
+  const terms = (prompt: string) => promptEnhancementDeveloperTermsV1(prompt);
+
+  it('refuses a window that spans a subordinator', () => {
+    // `link it to the existing account if the email matches` drew `account if the email` — two clauses,
+    // naming neither, and overlapping the `email matches` mark beside it.
+    const found = terms('link it to the existing account if the email matches');
+    expect(found).not.toContain('account if the email');
+    // …and the clean halves are still offered, so this is not just "refuse everything".
+    expect(found).toContain('existing account');
+    expect(found).toContain('email matches');
+  });
+
+  it('refuses a window that carries a finite verb', () => {
+    // `the order is saved in the database` drew `order is saved`, which is a sentence about the order.
+    const found = terms('make sure the order is saved in the database');
+    expect(found).not.toContain('order is saved');
+  });
+
+  it('still offers a phrase joined by and/or — the developer named one thing', () => {
+    // ⛔ `and`, `or`, `so` and `then` are deliberately NOT refused: these are the sort keys, one thing.
+    expect(terms('sort them by rating or delivery time')).toContain('rating or delivery time');
+  });
+
+  it('offers the whole five-word phrase, so no four-word piece of it has to stand in', () => {
+    // ⏪ The window was four until 2026-09-29, and a five-word phrase could only be offered as a piece
+    // of itself: `a fully functional category bar at the top` gave `bar at the top`, which begins in the
+    // middle of `category bar`.
+    const found = terms('add a category bar at the top of the listing page');
+    expect(found).toContain('category bar at the top');
+    // The piece is still generated — it is the MERGE that refuses it, tested below — so what this pins
+    // is that the fuller reading is offered FIRST, which is what makes that refusal pick the right one.
+    expect(found.indexOf('category bar at the top')).toBeLessThan(found.indexOf('bar at the top'));
+  });
+
+  it('keeps the fuller reading when the merge sees both', () => {
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'add a category bar at the top of the listing page',
+      sectionText: '- Build a fully functional category bar at the top of the listing page.',
+    })).toContain('category bar at the top');
+  });
+
+  it('does not offer a five-word window that is a sentence', () => {
+    // The ceiling going up must not let a whole clause through: the guards above still apply at five.
+    for (const term of terms('make sure the order is saved in the database before the retry')) {
+      expect(term.split(' ').length).toBeLessThanOrEqual(5);
+      expect(term.toLowerCase().split(' ')).not.toContain('is');
+    }
+  });
+});

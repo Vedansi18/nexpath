@@ -134,9 +134,65 @@ function byPriority(left: LocatedPhrase, right: LocatedPhrase): number {
 function withoutDuplicateSpans(phrases: readonly LocatedPhrase[]): LocatedPhrase[] {
   const kept: LocatedPhrase[] = [];
   for (const phrase of phrases) {
-    const duplicate = kept.some((other) => other.sectionIndex === phrase.sectionIndex
-      && other.at === phrase.at && other.text.length === phrase.text.length);
-    if (!duplicate) kept.push(phrase);
+    const start = phrase.at;
+    const end = phrase.at + phrase.text.length;
+    /**
+     * A same-class span already kept that this one CONTAINS.
+     *
+     * ⚠️ The fuller reading has to win regardless of arrival order, and it cannot be left to that
+     * order. The term sources are five, merged in a fixed sequence, and only the last of them
+     * generates longest-first — so a short term from an earlier source arrives before the long one
+     * that contains it, and "keep the first" would then keep the fragment. Measured: `null error`
+     * standing while `null error after login` was dropped.
+     */
+    const shorterSameClass = kept.findIndex((other) => other.sectionIndex === phrase.sectionIndex
+      && other.candidate.emphasisClass === phrase.candidate.emphasisClass
+      && start <= other.at && end >= other.at + other.text.length
+      && !(start === other.at && end === other.at + other.text.length));
+    if (shorterSameClass >= 0) {
+      kept.splice(shorterSameClass, 1, phrase);
+      continue;
+    }
+    const clash = kept.some((other) => {
+      if (other.sectionIndex !== phrase.sectionIndex) return false;
+      const otherStart = other.at;
+      const otherEnd = other.at + other.text.length;
+      // Disjoint: two marks on two pieces of text, which is the ordinary case.
+      if (otherEnd <= start || end <= otherStart) return false;
+      // ⚠️ **Identical first.** This is the case the function was written for, and the nested test
+      // below swallows it — an identical span contains itself both ways round — so checking nested
+      // first let `only` be marked twice, once as a boundary and once as the developer's term. A test
+      // that had passed since the first version of this file caught it.
+      if (otherStart === start && otherEnd === end) return true;
+      // Nested, either way round.
+      const nested = (otherStart <= start && otherEnd >= end) || (start <= otherStart && end >= otherEnd);
+      if (nested) {
+        // ⚠️ **The reason above is about two DIFFERENT classes.** `auth` inside `Do not modify the auth
+        // middleware` is the developer's word AND a boundary, and the worked example shows both. Two
+        // marks of the SAME class, one inside the other, are not that: they are one stretch of text
+        // charged to the budget twice.
+        //
+        // Measured across the recorded bodies and the reported popups: 4 such pairs, every one class 2,
+        // against 1 cross-class pair. H1 was spending THREE of its four marks on one stretch —
+        // `null error after login`, `null error`, `after login` — which is why it was the densest body
+        // in the corpus.
+        //
+        // Reached only when the span already kept is the LONGER one — the other direction is handled
+        // above, by replacing the shorter with the fuller reading. So the answer here is simply: a
+        // second mark of the same class inside one already drawn earns nothing.
+        return other.candidate.emphasisClass === phrase.candidate.emphasisClass;
+      }
+      // ⛔ **Partial**: they intersect and neither contains the other, so between them they cover one
+      // stretch of text with a seam in the middle. Measured on a reported popup, `account if the email`
+      // [123,143) and `email matches` [138,151) drew the words `email` twice and read as a single
+      // ragged blob from 123 to 151 — which is the one thing a mark must never be.
+      //
+      // The list arrives in priority order, so the one already kept is the one that earned it. Nothing
+      // is lost that the standard asks for: no rule anywhere produces a pair like this deliberately,
+      // and the same span was already being collapsed when the two happened to match exactly.
+      return true;
+    });
+    if (!clash) kept.push(phrase);
   }
   return kept;
 }
@@ -155,15 +211,74 @@ function withoutDuplicateSpans(phrases: readonly LocatedPhrase[]): LocatedPhrase
  * be displaced by the model and the two can never drift apart. The caller orders the list; this
  * only counts.
  */
+/**
+ * The most of one section that may be drawn heavy, as a percentage of that section's own characters.
+ *
+ * The two caps above count MARKS; this one measures how much of the reader's paragraph is bold, which
+ * is the thing that actually decides whether emphasis still reads as emphasis. A section with four
+ * short marks is fine; a section with two marks that between them cover half of it is not.
+ *
+ * ⛔ **A word ceiling is not this rule and was measured to be the wrong instrument.** At eight words
+ * it moved no density at all; at six it dropped `design the layout of the cart drawer`, an
+ * instruction a real popup was missing. Length is not the complaint — share is.
+ *
+ * Set to 50 by the owner, 2026-09-28. At that value it refuses 2 marks across the 35 recorded bodies
+ * and leaves 3 sections of 73 in the 41–50 % band: a guard against the pathological body rather than
+ * a shaper of ordinary ones.
+ */
+export const PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1 = 50 as const;
+
+/**
+ * The shortest section the share ceiling applies to, in characters.
+ *
+ * ⚠️ **A share is the right instrument for a paragraph and the wrong one for a line.**
+ * `Limit applies to POST /api/upload only.` is 74 characters; marking `POST /api/upload` and `only`
+ * inside it is 27 % of the section and is precisely what the standard asks for. Applied flat, the
+ * ceiling refused the standard's own worked example — nine tests failed at once and were right to.
+ *
+ * Below this, a section is a line and the mark COUNT caps already govern it: four per section, and a
+ * short line cannot hold four marks unless they are tiny. Above it, share is what decides whether a
+ * paragraph still reads as prose with marks in it rather than as a wall.
+ *
+ * 160 is about two popup lines. Measured: at 160 the worked example is untouched and the recorded
+ * bodies are identical to a flat ceiling; at 200 paragraphs start getting through again.
+ */
+export const PROMPT_ENHANCEMENT_EMPHASIS_SHARE_APPLIES_OVER_CHARS_V1 = 160 as const;
+
 export function applyPromptEnhancementEmphasisCapV1<T extends { sectionIndex: number }>(
   ordered: readonly T[],
+  /**
+   * How much of each section is already text, and how long a given mark is — supplied only by callers
+   * that can answer both. Omitted, the share ceiling simply does not apply, which is what the model
+   * tier's caller needs: it ranks phrase handles that carry no text of their own.
+   */
+  share?: {
+    readonly sectionLengths: readonly number[];
+    readonly markLength: (phrase: T) => number;
+  },
 ): T[] {
   const perSection = new Map<number, number>();
+  const perSectionChars = new Map<number, number>();
   const kept: T[] = [];
   for (const phrase of ordered) {
     if (kept.length >= PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_BODY_V1) break;
     const used = perSection.get(phrase.sectionIndex) ?? 0;
     if (used >= PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1) continue;
+
+    // …and the section may not go over its share. Tested in the SAME walk as the count, so a mark
+    // refused here does not spend a count the next mark could have used, and the priority order
+    // decides what survives: the safety line first, then the instruction, then the developer's own
+    // term. When a section fills up, what it keeps is what the reader most needs to see.
+    if (share !== undefined) {
+      const sectionLength = share.sectionLengths[phrase.sectionIndex] ?? 0;
+      if (sectionLength > PROMPT_ENHANCEMENT_EMPHASIS_SHARE_APPLIES_OVER_CHARS_V1) {
+        const drawn = perSectionChars.get(phrase.sectionIndex) ?? 0;
+        const after = drawn + share.markLength(phrase);
+        if ((after / sectionLength) * 100 > PROMPT_ENHANCEMENT_EMPHASIS_MAX_SECTION_SHARE_PERCENT_V1) continue;
+        perSectionChars.set(phrase.sectionIndex, after);
+      }
+    }
+
     perSection.set(phrase.sectionIndex, used + 1);
     kept.push(phrase);
   }
@@ -231,12 +346,19 @@ export function buildPromptEnhancementEmphasisPhrasesV1(
 
   // Cap: priority order, overlaps collapsed, then four per section and twelve in all.
   const ordered = withoutDuplicateSpans([...located].sort(byPriority));
-  const kept = applyPromptEnhancementEmphasisCapV1(ordered);
+  const kept = applyPromptEnhancementEmphasisCapV1(ordered, {
+    sectionLengths: input.sections.map((section) => section.bodyText.length),
+    markLength: (phrase) => phrase.text.length,
+  });
 
   return kept.map((phrase) => ({
     text: phrase.text,
     emphasisClass: phrase.candidate.emphasisClass,
     // Everything this pass produces is local, with no call behind it.
     source: 'floor' as const,
+    // 🔑 The section this phrase was CHARGED to, carried so the surfaces place it where the cap
+    // counted it. Without it they search the whole body and can land the mark in another section
+    // entirely — see {@link PromptEnhancementEmphasisPhraseV1.sectionIndex}.
+    sectionIndex: phrase.sectionIndex,
   }));
 }
