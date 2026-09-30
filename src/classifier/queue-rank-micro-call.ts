@@ -1,12 +1,12 @@
 import OpenAI from 'openai';
 
 /**
- * V-F4 — the queue-rank MICRO-CALL: one focused question, hosted on its own dedicated call, started beside the
+ * The queue-rank MICRO-CALL: one focused question, hosted on its own dedicated call, started beside the
  * stage classifier and never awaited. Shape and discipline copied from sensitive-action-micro-clearance.ts.
  *
- * Why a dedicated call: asking the multi-task stage classifier to pick from the allowed queue failed three ways
- * (Part D §20, §22) — a constraint bolted onto a 137-signal call is ignored, and shortening that call's list starves
- * its stage judgement. This call sees ONLY the allowed keys, so an out-of-queue answer is unrepresentable.
+ * Why a dedicated call rather than a field on the stage classifier's own call: a constraint bolted onto a
+ * 137-signal call is ignored, and shortening that call's list starves its stage judgement. This call sees
+ * ONLY the allowed keys, so an out-of-queue answer is unrepresentable.
  *
  * Timing contract: started before the classifier's own call; `read()` returns synchronously whatever has settled;
  * the caller reads it at the pick, after awaits it already performs. Added pipeline wall time: zero.
