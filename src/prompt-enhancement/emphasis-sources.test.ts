@@ -300,3 +300,66 @@ describe('a term is a name, not a piece of a sentence', () => {
     }
   });
 });
+
+/**
+ * A grounded fact written in the pipeline's notation (2026-09-29).
+ *
+ * The pipeline supplies a section's fact as `task_breakdown → implementation` and the composer then
+ * writes about it in prose, so the value only matches once its underscores are read as spaces.
+ */
+describe('a grounded fact in the pipeline’s notation', () => {
+  const found = (value: string, sectionText: string) =>
+    collectPromptEnhancementEmphasisUserTermsV1({ originalPromptText: 'ship it', sectionText });
+
+  it('offers the fact in the pieces a sentence writes', () => {
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'ship it',
+      sectionText: '- Recent practice shows a solid task breakdown before implementation.',
+      groundedFactValues: ['task_breakdown → implementation'],
+    })).toContain('task breakdown');
+  });
+
+  it('does not offer the notation itself', () => {
+    // ⛔ A mark on `task_breakdown → implementation` is a mark on plumbing.
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'ship it',
+      sectionText: '- The signal task_breakdown → implementation shows a solid task breakdown.',
+      groundedFactValues: ['task_breakdown → implementation'],
+    })).not.toContain('task_breakdown → implementation');
+  });
+
+  it('leaves a HYPHEN alone — a hyphen is how a real name is spelled', () => {
+    // ⛔ The first version replaced `[_-]`, which turned the plain value `alpha-one` into `alpha one`
+    // and cost four budget tests their marks. Inside notation it matters too: reading the hyphen in
+    // `feature-flag rollout` as a space looks for `feature flag rollout`, which no body writes.
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'ship it',
+      sectionText: '- Recent practice shows the feature-flag rollout is well handled.',
+      groundedFactValues: ['feature-flag rollout → verification'],
+    })).toContain('feature-flag rollout');
+  });
+
+  it('⛔ offers NOTHING for a fact whose pieces are each one word — a known limit', () => {
+    // `implementation` is one word and generic: marked, it took 29 of the 33 recorded practices sections
+    // and pushed seven conditions out of their bodies' budgets, which is the shape §5H measured and
+    // withdrew. So single-word pieces are refused — and the cost is that a fact whose name happens to BE
+    // one word (`feature-flag → rollout`) is not marked either. The corpus holds no such fact; this pins
+    // the behaviour so the trade is visible rather than discovered.
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'ship it',
+      sectionText: '- Recent practice shows the feature-flag rollout is well handled.',
+      groundedFactValues: ['feature-flag → rollout'],
+    })).toEqual([]);
+  });
+
+  it('offers a plain value exactly as it always did', () => {
+    // Nothing without a notation separator changes: it is offered whole, hyphen and all.
+    expect(collectPromptEnhancementEmphasisUserTermsV1({
+      originalPromptText: 'ship it',
+      sectionText: '- Uses alpha-one for the retry path.',
+      groundedFactValues: ['alpha-one'],
+    })).toContain('alpha-one');
+  });
+
+  void found;
+});

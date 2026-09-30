@@ -8,7 +8,7 @@
  * indicators, and the two sections the standard never marks.
  */
 import { describe, expect, it } from 'vitest';
-import { NEVER_MARKED_SECTION_KINDS } from './emphasis-classes.js';
+import { NEVER_MARKED_SECTION_KINDS, TERM_ONLY_SECTION_KINDS } from './emphasis-classes.js';
 import { PROMPT_ENHANCEMENT_APPLIED_DETAILS_TITLE_V1 } from './popup-section-map.js';
 import {
   buildPromptEnhancementEmphasisSpansV1,
@@ -108,12 +108,18 @@ describe('what a mark is kept away from', () => {
     expect(rows[ONLY_MARKABLE_ROW]).not.toEqual([]);
   });
 
-  it('never marks the practices section either, even when nothing else holds the phrase', () => {
-    // Only the two excluded sections hold it now: there is nowhere left to draw it.
+  it('DOES mark the practices section now — a phrase may land there', () => {
+    // ⏪ This asserted the opposite until 2026-09-29: the practices section was never marked, so a
+    // phrase held only by it and by the verbatim section had nowhere to go. The owner amended that —
+    // the section names the fact its guidance is about, and that name is the main word on the screen.
+    // The classifier produces only TERMS there now (`TERM_ONLY_SECTION_KINDS`); what this file decides
+    // is only whether a mark may LAND there, and it may.
     const text = [`${SECTIONS[0]!.title}:`, SECTION_TEXT[0]!, '', `${SECTIONS[2]!.title}:`, SECTION_TEXT[2]!].join('\n');
     const sections = [SECTIONS[0]!, SECTIONS[2]!];
-    expect(spansOf({ text, sections, windowRows: text.split('\n').length }))
-      .toEqual(text.split('\n').map(() => []));
+    const rows = spansOf({ text, sections, windowRows: text.split('\n').length });
+    // Row 1 is the verbatim section's line — still never marked. Row 4 is the practices section's.
+    expect(rows[1]).toEqual([]);
+    expect(rows[4]).not.toEqual([]);
   });
 
   it('never marks the details the developer typed and applied — the same words, merged into the body', () => {
@@ -172,10 +178,14 @@ describe('what a mark is kept away from', () => {
       .toEqual(TEXT.split('\n').map(() => []));
   });
 
-  it('keeps the two never-marked kinds as the only two', () => {
+  it('keeps the verbatim section as the ONLY never-marked kind', () => {
     // The overlay shares this set with the classifier rather than keeping a second copy, so its
     // membership is pinned here: an edit on either side has to come past this test.
-    expect([...NEVER_MARKED_SECTION_KINDS].sort()).toEqual(['original_request_or_goal', 'source_signal_guidance']);
+    //
+    // ⏪ `source_signal_guidance` was the second entry until 2026-09-29 and is TERM-ONLY now: its
+    // keyword may be marked, and no instruction, boundary or condition may.
+    expect([...NEVER_MARKED_SECTION_KINDS].sort()).toEqual(['original_request_or_goal']);
+    expect([...TERM_ONLY_SECTION_KINDS].sort()).toEqual(['source_signal_guidance']);
   });
 });
 
@@ -355,10 +365,14 @@ describe('which rows the contrast leaves at full weight', () => {
     expect(exempt()[rowFor('Best practices and standards')]).toBe(true);
   });
 
-  it('does NOT exempt the practices section, though no mark may land there either', () => {
-    // The body's own prose, so it reads like the body's own prose. Exempted, it was the brightest
-    // thing on screen while carrying nothing.
-    expect(NEVER_MARKED_SECTION_KINDS.has('source_signal_guidance')).toBe(true);
+  it('does NOT exempt the practices section from the contrast', () => {
+    // The body's own prose, so it reads like the body's own prose. Exempted, it was the brightest thing
+    // on screen — which is exactly what was reported as "the last section is bold".
+    //
+    // ⏪ It used to be exempt BECAUSE no mark could land there. One can now, and the answer is unchanged
+    // for a better reason: its unmarked rows are dimmed like every other section's, and its keyword
+    // stands out by being MARKED rather than by everything around it being faded.
+    expect(NEVER_MARKED_SECTION_KINDS.has('source_signal_guidance')).toBe(false);
     expect(exempt()[rowFor('According to the signal')]).toBe(false);
   });
 

@@ -365,15 +365,52 @@ describe('what is never marked', () => {
     })).toEqual([]);
   });
 
-  it('marks nothing at all inside the practices section', () => {
-    expect(classify({
+  it('marks ONLY a term inside the practices section — its keyword, and nothing else', () => {
+    // ⏪ Until 2026-09-29 this section was marked NOTHING at all, on the reasoning that its lines propose
+    // practices by design. The owner amended that: the section names the fact its guidance is about, and
+    // that name is the main word on the screen. What did NOT change is why it was closed — an instruction
+    // marked here is nexpath telling itself what to do — so every other class is still refused, and this
+    // asserts both halves at once.
+    const found = classify({
       originalPromptText: 'deploy the payment client',
       sections: [{
         sectionKind: 'source_signal_guidance',
         sectionText: "Do not skip the tests. I'll review the payment client only.",
         groundedFactValues: ['the payment client'],
       }],
-    })).toEqual([]);
+    });
+    expect(pairs(found)).toEqual([[2, 'the payment client']]);
+    // ⛔ The line carries a limiter, a condition and an instruction. None of them earns a mark here.
+    expect(found.every((candidate) => candidate.emphasisClass === 2)).toBe(true);
+  });
+
+  it('marks the NAMED FACT the practices section was generated from', () => {
+    // The pipeline supplies the fact in its own notation and the composer writes about it in prose, so
+    // the value only matches once its underscores are read as spaces. Measured over the recorded bodies:
+    // the whole value matches none of them, `task breakdown` matches 21.
+    expect(pairs(classify({
+      originalPromptText: 'ship the billing change',
+      sections: [{
+        sectionKind: 'source_signal_guidance',
+        sectionText: '- Recent practice shows a solid task breakdown before moving to implementation.',
+        groundedFactValues: ['task_breakdown → implementation'],
+      }],
+    }))).toContainEqual([2, 'task breakdown']);
+  });
+
+  it('does not mark the pipeline’s NOTATION, even where the body prints it', () => {
+    // ⛔ A mark on `task_breakdown → implementation` is a mark on plumbing — the same thing the
+    // identifier rule refuses. One recorded body prints it verbatim and was drawing it, arrow and all.
+    const found = pairs(classify({
+      originalPromptText: 'ship the billing change',
+      sections: [{
+        sectionKind: 'source_signal_guidance',
+        sectionText: '- The signal task_breakdown → implementation shows a solid task breakdown.',
+        groundedFactValues: ['task_breakdown → implementation'],
+      }],
+    }));
+    expect(found).not.toContainEqual([2, 'task_breakdown → implementation']);
+    expect(found).toContainEqual([2, 'task breakdown']);
   });
 
   it('cuts a candidate before a secret-shaped token, in every class', () => {

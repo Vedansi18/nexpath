@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { NEVER_MARKED_SECTION_KINDS, TERM_ONLY_SECTION_KINDS } from './emphasis-classes.js';
 
 const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'emphasis-classes.ts'), 'utf8');
 
@@ -74,6 +75,49 @@ describe('the clause lists agree', () => {
       if (bare.includes(' ')) continue;
       expect(EXECUTION_VERB.test(bare), `${wrapper} is an execution verb`).toBe(false);
       expect(ALWAYS_ESCALATE_PATTERN.test(bare), `${wrapper} is an escalation verb`).toBe(false);
+    }
+  });
+});
+
+/**
+ * The VS Code preview keeps its OWN copy of the never-marked set, and nothing was watching it.
+ *
+ * `src/ext-vscode/**` is excluded from this suite by `vitest.config.ts` — that sub-package has its own
+ * package.json and a native dependency the root does not install — so its tests never run here. Its copy
+ * of `NEVER_MARKED_SECTION_KINDS` is therefore unprotected by anything that runs, and a change on either
+ * side would let the preview and the popup disagree about which sections may carry a mark.
+ *
+ * ⛔ Caught by mutation: restoring `source_signal_guidance` to the preview's copy broke nothing, because
+ * no test that runs could see it. Read from SOURCE, like the two lists above, for the same reason.
+ */
+describe('the VS Code preview agrees with the engine about what is never marked', () => {
+  const previewSource = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'ext-vscode', 'src', 'pe-payload.ts'),
+    'utf8',
+  );
+
+  /** The entries of the preview's own copy. */
+  const previewKinds = (): readonly string[] => {
+    const at = previewSource.indexOf('export const NEVER_MARKED_SECTION_KINDS');
+    if (at < 0) throw new Error('the preview no longer declares NEVER_MARKED_SECTION_KINDS');
+    const end = previewSource.indexOf(']);', at);
+    const block = previewSource.slice(at, end).replace(/^\s*\/\/.*$/gm, '');
+    return [...block.matchAll(/'([^']+)'/g)].map((match) => match[1]!);
+  };
+
+  it('reads that copy at all — an empty read would prove nothing', () => {
+    expect(previewKinds().length).toBeGreaterThan(0);
+  });
+
+  it('holds exactly the kinds the engine never marks', () => {
+    expect([...previewKinds()].sort()).toEqual([...NEVER_MARKED_SECTION_KINDS].sort());
+  });
+
+  it('does not bar the term-only section, whose keyword the engine now marks', () => {
+    // Barring it there would drop exactly the mark the 2026-09-29 change was made for, and the preview
+    // would disagree with the popup beside it.
+    for (const kind of TERM_ONLY_SECTION_KINDS) {
+      expect(previewKinds()).not.toContain(kind);
     }
   });
 });
