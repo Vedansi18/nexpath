@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { detectAbsenceFlags } from './AbsenceDetector.js';
 
 /**
  * The queue-rank MICRO-CALL: one focused question, hosted on its own dedicated call, started beside the
@@ -59,6 +60,34 @@ export function parseQueueRankReplyV1(raw: string, offered: readonly string[]): 
   try { parsed = JSON.parse(stripped); } catch { return undefined; }
   const k = (parsed as Record<string, unknown>).selected_signal_key;
   return typeof k === 'string' && offered.includes(k) ? k : undefined;
+}
+
+/**
+ * The candidate list offered to the ranking call, built BEFORE the stage classifier returns: the queue the engine
+ * will enforce if the classifier leaves the stage where it is. The session state is therefore advanced exactly as
+ * `processPrompt` will advance it for this prompt — one more prompt in the stage AND one more prompt overall.
+ * Both matter: the detector's per-signal floor reads `promptsInCurrentStage`, and its cooldown gate compares
+ * `promptCount` with each raised flag's `cooldownUntil`. Advancing only the first leaves the estimate one prompt
+ * short on the prompt a cooldown batch expires — which is exactly when the enforced queue is at its largest.
+ *
+ * Pure: the state is copied, never written. The result is only ever OFFERED; the pick validates the ranked answer
+ * against the enforced queue, so a candidate that does not materialise is refused and the fallback applies.
+ */
+export function estimateQueueIfStageStaysV1(
+  state: Parameters<typeof detectAbsenceFlags>[0],
+  profile: Parameters<typeof detectAbsenceFlags>[1],
+  projectType: Parameters<typeof detectAbsenceFlags>[2],
+  thresholdMultiplier: Parameters<typeof detectAbsenceFlags>[3],
+  absenceMinFloor: Parameters<typeof detectAbsenceFlags>[4],
+  runtimeContext: Parameters<typeof detectAbsenceFlags>[5],
+): string[] {
+  const advanced = {
+    ...state,
+    promptsInCurrentStage: (state.promptsInCurrentStage ?? 0) + 1,
+    promptCount: (state.promptCount ?? 0) + 1,
+  } as typeof state;
+  return detectAbsenceFlags(advanced, profile, projectType, thresholdMultiplier, absenceMinFloor, runtimeContext)
+    .map((f) => f.signalKey);
 }
 
 export function startQueueRankMicroCallV1(

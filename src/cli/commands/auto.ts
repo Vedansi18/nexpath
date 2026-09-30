@@ -6,7 +6,7 @@ import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { classifyStage } from '../../classifier/stage-classifier.js';
 import { startSensitiveActionMicroClearanceV1 } from '../../classifier/sensitive-action-micro-clearance.js';
-import { startQueueRankMicroCallV1 } from '../../classifier/queue-rank-micro-call.js';
+import { startQueueRankMicroCallV1, estimateQueueIfStageStaysV1 } from '../../classifier/queue-rank-micro-call.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
@@ -1319,9 +1319,7 @@ export async function runAuto(
   try {
     const rankProjectType = getProject(store, input.projectRoot)?.projectType ?? undefined;
     const rankRuntimeContext = buildRuntimeContext(mgr.current as import('../../classifier/types.js').SessionState);
-    const rankSessionState = mgr.current as import('../../core/classifier/types.js').SessionState;
-    const rankAdvancedState = { ...rankSessionState, promptsInCurrentStage: (rankSessionState.promptsInCurrentStage ?? 0) + 1 } as typeof rankSessionState;
-    rankCandidateKeys = detectAbsenceFlags(rankAdvancedState, mgr.current.profile, rankProjectType, freqConfig.signalAbsenceThresholdMultiplier, freqConfig.signalAbsenceMinFloor, rankRuntimeContext).map((f) => f.signalKey);
+    rankCandidateKeys = estimateQueueIfStageStaysV1(mgr.current as import('../../core/classifier/types.js').SessionState, mgr.current.profile, rankProjectType, freqConfig.signalAbsenceThresholdMultiplier, freqConfig.signalAbsenceMinFloor, rankRuntimeContext);
   } catch (e) { logger.info('queue_rank_error', { where: 'prequeue', error: String(e) }); rankCandidateKeys = []; }
   const rankRecentPrompts = [...mgr.current.promptHistory.slice(-3).map((p) => p.text), input.promptText];
   const microClearance = startSensitiveActionMicroClearanceV1(input.promptText, openai);
