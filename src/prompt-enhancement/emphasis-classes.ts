@@ -79,21 +79,45 @@ export interface PromptEnhancementEmphasisInputV1 {
 }
 
 /**
- * The two sections whose text is never marked, whatever it contains.
+ * The section whose text is never marked, whatever it contains.
  *
  * Exported for the popup's overlay, which has to answer the same question from the other end: not
  * "may this section produce a phrase" but "may a phrase land here". A phrase taken from the
- * developer's prompt is quoted back verbatim in the first of these, so without the same list the
- * overlay would find it there first and mark their own words at them.
+ * developer's prompt is quoted back verbatim here, so without the same list the overlay would find it
+ * there first and mark their own words at them.
  *
- * ⚠️ **Visibility only.** The set is unchanged, and the overlay's test pins its membership so an
- * edit here cannot pass silently.
+ * ⏪ **`source_signal_guidance` was in this set until 2026-09-29** — *"its lines propose practices by
+ * design, so the loudest mark would land on the one section that is nexpath's suggestion rather than
+ * the developer's ask."* The owner amended that: the practices section names the thing the guidance is
+ * ABOUT, and that name is the main word on the screen. It is now in
+ * {@link TERM_ONLY_SECTION_KINDS} instead — its keyword may be marked, and nothing else may.
  */
 export const NEVER_MARKED_SECTION_KINDS: ReadonlySet<string> = new Set([
   // The developer's own words, quoted back. Marking them would emphasise their own prompt at them.
   'original_request_or_goal',
-  // Its lines propose practices by design, so the loudest mark would land on the one section that
-  // is nexpath's suggestion rather than the developer's ask.
+]);
+
+/**
+ * Sections where ONLY the term classes may fire — the developer's own words and the named facts the
+ * section was generated from. No instruction, no boundary, no condition, no safety line.
+ *
+ * 🔑 **Why a third state rather than simply opening the section.** Measured before it was written, over
+ * the 33 recorded practices sections and a reported popup:
+ *
+ *   as a TERM-ONLY section   `implementation` in 29 of 33 · `task breakdown` in 21 — the named fact the
+ *                            guidance is about, which is what the reader is looking for
+ *   fully markable           the same, PLUS `Do not assume` ×4 and `sensitive action` ×4 — the inserted
+ *                            safety sentence, whose marks already exist in the section that carries it,
+ *                            so the same sentence would be marked twice — PLUS, on the reported popup,
+ *                            the single mark `Recent practice suggests I need`: a sentence opening, cut
+ *                            mid-phrase, and not a keyword at all
+ *
+ * ⛔ The reason the section was closed in the first place still holds for the OTHER classes: an
+ * instruction marked here is nexpath telling itself what to do, drawn louder than anything the developer
+ * asked for. What changed is that its NAMED FACT is not that — it is the subject of the guidance, and it
+ * arrives as data (`groundedFactValues`), not as prose this module had to guess at.
+ */
+export const TERM_ONLY_SECTION_KINDS: ReadonlySet<string> = new Set([
   'source_signal_guidance',
 ]);
 
@@ -146,7 +170,7 @@ const CLASS_1_MIDSENTENCE_HEADS: readonly string[] = [
 /**
  * What a clause can WEAR in front of its verb, peeled off before the verb is looked for.
  *
- * {@link CLASS_1_CLAUSE_HEADS} finds one head at a time, anywhere in the line. That is the right
+ * {@link CLASS_1_MIDSENTENCE_HEADS} finds one head at a time, anywhere in the line. That is the right
  * mechanism for a head in the MIDDLE of a sentence, and the wrong one for what the composer actually
  * writes, which is several of these stacked: `First, I'll need to check the logs`. Read head by head,
  * `first,` leaves `I'll need to check…` — words in front of the verb — and `i'll` leaves
@@ -170,7 +194,7 @@ const CLASS_1_WRAPPERS: readonly string[] = [
   'i want to', "i'd like to", 'i should', 'we should', 'you should', 'you must', 'i can', 'we can',
   'i will', 'we will', "i'll", "we'll", "i'm", "we're", "let's", 'let us',
   // The modal run on its own, for when a clause head above already took the pronoun off. `I'll` is one
-  // of {@link CLASS_1_CLAUSE_HEADS}, so `…, I'll need to gather that info too.` arrives here as
+  // of {@link CLASS_1_MIDSENTENCE_HEADS}, so `…, I'll need to gather that info too.` arrives here as
   // `need to gather…` — measured on a reported popup, where the instruction drew nothing at all.
   // ⚠️ Every one of these ends in `to`, which is what makes them safe: `plan to run the tests` is
   // peeled and `plan a dry run` is untouched.
@@ -1014,6 +1038,12 @@ export function classifyPromptEnhancementEmphasisCandidatesV1(
     const classOneHere = classOneOn && section.clearanceVerdict !== 'not_proposed';
 
     for (const term of userTerms) keep({ text: term, emphasisClass: 2 });
+
+    // 🔑 A TERM-ONLY section stops here: its keyword is marked and nothing else is. See
+    // {@link TERM_ONLY_SECTION_KINDS} for what the other classes produced there when this was measured
+    // — a doubly-marked safety sentence, and a sentence opening cut mid-phrase.
+    if (TERM_ONLY_SECTION_KINDS.has(section.sectionKind)) continue;
+
     for (const safety of safetyLinesOf(section.sectionText, input.sensitiveActionName)) keep(safety);
     // The confirmation's second unit — a boundary, and the one place a fixed span is claimed
     // before the line scan, so "Do not assume, and do not rely…" is not taken as one long clause.

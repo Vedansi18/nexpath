@@ -251,12 +251,18 @@ export function locatePromptEnhancementEmphasisOffsetsV1(input: {
  * The stretches the CONTRAST must leave at full weight: every title line, the applied-details block,
  * and the section that quotes the developer's prompt back.
  *
- * ⚠️ **Deliberately narrower than {@link ineligibleRanges}.** That answers "may a mark land here",
- * and it also covers `source_signal_guidance` — the practices section. Using it for the contrast too
- * left that section as the only full-brightness prose in a frame of dimmed prose, and full beside dim
- * reads as emphasis: on a reported body, the whole of `Best practices and standards` looked bold
- * while every other body row was dim. It carries no marks and it is the body's own prose, so it
- * should read like the body's own prose.
+ * ⚠️ **Deliberately narrower than {@link ineligibleRanges}.** That answers "may a mark land here", and
+ * it used to cover `source_signal_guidance` — the practices section — as well. Using it for the contrast
+ * too left that section as the only full-brightness prose in a frame of dimmed prose, and full beside
+ * dim reads as emphasis: on a reported body, the whole of `Best practices and standards` looked bold
+ * while every other body row was dim. It is the body's own prose, so it should read like the body's own
+ * prose.
+ *
+ * ⏪ **The two lists agreed about that section until 2026-09-29 and no longer do.** It is now term-only
+ * rather than never-marked (`TERM_ONLY_SECTION_KINDS`), so a mark CAN land there — and the contrast's
+ * answer is unchanged for a better reason than before: its keyword stands out by being marked, and its
+ * remaining rows are dimmed like every other section's, instead of the whole section standing out by
+ * being the one thing not faded.
  *
  * What stays exempt is what the reason was always about: a title is structure the reader navigates
  * by, and the verbatim section and the applied-details block are the developer's own words rather

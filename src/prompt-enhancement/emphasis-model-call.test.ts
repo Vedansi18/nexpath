@@ -420,3 +420,33 @@ describe("the floor's spend is charged where the cap charged it", () => {
       .toBe(PROMPT_ENHANCEMENT_EMPHASIS_CAP_PER_SECTION_V1 - 1);
   });
 });
+
+/**
+ * Which sections the model is shown at all (2026-09-29).
+ *
+ * It is asked for INSTRUCTIONS. A section where an instruction may not be marked is a section it may not
+ * be asked about — otherwise it spends a billed call producing phrases nothing can draw, and the reason
+ * the section is restricted (an instruction marked there is nexpath telling itself what to do) is
+ * defeated by the tier that does not read the restriction.
+ */
+describe('the sections the model is shown', () => {
+  const BODY = [
+    { sectionKind: 'context_and_constraints', bodyText: 'Check the auth middleware for the null error.' },
+    { sectionKind: 'original_request_or_goal', bodyText: 'fix the null error after login' },
+    { sectionKind: 'source_signal_guidance', bodyText: '- Recent practice shows a solid task breakdown.' },
+  ];
+
+  it('withholds the verbatim section, as it always did', () => {
+    expect(buildPromptEnhancementEmphasisModelBodyV1({ sections: BODY })).not.toContain('fix the null error after login');
+  });
+
+  it('withholds the TERM-ONLY section too', () => {
+    // ⛔ Caught by mutation: without this the filter could drop back to the never-marked set alone and
+    // nothing that runs would notice.
+    expect(buildPromptEnhancementEmphasisModelBodyV1({ sections: BODY })).not.toContain('task breakdown');
+  });
+
+  it('still shows the ordinary section — so the two above are not passing on an empty body', () => {
+    expect(buildPromptEnhancementEmphasisModelBodyV1({ sections: BODY })).toContain('the auth middleware');
+  });
+});

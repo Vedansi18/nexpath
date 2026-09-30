@@ -189,6 +189,45 @@ const has = (haystack: readonly string[], needle: string): boolean =>
   haystack.some((entry) => entry.toLowerCase() === needle.toLowerCase());
 
 /**
+ * A grounded fact value, in the pieces a SENTENCE would contain.
+ *
+ * The pipeline supplies a section's fact in its own notation — `task_breakdown → implementation` — and
+ * the composer then writes about it in prose: *"…emphasize the stage movement discipline focused on
+ * transitioning from idea to implementation"*. `offer` requires a value to appear in the section before
+ * it will mark it, so the whole value never matches and the fact goes unmarked even though the section
+ * is entirely about it.
+ *
+ * 🔑 Measured over the 33 recorded practices sections: the whole value matches **0**; split on the arrow
+ * and with the underscores read as spaces, `implementation` matches **29** and `task breakdown` **21**.
+ * That is the name of the thing the guidance is about — the main word on the screen — and it arrives as
+ * DATA, which is what makes it a term rather than a guess.
+ *
+ * ⛔ Nothing here invents wording. It reshapes a value the pipeline already supplied so it can be found
+ * in prose the pipeline already wrote, and `offer` still refuses anything the section does not contain.
+ *
+ * ⛔ **Two words minimum, the same floor {@link TERM_MIN_WORDS} sets for every other term.** Split on the
+ * arrow, `task_breakdown → implementation` offers `task breakdown` and `implementation`, and the second is
+ * a generic word that happened to be in the notation: measured, it marked 29 of the 33 recorded practices
+ * sections and pushed seven conditions out of their bodies' budgets. That is exactly the shape §5H
+ * measured and withdrew — a single word replacing the phrase a reader would have picked. `task breakdown`
+ * names the fact; `implementation` names nothing.
+ */
+const FACT_NOTATION_SEPARATOR = /\s*(?:→|->|·|\|)\s*/;
+
+function readableFactPieces(value: string): readonly string[] {
+  return value
+    .split(FACT_NOTATION_SEPARATOR)
+    // ⛔ UNDERSCORES only. A first version replaced `[_-]` and turned the grounded value `alpha-one`
+    // into `alpha one`, which no body contains — and because a piece had been produced, the value
+    // itself stopped being offered. Four budget tests went from four marks to none. A hyphen is how a
+    // real term is spelled (`alpha-one`, `gpt-4o-mini`); an underscore is how the pipeline spells one.
+    .map((piece) => piece.replace(/_+/g, ' ').trim())
+    .filter((piece) => piece !== value
+      && piece.length >= TERM_MIN_LENGTH
+      && piece.split(/\s+/).length >= TERM_MIN_WORDS);
+}
+
+/**
  * Every phrase in this section that is the developer's own wording.
  *
  * Four sources, each already shipped and each answering a different question: the item floors say
@@ -237,7 +276,19 @@ export function collectPromptEnhancementEmphasisUserTermsV1(
   for (const value of extractPromptEnhancementExpectationValuesV1(input.sectionText)) offer(value);
 
   // 4. What the project supplied for this section.
-  for (const value of input.groundedFactValues ?? []) offer(value);
+  //
+  //    A plain value — `POST /api/upload`, `auth` — is offered as it stands. A value written in the
+  //    pipeline's NOTATION is offered only in its readable pieces: `task_breakdown → implementation`
+  //    turned up verbatim in one recorded body and was marked arrow and all, which is a mark on
+  //    plumbing — the same thing the identifier rule above refuses.
+  for (const value of input.groundedFactValues ?? []) {
+    const pieces = readableFactPieces(value);
+    // The whole value, unless it is NOTATION — `task_breakdown → implementation` turned up verbatim in
+    // one recorded body and was marked arrow and all, which is a mark on plumbing. A value with no
+    // separator is a term and is offered exactly as it always was.
+    if (!FACT_NOTATION_SEPARATOR.test(value) || pieces.length === 0) offer(value);
+    for (const piece of pieces) offer(piece);
+  }
 
   // 5. The developer's own multi-word terms, where the body kept them.
   //

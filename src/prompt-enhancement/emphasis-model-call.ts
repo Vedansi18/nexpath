@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { redactSecrets } from '../store/redact.js';
 import { SECRET_IN_TEXT } from '../classifier/mistake-categories.js';
-import { maskInsertedText, NEVER_MARKED_SECTION_KINDS } from './emphasis-classes.js';
+import { maskInsertedText, NEVER_MARKED_SECTION_KINDS, TERM_ONLY_SECTION_KINDS } from './emphasis-classes.js';
 import { applyPromptEnhancementEmphasisCapV1, namedActionIn } from './emphasis-locate.js';
 import type { PromptEnhancementEmphasisPhraseV1 } from '../store/pending-prompt-enhancements.js';
 
@@ -190,7 +190,12 @@ export function buildPromptEnhancementEmphasisMarkableBodyV1(
   // with the same function rather than a second copy of the rule.
   const named = input.sensitiveActionName ?? namedActionIn(input.sections);
   return input.sections
-    .filter((section) => !NEVER_MARKED_SECTION_KINDS.has(section.sectionKind))
+    // ⛔ A TERM-ONLY section is withheld too. The model tier proposes INSTRUCTIONS, and the whole point
+    // of that state is that an instruction marked there is nexpath telling itself what to do — so the
+    // section it may not produce one for is a section it may not read either. Its keyword is a term the
+    // floor already has from data, and the model is not asked about terms.
+    .filter((section) => !NEVER_MARKED_SECTION_KINDS.has(section.sectionKind)
+      && !TERM_ONLY_SECTION_KINDS.has(section.sectionKind))
     .map((section) => maskInsertedText(section.bodyText, named))
     .join('\n');
 }

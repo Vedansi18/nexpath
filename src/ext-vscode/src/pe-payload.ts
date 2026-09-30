@@ -61,21 +61,27 @@ export interface PeBodySection {
 }
 
 /**
- * The two section kinds the standard never marks, restated because this package
- * cannot import the set that defines them.
+ * The section kind the standard never marks, restated because this package cannot
+ * import the set that defines them.
  *
  *   `original_request_or_goal`   the developer's own words, quoted back — marking
  *                                them would emphasise their own prompt at them.
- *   `source_signal_guidance`     its lines propose practices by design, so the
- *                                loudest mark would land on the one section that
- *                                is a suggestion rather than the ask.
  *
- * ⛔ A mark drawn inside either is a defect, not a preference, which is why the
- * preview computes eligibility rather than trusting the phrase list.
+ * ⛔ A mark drawn inside it is a defect, not a preference, which is why the preview
+ * computes eligibility rather than trusting the phrase list.
+ *
+ * ⏪ **`source_signal_guidance` was here until 2026-09-29**, on the reasoning that its
+ * lines propose practices by design. The owner amended that: the section NAMES the
+ * fact its guidance is about, that name arrives as data, and it is the main word on
+ * the screen. The engine now marks that keyword there and nothing else
+ * (`TERM_ONLY_SECTION_KINDS`), so barring the section here would drop exactly the mark
+ * the change was made for — and the preview would disagree with the popup beside it.
+ *
+ * ⚠️ This is a COPY of the engine's set, and the two must not drift. The engine's own
+ * declaration carries the same note.
  */
 export const NEVER_MARKED_SECTION_KINDS: ReadonlySet<string> = new Set([
   'original_request_or_goal',
-  'source_signal_guidance',
 ]);
 
 export interface PeDirectionalAction {
