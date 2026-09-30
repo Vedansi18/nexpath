@@ -6,7 +6,7 @@ import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { classifyStage } from '../../classifier/stage-classifier.js';
 import { startSensitiveActionMicroClearanceV1 } from '../../classifier/sensitive-action-micro-clearance.js';
-import { startQueueRankMicroCallV1 } from '../../classifier/queue-rank-micro-call.js';
+import { startQueueRankMicroCallV1, estimateQueueIfStageStaysV1 } from '../../classifier/queue-rank-micro-call.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
@@ -38,7 +38,7 @@ import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
 import { OpenAILLMAdapter } from '../adapters/llm.adapter.js';
 import { loggerAdapter } from '../adapters/log.adapter.js';
 import { logger, initLogger } from '../../logger.js';
-import { SIGNAL_MAP as B5_SIGNAL_MAP } from '../../core/classifier/signals.js';
+import { SIGNAL_MAP as RANK_SIGNAL_MAP } from '../../core/classifier/signals.js';
 import { stripBom, headBytesHex } from '../../utils/strip-bom.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
@@ -1313,21 +1313,17 @@ export async function runAuto(
   // below, and is read synchronously (then aborted if still pending) right after that await —
   // added wall time is exactly zero and the hook process's lifetime is unchanged. Every
   // failure mode reads as "no clearance", which keeps today's confirmation behaviour intact.
-  // V-F4: build the queue the engine will enforce if the stage stays (obs run: identical on 11 of 13 fires) and
-  // start the ranking micro-call beside the classifier. Never awaited; read at the pick; zero added wall time.
-  let vf4Keys: string[] = [];
+  // Build the queue the engine will enforce if the stage stays, ready for the ranking micro-call that is
+  // issued beside the classifier below. Never awaited; read at the pick; zero added wall time.
+  let rankCandidateKeys: string[] = [];
   try {
-    const vf4PT = getProject(store, input.projectRoot)?.projectType ?? undefined;
-    const vf4RC = buildRuntimeContext(mgr.current as import('../../classifier/types.js').SessionState);
-    const vf4St = mgr.current as import('../../core/classifier/types.js').SessionState;
-    const vf4Adv = { ...vf4St, promptsInCurrentStage: (vf4St.promptsInCurrentStage ?? 0) + 1 } as typeof vf4St;
-    vf4Keys = detectAbsenceFlags(vf4Adv, mgr.current.profile, vf4PT, freqConfig.signalAbsenceThresholdMultiplier, freqConfig.signalAbsenceMinFloor, vf4RC).map((f) => f.signalKey);
-  } catch (e) { logger.info('vf4_error', { where: 'prequeue', error: String(e) }); vf4Keys = []; }
-  const vf4Recent = [...mgr.current.promptHistory.slice(-3).map((p) => p.text), input.promptText];
-  const vf4 = startQueueRankMicroCallV1(vf4Keys, vf4Recent, openai as any);
-  logger.info('vf4_start', { promptCountBefore: mgr.current.promptCount, n: vf4Keys.length, outcome: vf4.outcome() });
+    const rankProjectType = getProject(store, input.projectRoot)?.projectType ?? undefined;
+    const rankRuntimeContext = buildRuntimeContext(mgr.current as import('../../classifier/types.js').SessionState);
+    rankCandidateKeys = estimateQueueIfStageStaysV1(mgr.current as import('../../core/classifier/types.js').SessionState, mgr.current.profile, rankProjectType, freqConfig.signalAbsenceThresholdMultiplier, freqConfig.signalAbsenceMinFloor, rankRuntimeContext);
+  } catch (e) { logger.info('queue_rank_error', { where: 'prequeue', error: String(e) }); rankCandidateKeys = []; }
+  const rankRecentPrompts = [...mgr.current.promptHistory.slice(-3).map((p) => p.text), input.promptText];
   const microClearance = startSensitiveActionMicroClearanceV1(input.promptText, openai);
-  const stageResult = await classifyStage(
+  const stagePromise = classifyStage(
     {
       promptText:        input.promptText,
       window:            [...mgr.current.promptHistory.map((p) => ({ text: p.text })), { text: input.promptText }],
@@ -1358,6 +1354,11 @@ export async function runAuto(
       },
     },
   );
+  // Issued AFTER the classifier's own call so runAuto's first call stays the stage classifier's, and
+  // BEFORE the await below so both are in flight across it — the concurrency is unchanged either way.
+  const queueRank = startQueueRankMicroCallV1(rankCandidateKeys, rankRecentPrompts, openai as any);
+  logger.info('queue_rank_start', { promptCountBefore: mgr.current.promptCount, n: rankCandidateKeys.length, outcome: queueRank.outcome() });
+  const stageResult = await stagePromise;
   microClearance.abort();
   const settledClearance = microClearance.read();
   // Observability for the capture/failure rate (the I1 lesson, applied here from day one):
@@ -1780,29 +1781,29 @@ export async function runAuto(
     effectiveFlagType = 'stage_transition';
   } else {
     const qualifyingKeys = new Set(triggerResult.qualifyingFlags.map((f) => f.signalKey));
-    // V-F4: read the ranked pick (synchronous — whatever settled beside the classifier), validate it against the
+    // Read the ranked pick (synchronous — whatever settled beside the classifier), validate it against the
     // REAL queue, and only then let it replace today's file-order fallback. Tier 1 is untouched.
-    const vf4Ranked = vf4.read();
-    vf4.abort();
-    const vf4Usable = vf4Ranked !== undefined && qualifyingKeys.has(vf4Ranked);
-    // B5 (rubric B): the tier-3 fallback is no longer file order. Order the queue by FEWEST expected stages
+    const rankedKey = queueRank.read();
+    queueRank.abort();
+    const rankedUsable = rankedKey !== undefined && qualifyingKeys.has(rankedKey);
+    // The tier-3 fallback is no longer file order. Order the queue by FEWEST expected stages
     // (the more specific signal), then by the SMALLEST wait number; both are existing SignalDefinition fields,
     // so no signal is ranked by hand. Ties keep file order — Array#sort is stable — so this is a strict
     // refinement of today's behaviour, never a reshuffle of equals.
-    const b5Rank = (k: string): [number, number] => {
-      const s = B5_SIGNAL_MAP.get(k) as { expectedStages?: readonly string[]; absenceThreshold?: number } | undefined;
+    const fallbackRank = (k: string): [number, number] => {
+      const s = RANK_SIGNAL_MAP.get(k) as { expectedStages?: readonly string[]; absenceThreshold?: number } | undefined;
       return [s?.expectedStages?.length ?? Number.MAX_SAFE_INTEGER, s?.absenceThreshold ?? Number.MAX_SAFE_INTEGER];
     };
-    const b5Ordered = [...triggerResult.qualifyingFlags].sort((a, b) => {
-      const ra = b5Rank(a.signalKey); const rb = b5Rank(b.signalKey);
+    const fallbackOrdered = [...triggerResult.qualifyingFlags].sort((a, b) => {
+      const ra = fallbackRank(a.signalKey); const rb = fallbackRank(b.signalKey);
       return (ra[0] - rb[0]) || (ra[1] - rb[1]);
     });
-    const b5Fallback = b5Ordered[0]!.signalKey;
+    const fallbackKey = fallbackOrdered[0]!.signalKey;
     const selectedKey = qualifyingKeys.has(stageResult.selectedSignalKey)
       ? stageResult.selectedSignalKey
-      : (vf4Usable ? vf4Ranked : b5Fallback);
-    logger.info('b5_rank', { promptCount: mgr.current.promptCount, fileOrderFirst: triggerResult.qualifyingFlags[0]!.signalKey, rubricFirst: b5Fallback, changed: triggerResult.qualifyingFlags[0]!.signalKey !== b5Fallback, queueSize: triggerResult.qualifyingFlags.length });
-    logger.info('vf4_pick', { promptCount: mgr.current.promptCount, offered: vf4Keys.length, outcome: vf4.outcome(), ranked: vf4Ranked ?? null, rankedInQueue: vf4Usable, classifierInQueue: qualifyingKeys.has(stageResult.selectedSignalKey), used: selectedKey, tier: qualifyingKeys.has(stageResult.selectedSignalKey) ? 1 : (vf4Usable ? 2 : 3) });
+      : (rankedUsable ? rankedKey : fallbackKey);
+    logger.info('absence_fallback_rank', { promptCount: mgr.current.promptCount, fileOrderFirst: triggerResult.qualifyingFlags[0]!.signalKey, rubricFirst: fallbackKey, changed: triggerResult.qualifyingFlags[0]!.signalKey !== fallbackKey, queueSize: triggerResult.qualifyingFlags.length });
+    logger.info('queue_rank_pick', { promptCount: mgr.current.promptCount, offered: rankCandidateKeys.length, outcome: queueRank.outcome(), ranked: rankedKey ?? null, rankedInQueue: rankedUsable, classifierInQueue: qualifyingKeys.has(stageResult.selectedSignalKey), used: selectedKey, tier: qualifyingKeys.has(stageResult.selectedSignalKey) ? 1 : (rankedUsable ? 2 : 3) });
     effectiveFlagType = `absence:${selectedKey}`;
     // Same list the gate used, for the same reason — by now 6.8 has persisted the fresh raises, so
     // the duplicates this introduces are absorbed rather than counted twice.
