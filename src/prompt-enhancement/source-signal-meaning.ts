@@ -34,11 +34,15 @@ import {
  * second person). Their descriptions are the cause, and their weakness is NOT mechanically detectable — a length or
  * polarity rule passes all three. So the gate is an explicit list, and it is fail-closed.
  *
- * HOW A KEY GETS ON IT. Only by being read and judged fit, and — for these eight — by having produced no wrong draft
+ * HOW A KEY GETS ON IT. Only by being read and judged fit, and — for these seven — by having produced no wrong draft
  * in a measured run. The list is CONTENT, so it is Hiren's to extend; this seed is what the evidence supports today.
+ *
+ * WHY `context_loss` IS NOT ON IT (measured on staging 35fd8c56, 2026-10-01). On a session about a cancellation policy
+ * the writer took its description ("recapping or re-anchoring session context") and applied it to the product — "the
+ * cancellation flow does not adequately recap or re-anchor session context". A wrong statement made of the fix's own
+ * words is a side effect, so the signal keeps today's wording until its description is rewritten and re-measured.
  */
 export const PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1: ReadonlySet<string> = new Set([
-  'context_loss',
   'feature_scope_before_build',
   'idea_scoping',
   'implementation_checkpoint',

@@ -28,7 +28,7 @@ import { promptEnhancementGeneratedEscalatesAuthorityV1 } from './safety-sendabi
 
 const ORIGINAL_ABSENCE = 'not observed in this prompt';
 // an approved signal, used wherever a test needs the meaning to actually travel
-const APPROVED = 'context_loss';
+const APPROVED = 'idea_scoping';
 
 type Request = Parameters<typeof buildPromptEnhancementGuidanceFactsV1>[0];
 
@@ -94,7 +94,7 @@ describe('2. the approved list — an unapproved description never travels', () 
   it('lets an approved signal through, keeping the observation first and the spaced name', () => {
     expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.has(APPROVED)).toBe(true);
     expect(promptEnhancementAbsenceEvidenceValueV1(APPROVED, ORIGINAL_ABSENCE, 'Recapping session context'))
-      .toBe('not observed in this prompt; context loss means: Recapping session context');
+      .toBe('not observed in this prompt; idea scoping means: Recapping session context');
   });
 
   it("keeps today's wording for the three signals measured to produce wrong drafts", () => {
@@ -111,11 +111,11 @@ describe('2. the approved list — an unapproved description never travels', () 
 
   it('drops a trailing full stop and nothing else — a word ending in "s" keeps its "s"', () => {
     expect(promptEnhancementAbsenceEvidenceValueV1(APPROVED, ORIGINAL_ABSENCE, 'the existing tests kept green.'))
-      .toBe('not observed in this prompt; context loss means: the existing tests kept green');
+      .toBe('not observed in this prompt; idea scoping means: the existing tests kept green');
     expect(promptEnhancementAbsenceEvidenceValueV1(APPROVED, ORIGINAL_ABSENCE, 'the existing tests kept green'))
-      .toBe('not observed in this prompt; context loss means: the existing tests kept green');
+      .toBe('not observed in this prompt; idea scoping means: the existing tests kept green');
     expect(promptEnhancementAbsenceEvidenceValueV1(APPROVED, ORIGINAL_ABSENCE, 'a tested recovery. . '))
-      .toBe('not observed in this prompt; context loss means: a tested recovery');
+      .toBe('not observed in this prompt; idea scoping means: a tested recovery');
   });
 
   it('gates the stage ADVICE — no stage line is approved yet — but lets the plain names through', () => {
@@ -144,7 +144,7 @@ describe('3. the authority guard — a meaning may never make the sentence read 
 
   it('keeps a meaning that describes the practice without commanding anything', () => {
     expect(promptEnhancementAbsenceEvidenceValueV1(APPROVED, ORIGINAL_ABSENCE, 'Recapping or re-anchoring session context in a long session'))
-      .toBe('not observed in this prompt; context loss means: Recapping or re-anchoring session context in a long session');
+      .toBe('not observed in this prompt; idea scoping means: Recapping or re-anchoring session context in a long session');
   });
 
   it('does not charge the meaning for a verdict the bare name already carries', () => {
@@ -186,7 +186,15 @@ describe('5. through the fact builder', () => {
   it('carries an approved meaning when the field is present, and never touches the key', () => {
     const map = promptEnhancementSignalMeaningByRefV1({ absenceKey: APPROVED, absenceDescription: 'Recapping session context' });
     expect(evidenceOf(request(absenceTrigger(APPROVED), { signalMeaningByRef: map }), 'absence_signal'))
-      .toEqual({ key: APPROVED, value: 'not observed in this prompt; context loss means: Recapping session context' });
+      .toEqual({ key: APPROVED, value: 'not observed in this prompt; idea scoping means: Recapping session context' });
+  });
+
+  it('keeps context_loss off the list: its own description was applied to a product flow on staging', () => {
+    expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.has('context_loss')).toBe(false);
+    expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.size).toBe(7);
+    const map = promptEnhancementSignalMeaningByRefV1({ absenceKey: 'context_loss', absenceDescription: 'Recapping or re-anchoring session context in a long session' });
+    expect(evidenceOf(request(absenceTrigger('context_loss'), { signalMeaningByRef: map }), 'absence_signal'))
+      .toEqual({ key: 'context_loss', value: ORIGINAL_ABSENCE });
   });
 
   it('leaves an UNAPPROVED signal exactly as it is today, even with a meaning supplied', () => {
@@ -202,7 +210,7 @@ describe('5. through the fact builder', () => {
       { normalizedStageAbsenceSignalRefs: [APPROVED], signalMeaningByRef: map },
     ));
     expect(facts.find((fact) => fact.sourceType === 'absence_signal')?.evidence?.value)
-      .toBe('not observed in this prompt; context loss means: Recapping session context');
+      .toBe('not observed in this prompt; idea scoping means: Recapping session context');
   });
 
   it('gives a stage fact the plain names and no advice', () => {
