@@ -118,12 +118,14 @@ describe('2. the approved list — an unapproved description never travels', () 
       .toBe('not observed in this prompt; idea scoping means: a tested recovery');
   });
 
-  it('gates the stage ADVICE — no stage line is approved yet — but lets the plain names through', () => {
+  it('leaves the stage lane exactly as it is today — no stage line is approved, and the plain names do not travel either', () => {
     expect(PROMPT_ENHANCEMENT_APPROVED_STAGE_ADVICE_V1.size).toBe(0);
     expect(promptEnhancementStageEvidenceValueV1('task_breakdown', 'implementation', 'task_breakdown → implementation',
-      PROMPT_ENHANCEMENT_STAGE_ADVICE_V1.implementation)).toBe('task breakdown → implementation');
+      PROMPT_ENHANCEMENT_STAGE_ADVICE_V1.implementation)).toBe('task_breakdown → implementation');
+    expect(promptEnhancementStageEvidenceValueV1('review_testing', 'feedback_loop', 'review_testing → feedback_loop', 'x'))
+      .toBe('review_testing → feedback_loop');
     expect(promptEnhancementStageEvidenceValueV1('release', 'release', 'release', 'x')).toBe('release');
-    expect(promptEnhancementStageEvidenceValueV1(undefined, 'idea', 'undefined → idea', 'x')).toBe('unknown → idea');
+    expect(promptEnhancementStageEvidenceValueV1(undefined, 'idea', 'undefined → idea', 'x')).toBe('undefined → idea');
   });
 });
 
@@ -213,10 +215,10 @@ describe('5. through the fact builder', () => {
       .toBe('not observed in this prompt; idea scoping means: Recapping session context');
   });
 
-  it('gives a stage fact the plain names and no advice', () => {
+  it('gives a stage fact nothing: the value is exactly the current one, underscores included', () => {
     const map = promptEnhancementSignalMeaningByRefV1({ prevStage: 'task_breakdown', currentStage: 'implementation' });
     expect(evidenceOf(request(stageTrigger('task_breakdown', 'implementation'), { signalMeaningByRef: map }), 'stage_transition'))
-      .toEqual({ key: 'stage', value: 'task breakdown → implementation' });
+      .toEqual({ key: 'stage', value: 'task_breakdown → implementation' });
   });
 
   it('still gives a sensitive signal NO evidence, meaning or not', () => {

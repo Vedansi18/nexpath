@@ -140,16 +140,16 @@ export function promptEnhancementStageEvidenceValueV1(
   const text = meaning?.trim().replace(/[. ]+$/, '');
   if (!text) return original;
 
-  // For a caller that DID opt in, the plain NAMES travel on their own: they carry no advice, they are what the
-  // benchmark report asked for in the no-key text, and they cannot say anything wrong —
-  // `task_breakdown → implementation` becomes `task breakdown → implementation` and nothing else changes.
+  // The stage lane is UNTOUCHED unless a stage line is approved, and none is: no stage line has yet produced a correct
+  // draft in a measured run. So the original value travels byte for byte — the stage fact the writer sees is exactly
+  // today's, underscores included. (An earlier version let the plain names through, `task breakdown → implementation`;
+  // that changed a lane this fix does not need to change, and it is withdrawn so the fix reaches the absence facts of
+  // the approved signals and nothing else.)
+  if (to === undefined || !PROMPT_ENHANCEMENT_APPROVED_STAGE_ADVICE_V1.has(to)) return original;
   const start = plainName(from ?? 'unknown');
-  const move = to === undefined || to === from ? start : `${start} → ${plainName(to)}`;
-
-  // The ADVICE is gated: no stage line has yet produced a correct draft in a measured run.
-  if (to === undefined || !PROMPT_ENHANCEMENT_APPROVED_STAGE_ADVICE_V1.has(to)) return move;
+  const move = to === from ? start : `${start} → ${plainName(to)}`;
   const enriched = `${move}; at this stage: ${text}`;
-  return promptEnhancementMeaningKeepsAuthorityV1('stage', original, enriched) ? enriched : move;
+  return promptEnhancementMeaningKeepsAuthorityV1('stage', original, enriched) ? enriched : original;
 }
 
 /**
