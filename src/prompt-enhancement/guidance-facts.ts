@@ -1,6 +1,7 @@
 import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
 import { ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { redactSecrets } from '../store/redact.js';
+import { promptEnhancementAbsenceEvidenceValueV1, promptEnhancementStageEvidenceValueV1 } from './source-signal-meaning.js';
 import {
   projectFactCategoryForRefV1,
   projectFactRefIsApplicableV1,
@@ -185,6 +186,7 @@ function triggerEligibilityV1(
 function sourceSignalEvidenceV1(
   kind: 'absence' | 'stage' | 'memory' | 'content_template',
   sourceId: string,
+  meaning?: string,
 ): { readonly key: string; readonly value: string } {
   switch (kind) {
     case 'stage': {
@@ -194,11 +196,19 @@ function sourceSignalEvidenceV1(
       // itself reads as a bug to whoever sees it in a body.
       return {
         key: 'stage',
-        value: to === undefined || to === from ? from ?? 'unknown' : `${from} → ${to}`,
+        value: promptEnhancementStageEvidenceValueV1(
+          from,
+          to,
+          to === undefined || to === from ? from ?? 'unknown' : `${from} → ${to}`,
+          meaning,
+        ),
       };
     }
     case 'absence':
-      return { key: sourceId.replace(/^absence:/, ''), value: 'not observed in this prompt' };
+      return {
+        key: sourceId.replace(/^absence:/, ''),
+        value: promptEnhancementAbsenceEvidenceValueV1(sourceId.replace(/^absence:/, ''), 'not observed in this prompt', meaning),
+      };
     case 'memory':
       // ⚠️ Just 'a repeated gap' — the ANCHOR appends 'in your recent work'. Carrying it in the
       // value too rendered it twice: "...as a repeated gap in your recent work in your recent
@@ -218,6 +228,7 @@ function absenceSignalFactV1(
   factId: string,
   sourceId: string,
   eligibility: PromptEnhancementSourceEligibilityStateV1 | undefined,
+  meaning?: string,
 ): PromptEnhancementGuidanceFact {
   const isSensitiveSource = isSensitiveSignalRefV1(sourceId);
   return {
@@ -249,7 +260,7 @@ function absenceSignalFactV1(
     evidence: evidenceForGuidanceFact(
       isSensitiveSource ? 'requires_confirmation' : 'public_safe',
       'not_applicable',
-      sourceSignalEvidenceV1('absence', sourceId),
+      sourceSignalEvidenceV1('absence', sourceId, meaning),
     ),
     publicCopySafe: true,
   };
@@ -294,6 +305,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       evidence: evidenceForGuidanceFact('public_safe', 'not_applicable', sourceSignalEvidenceV1(
         'stage',
         promptEnhancementStageSignalKeyV1(trigger.prevStage, trigger.currentStage),
+        signals.signalMeaningByRef?.[promptEnhancementStageSignalKeyV1(trigger.prevStage, trigger.currentStage)],
       )),
       publicCopySafe: true,
     });
@@ -302,6 +314,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       nextId('signal'),
       promptEnhancementAbsenceSignalKeyV1(trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage),
       triggerEligibilityV1(request),
+      signals.signalMeaningByRef?.[promptEnhancementAbsenceSignalKeyV1(trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage)],
     ));
   }
 
@@ -314,7 +327,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
     // facts survived for one signal. That was invisible while neither stated anything; the moment
     // both state an identity it is the same sentence printed twice in the body.
     const canonical = ref.includes(':') ? ref : promptEnhancementAbsenceSignalKeyV1(ref);
-    facts.push(absenceSignalFactV1(nextId('signal'), canonical, triggerEligibilityV1(request)));
+    facts.push(absenceSignalFactV1(nextId('signal'), canonical, triggerEligibilityV1(request), signals.signalMeaningByRef?.[canonical]));
   }
 
   // Source A — content-template records are source *evidence / precedent only*

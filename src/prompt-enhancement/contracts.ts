@@ -325,6 +325,11 @@ export interface PromptEnhancementSourceInputSnapshotV1 {
   groundingTierByRef?: Readonly<Record<string, 'promoted_practice_P' | 'capability' | 'uncorroborated'>>;
   groundingPolarityByRef?: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
   /**
+   * What each crossing source signal MEANS — caller-resolved plain text keyed by the canonical ref
+   * (`absence:<key>`, `stage:<from>-to-<to>`). Absent ⇒ the evidence value is worded exactly as before.
+   */
+  signalMeaningByRef?: Readonly<Record<string, string>>;
+  /**
    * The caller-resolved CONTENT per crossing ref — a generic key/value pair plus
    * where the resolution happened. Values come from the store-backed reads the
    * boundary already performs; prompt-derived values arrive only through

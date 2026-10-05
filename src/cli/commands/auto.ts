@@ -10,6 +10,8 @@ import { startQueueRankMicroCallV1, estimateQueueIfStageStaysV1 } from '../../cl
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
+import { SIGNAL_MAP } from '../../classifier/signals.js';
+import { promptEnhancementSignalMeaningByRefV1 } from '../../prompt-enhancement/source-signal-meaning.js';
 import { ACTIVE_AGENT_ID } from '../../env/agent-capabilities.js';
 import { recordEnvTrajectory, recentEnvChangesV1 } from '../../env/env-trajectory.js';
 import { recordTranscriptCorroboration } from '../../telemetry/transcript-corroboration.js';
@@ -733,6 +735,12 @@ export function buildPromptEnhancementRequestForAuto(input: {
       sourceRefs,
       triggerSignalEligibilityState: input.triggerEligibility,
       normalizedStageAbsenceSignalRefs: absenceSignal ? [absenceSignal] : [],
+      signalMeaningByRef: promptEnhancementSignalMeaningByRefV1({
+        absenceKey: absenceSignal,
+        absenceDescription: absenceSignal ? SIGNAL_MAP.get(absenceSignal)?.description : undefined,
+        prevStage: triggerKind === 'stage_transition' ? input.previousStage : undefined,
+        currentStage: triggerKind === 'stage_transition' ? currentStage : undefined,
+      }),
       contentTemplateRecordFactRefs: content.resolvedRecordIdentity ? [content.resolvedRecordIdentity] : [],
       popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
       whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],
