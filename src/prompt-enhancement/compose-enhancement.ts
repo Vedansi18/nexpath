@@ -27,7 +27,17 @@ import {
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { promptEnhancementFactValueLinesV1, promptEnhancementGroundedValuesV1 } from './fact-value-render.js';
-import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import {
+  promptEnhancementSectionCitableRefsV1,
+  promptEnhancementSectionProjectWordV1,
+  type PromptEnhancementGuidanceFact,
+} from './templates/section-plan.js';
+import {
+  promptEnhancementProjectWordsLanguageAllowedV1,
+  resolvePromptEnhancementProjectWordsV1,
+  type PromptEnhancementProjectWordV1,
+} from './project-words.js';
+import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import { PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1 } from './body-assertion-checks.js';
 import {
   buildPromptEnhancementOriginalTextRefV1,
@@ -179,6 +189,11 @@ interface ValidatedStructuredComposerDrafts {
    */
   readonly droppedDraftCount?: number;
   readonly droppedDraftReason?: PromptEnhancementComposerDraftRejectionReason;
+  /**
+   * The project words each section KEPT (`project-words.ts`), by section id. Empty whenever the plan offered none,
+   * and whenever every offered word was refused — the drafts are then the writer's text with our marks resolved away.
+   */
+  readonly keptProjectWords: ReadonlyMap<string, PromptEnhancementProjectWordV1>;
 }
 
 const ADDITIONAL_DETAILS_WORD_CAP = 5000;
@@ -195,7 +210,78 @@ const ACTION_LABELS: Record<PromptEnhancementActionType, PromptEnhancementAction
   close: 'Close',
 };
 
+/**
+ * Compose the body — and, when a section kept project words (`project-words.ts`), compose it a second time without
+ * them and keep the words ONLY if that is the one thing that differs.
+ *
+ * The words passed their own checks before they were kept; this is the check that they changed nothing else. Every
+ * verdict the body carries — the safety and send decision, the fallback, the diagnostics, which sections render, the
+ * confirmation clause — must come out the same, and the text must be the body without the words plus the words. If
+ * anything else moved (a name the no-invention check now flags, a clause a risk check now demands), the body without
+ * them is the one returned: it is exactly what the writer's reply composes to without this feature.
+ *
+ * Nothing kept — every body whose plan offered no project words, and every reply that kept none — returns the first
+ * composition untouched, so this costs a second pass only where there is something to compare.
+ */
 export function composePromptEnhancementBody(input: PromptEnhancementComposeInput): PromptEnhancementComposeResult {
+  const withWords = composeBodyV1(input, 'keep');
+  if (withWords.keptProjectWords.size === 0) return withWords.result;
+  const withoutWords = composeBodyV1(input, 'base');
+  return projectWordsChangeNothingElseV1(withWords, withoutWords) ? withWords.result : withoutWords.result;
+}
+
+/** Remove each kept phrase once from the text it was kept in — the inverse of keeping it. */
+function withoutKeptPhraseV1(text: string, phrase: string): string {
+  const at = text.indexOf(` ${phrase}`);
+  return at < 0 ? text : `${text.slice(0, at)}${text.slice(at + phrase.length + 1)}`;
+}
+
+/** Does the text name what the project words state ("Next.js") as the no-invention check would flag it, given these allowances? */
+function namesProjectWordItselfV1(text: string, word: PromptEnhancementProjectWordV1, allowedTexts: readonly string[]): boolean {
+  const key = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const named = new Set(word.namedValues.map(key));
+  return findPromptEnhancementInventionViolationsV1({ sectionText: text, allowedTexts })
+    .some((violation) => named.has(key(violation.item)));
+}
+
+function projectWordsChangeNothingElseV1(
+  withWords: { result: PromptEnhancementComposeResult; keptProjectWords: ReadonlyMap<string, PromptEnhancementProjectWordV1> },
+  withoutWords: { result: PromptEnhancementComposeResult; keptProjectWords: ReadonlyMap<string, PromptEnhancementProjectWordV1> },
+): boolean {
+  const a = withWords.result;
+  const b = withoutWords.result;
+  const phrases = [...withWords.keptProjectWords.values()].map((word) => word.phrase);
+  const unworded = (text: string): string => phrases.reduce(withoutKeptPhraseV1, text);
+  const sameVerdict = a.sendPolicy === b.sendPolicy
+    && a.fallbackMode === b.fallbackMode
+    && a.callVisibilityMode === b.callVisibilityMode
+    && a.sourceGuidanceCoverage === b.sourceGuidanceCoverage
+    && a.actionInteractionState === b.actionInteractionState
+    && a.bodySectionAgreement === b.bodySectionAgreement
+    && a.currentBody.generatedSafeStatus === b.currentBody.generatedSafeStatus
+    && a.currentBody.composerMode === b.currentBody.composerMode
+    && JSON.stringify(a.diagnostics) === JSON.stringify(b.diagnostics)
+    && JSON.stringify(a.currentBody.composerClaims) === JSON.stringify(b.currentBody.composerClaims)
+    && JSON.stringify(a.currentBody.sourceFactIds) === JSON.stringify(b.currentBody.sourceFactIds);
+  if (!sameVerdict) return false;
+  if (a.currentBody.sections.length !== b.currentBody.sections.length) return false;
+  for (let index = 0; index < a.currentBody.sections.length; index++) {
+    const sectionA = a.currentBody.sections[index]!;
+    const sectionB = b.currentBody.sections[index]!;
+    if (sectionA.sectionId !== sectionB.sectionId || sectionA.sectionKind !== sectionB.sectionKind) return false;
+    const kept = withWords.keptProjectWords.get(sectionA.sectionId);
+    const bodyA = kept === undefined ? sectionA.bodyText : withoutKeptPhraseV1(sectionA.bodyText, kept.phrase);
+    if (bodyA !== sectionB.bodyText) return false;
+    if (JSON.stringify(sectionA.promptPointRefs) !== JSON.stringify(sectionB.promptPointRefs)) return false;
+    if (JSON.stringify(sectionA.transformReasonCodes) !== JSON.stringify(sectionB.transformReasonCodes)) return false;
+  }
+  return unworded(a.currentBody.text) === b.currentBody.text;
+}
+
+function composeBodyV1(
+  input: PromptEnhancementComposeInput,
+  projectWords: 'keep' | 'base',
+): { result: PromptEnhancementComposeResult; keptProjectWords: ReadonlyMap<string, PromptEnhancementProjectWordV1> } {
   const action = input.action ?? 'default';
   const runtimeState = input.composerRuntimeState ?? 'not_requested';
   const sectionPlans = selectSectionPlansForAction(
@@ -208,7 +294,10 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     sectionPlans,
     input.sectionPlanningResult.renderedFacts,
     input.originalPromptText,
+    projectWords,
   );
+  const keptProjectWords = validatedLlmDrafts.keptProjectWords;
+  const composed = (result: PromptEnhancementComposeResult) => ({ result, keptProjectWords });
   const structuredComposerAttempted = runtimeState === 'accepted_structured_output' && input.structuredComposerOutput !== undefined;
   const structuredComposerRejected = structuredComposerAttempted && validatedLlmDrafts.draftsBySectionId.size === 0;
   const effectiveRuntimeState: PromptEnhancementComposerRuntimeState = structuredComposerRejected
@@ -243,7 +332,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       generatedSafeStatus: previousBodySafety.generatedSafeStatus,
       sections: carriedSections,
     };
-    return {
+    // The previous body is carried as it was: no project words of THIS reply are in it.
+    return { keptProjectWords: new Map(), result: {
       currentBody: previousBody,
       composerBoundary: buildComposerBoundary(input, 'previous_sendable_body', 'fallback_no_llm', [], {
         composerRunId,
@@ -275,13 +365,13 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         { category: 'fallback_or_no_popup', reasonCode: `action_failed_previous_body_preserved:${effectiveRuntimeState}` },
         ...previousBodySafety.publicDiagnostics,
       ],
-    };
+    } };
   }
 
   if (sectionPlans.length === 0) {
     const text = input.originalPromptText;
     const llmCallPolicy = 'no_call';
-    return {
+    return { keptProjectWords: new Map(), result: {
       currentBody: {
         currentBodyId,
         bodyRevision,
@@ -335,7 +425,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       actionInteractionState: 'fallback_only',
       callVisibilityMode: 'fallback_no_llm',
       diagnostics: [{ category: 'fallback_or_no_popup', reasonCode: 'no_popup_or_no_sections_original_only' }],
-    };
+    } };
   }
 
   // Owner ruling 2026-08-07: on a provider failure (provider_api_unavailable / timeout_no_send)
@@ -452,7 +542,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
   const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
-  let sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
+  let sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin, keptProjectWords);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -481,7 +571,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
+      sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin, keptProjectWords);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -563,7 +653,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     ...(usesLlmWording ? { nounPurposes: input.structuredComposerOutput?.nounPurposes } : {}),
   });
 
-  return {
+  return composed({
     currentBody: {
       ...currentBody,
       generatedSafeStatus: safetyValidation.generatedSafeStatus === 'valid' && generatedSafeStatus === 'valid_with_fallback'
@@ -594,7 +684,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     actionInteractionState: action === 'default' ? 'idle' : 'success_replaced_body',
     callVisibilityMode,
     diagnostics: [...diagnostics, ...safetyValidation.publicDiagnostics],
-  };
+  });
 }
 
 function selectSectionPlansForAction(
@@ -679,20 +769,34 @@ function validatedStructuredComposerDrafts(
   // The developer's own words: an identifier THEY wrote is theirs to echo, so the leak check
   // below applies the same allowance the validator does rather than a stricter one.
   originalPromptText = '',
+  // 'keep' lets a section keep the project words that pass their checks; 'base' resolves every one of them away —
+  // the body the words are compared against (`composePromptEnhancementBody`).
+  projectWords: 'keep' | 'base' = 'keep',
 ): ValidatedStructuredComposerDrafts {
+  const noWords: ReadonlyMap<string, PromptEnhancementProjectWordV1> = new Map();
   const rejectedFor = (
     rejectionReason: PromptEnhancementComposerDraftRejectionReason,
-  ): ValidatedStructuredComposerDrafts => ({ draftsBySectionId: new Map(), composerClaims: [], rejectionReason });
+  ): ValidatedStructuredComposerDrafts => ({ draftsBySectionId: new Map(), composerClaims: [], rejectionReason, keptProjectWords: noWords });
   // No output at all is not a rejection — the composer never produced anything to refuse. But an output
   // that arrives carrying zero drafts IS a refusal, and leaving it reasonless made it the one rejection
   // path that could not be identified.
-  if (!output) return { draftsBySectionId: new Map(), composerClaims: [] };
+  if (!output) return { draftsBySectionId: new Map(), composerClaims: [], keptProjectWords: noWords };
   if (output.sectionDrafts.length === 0) return rejectedFor('no_drafts_returned');
   const sectionIds = new Set(sectionPlans.map((sectionPlan) => sectionPlan.sectionId));
   const sourceIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceId)));
   const sourceRefIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceRefId)));
-  const allowedSourceFactIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
+  // A section may cite the project fact it was offered, so the claims union may name it too. With nothing offered
+  // this is each section's `structuredContentPartRefs`, as before.
+  const allowedSourceFactIds = new Set(sectionPlans.flatMap((sectionPlan) => promptEnhancementSectionCitableRefsV1(sectionPlan)));
   const drafts = new Map<string, string>();
+  // Project words (`project-words.ts`): every phrase this body offered, so a mark of ours is resolved wherever the
+  // writer put it. None offered → nothing below touches a draft. A reply the writer reports as not English keeps
+  // none: the checks that judge the words read English.
+  const bodyPhrases = sectionPlans
+    .map((sectionPlan) => promptEnhancementSectionProjectWordV1(sectionPlan, renderedFacts)?.phrase)
+    .filter((phrase): phrase is string => phrase !== undefined);
+  const mayKeepWords = projectWords === 'keep' && promptEnhancementProjectWordsLanguageAllowedV1(output.detectedLanguageSelfReport);
+  const keptProjectWords = new Map<string, PromptEnhancementProjectWordV1>();
 
   // Per-draft faults cost their own section, not the whole reply.
   //
@@ -716,27 +820,66 @@ function validatedStructuredComposerDrafts(
     if (!sectionIds.has(draft.sectionId)) { dropDraft('unknown_section'); continue; }
     const sectionPlan = sectionPlans.find((section) => section.sectionId === draft.sectionId);
     if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
-    const bodyText = normalizeWhitespace(draft.bodyText);
-    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
-    // A draft echoing the engine's own vocabulary is refused HERE, so the section renders
-    // deterministically and the popup survives. The validator still blocks the same identifier
-    // in a finished body — that is the backstop for text this gate never saw (a user edit, a
-    // body assembled another way); catching it at the draft keeps a model slip from costing the
-    // developer their whole enhancement.
-    const vocabularyLeaks = findPromptEnhancementInternalVocabularyLeaksV1({
-      text: bodyText,
-      allowedTexts: [originalPromptText, ...sectionPlan.structuredContentPartRefs, ...sectionPlan.sourceRefs.map((ref) => ref.sourceId)],
-    });
-    if (vocabularyLeaks.length > 0) { dropDraft('empty_or_disallowed_wording'); continue; }
-    // Pasted content-template prose is disallowed wording of exactly the kind the
-    // check above refuses, so it rides that reason rather than widening the typed
-    // union — and it costs this draft only, leaving the section to render
-    // deterministically while every other draft keeps the model's wording.
-    const pastedProse = contentTemplateProseFor(sectionPlan, renderedFacts)
-      .some((prose) => bodyText.toLowerCase().includes(prose));
-    if (pastedProse) { dropDraft('empty_or_disallowed_wording'); continue; }
-    if (draft.sourceFactIds.length === 0) { dropDraft('no_source_fact_ids'); continue; }
-    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) { dropDraft('source_fact_id_not_in_section'); continue; }
+    // The wording checks, as one question about one text: the reason it is refused, or nothing.
+    const refusalFor = (bodyText: string): PromptEnhancementComposerDraftRejectionReason | undefined => {
+      if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) return 'empty_or_disallowed_wording';
+      // A draft echoing the engine's own vocabulary is refused HERE, so the section renders
+      // deterministically and the popup survives. The validator still blocks the same identifier
+      // in a finished body — that is the backstop for text this gate never saw (a user edit, a
+      // body assembled another way); catching it at the draft keeps a model slip from costing the
+      // developer their whole enhancement.
+      const vocabularyLeaks = findPromptEnhancementInternalVocabularyLeaksV1({
+        text: bodyText,
+        allowedTexts: [originalPromptText, ...sectionPlan.structuredContentPartRefs, ...sectionPlan.sourceRefs.map((ref) => ref.sourceId)],
+      });
+      if (vocabularyLeaks.length > 0) return 'empty_or_disallowed_wording';
+      // Pasted content-template prose is disallowed wording of exactly the kind the
+      // check above refuses, so it rides that reason rather than widening the typed
+      // union — and it costs this draft only, leaving the section to render
+      // deterministically while every other draft keeps the model's wording.
+      const pastedProse = contentTemplateProseFor(sectionPlan, renderedFacts)
+        .some((prose) => bodyText.toLowerCase().includes(prose));
+      if (pastedProse) return 'empty_or_disallowed_wording';
+      return undefined;
+    };
+    const writtenText = normalizeWhitespace(draft.bodyText);
+    const hostWord = promptEnhancementSectionProjectWordV1(sectionPlan, renderedFacts);
+    // Project words are resolved BEFORE the checks, so every check judges exactly the text that would ship: the
+    // text with the kept words when they pass every check the text without them passes, and otherwise without them.
+    let bodyText = writtenText;
+    if (bodyPhrases.length > 0) {
+      const resolve = (keep: boolean) => resolvePromptEnhancementProjectWordsV1({
+        text: writtenText, sectionKind: sectionPlan.sectionKind, hostWord, bodyPhrases, originalPromptText, keep,
+      });
+      const withWords = mayKeepWords && hostWord !== undefined ? resolve(true) : undefined;
+      if (withWords?.keptPhrase !== undefined && hostWord !== undefined && refusalFor(withWords.text) === undefined) {
+        bodyText = withWords.text;
+        keptProjectWords.set(draft.sectionId, hostWord);
+      } else {
+        bodyText = resolve(false).text;
+      }
+    }
+    const refusal = refusalFor(bodyText);
+    if (refusal !== undefined) { keptProjectWords.delete(draft.sectionId); dropDraft(refusal); continue; }
+    if (draft.sourceFactIds.length === 0) { keptProjectWords.delete(draft.sectionId); dropDraft('no_source_fact_ids'); continue; }
+    const citableRefs = promptEnhancementSectionCitableRefsV1(sectionPlan);
+    if (draft.sourceFactIds.some((sourceFactId) => !citableRefs.includes(sourceFactId))) { keptProjectWords.delete(draft.sectionId); dropDraft('source_fact_id_not_in_section'); continue; }
+    // The offered fact is citable for the words it carries — never as licence for the writer to name the fact in
+    // words of its own. Such a draft is refused for the citation, exactly as the same draft is where nothing was
+    // offered: measured 2026-10-10 (1 reply in 140), the writer skipped the words, named the framework itself and
+    // cited the fact; kept for that citation, its own name blocked the WHOLE body, where the refused citation costs
+    // this one section. Judged with the no-invention check's own extractor and the allowance the section has
+    // without the words, so a draft is refused here only where that check would have flagged the name.
+    if (
+      hostWord !== undefined
+      && draft.sourceFactIds.some((sourceFactId) => (sectionPlan.sharedProjectFactRefs ?? []).includes(sourceFactId))
+      && namesProjectWordItselfV1(keptProjectWords.has(draft.sectionId) ? withoutKeptPhraseV1(bodyText, hostWord.phrase) : bodyText, hostWord, [
+        originalPromptText,
+        ...sectionPlan.structuredContentPartRefs,
+        ...sectionPlan.sourceIds,
+        ...promptEnhancementGroundedValuesV1(sectionPlan.sectionKind, renderedFacts),
+      ])
+    ) { keptProjectWords.delete(draft.sectionId); dropDraft('source_fact_id_not_in_section'); continue; }
     drafts.set(draft.sectionId, `- ${bodyText}`);
   }
 
@@ -758,6 +901,7 @@ function validatedStructuredComposerDrafts(
     composerClaims: output.composerClaims,
     droppedDraftCount: droppedDraftCount > 0 ? droppedDraftCount : undefined,
     droppedDraftReason,
+    keptProjectWords,
   };
 }
 
@@ -807,8 +951,9 @@ export function promptEnhancementValidatedDraftSectionIdsV1(
  *
  * ⚠️ The empty-claims fallback re-derives the union from the SURVIVING drafts' own `sourceFactIds`
  * rather than inventing anything — the same definition the model was given, applied to the subset
- * that lived. Every such id is provably in a surviving section's `structuredContentPartRefs`,
- * because that is what admitted the draft in the first place.
+ * that lived. Every such id is provably among a surviving section's citable refs (its
+ * `structuredContentPartRefs`, plus the project fact it was offered), because that is what admitted
+ * the draft in the first place.
  */
 export function promptEnhancementComposerOutputForSurvivingSectionsV1(
   output: PromptEnhancementStructuredComposerOutputV1 | undefined,
@@ -820,8 +965,10 @@ export function promptEnhancementComposerOutputForSurvivingSectionsV1(
   const sectionDrafts = output.sectionDrafts.filter((draft) => !prunedIds.has(draft.sectionId));
   if (sectionDrafts.length === output.sectionDrafts.length) return output;
   // Only claims stranded BY THE PRUNING are withdrawn: an id a surviving section still carries stays,
-  // and an id no section ever carried stays too, so the validator still refuses it.
-  const allowed = new Set(survivingSectionPlans.flatMap((section) => section.structuredContentPartRefs));
+  // and an id no section ever carried stays too, so the validator still refuses it. A project fact a
+  // surviving section was offered as project words is still carried by it, even when the project-facts
+  // section itself was the one pruned.
+  const allowed = new Set(survivingSectionPlans.flatMap((section) => promptEnhancementSectionCitableRefsV1(section)));
   const stranded = new Set(
     prunedSectionPlans.flatMap((section) => section.structuredContentPartRefs).filter((ref) => !allowed.has(ref)),
   );
@@ -1384,6 +1531,8 @@ function attachSpanRefs(
   // T3: without this the carriers would ref harvested Nexpath boilerplate as the user's
   // own points — the same self-ingestion defect, one layer down.
   promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+  // The project words each section kept: the names they state are what that section may name.
+  keptProjectWords: ReadonlyMap<string, PromptEnhancementProjectWordV1> = new Map(),
 ): readonly PromptEnhancementSectionV1[] {
   // Extracted once per composition rather than per section: the points belong to the
   // prompt, not to any one section, and recomputing invites two answers.
@@ -1444,6 +1593,10 @@ function attachSpanRefs(
       sourceIds: sectionPlan.sourceIds,
       sourceFactIds: sectionPlan.structuredContentPartRefs,
       groundedFactValues: promptEnhancementGroundedValuesV1(sectionPlan.sectionKind, renderedFacts),
+      // Only a section that KEPT project words carries their names; every other section is exactly as before.
+      ...((keptProjectWords.get(sectionPlan.sectionId)?.namedValues ?? []).length > 0
+        ? { projectWordValues: keptProjectWords.get(sectionPlan.sectionId)!.namedValues }
+        : {}),
       // The typed slot obligations travel from the plan onto the composed
       // section unchanged - the composer, checks and fixtures read them here.
       slotObligations: sectionPlan.slotObligations,

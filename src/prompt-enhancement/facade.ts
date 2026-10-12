@@ -295,6 +295,8 @@ async function prepare(
     sourceRefs: request.sourceSignals.sourceRefs,
     guidanceFacts: sourceMix.renderedFacts,
     requiresExecutionConfirmation,
+    // Project words are offered only to a body the developer writes in English (or an unknown language).
+    projectWordLanguage: request.reviewMomentContext.detectedLanguage,
   });
 
   // E4: bounded LLM composer wording for a shown popup on the baseline compose (no

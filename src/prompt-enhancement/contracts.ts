@@ -607,6 +607,15 @@ export interface PromptEnhancementSectionPlanItemV1 {
   deterministicTextBasisPolicy: 'structured_parts' | 'deterministic_text_draft' | 'not_applicable';
   textDraftRef?: string;
   structuredContentPartRefs: readonly string[];
+  /**
+   * The project fact this section is offered as project words (`project-words.ts`): the id of ONE probe fact the
+   * classifier judged applicable to this prompt, set on the one section that fact serves best. Kept apart from
+   * `structuredContentPartRefs` on purpose — that field also decides which sections reach the composer, which
+   * sections the pruner keeps, the why-help codes and the claims a deterministic body makes, and none of those may
+   * move because a section can now name a project fact. Absent on every other section; never set on the original
+   * request or on the project-facts section itself, which owns these facts already.
+   */
+  sharedProjectFactRefs?: readonly string[];
   supportedActions: readonly PromptEnhancementActionType[];
   contentTemplateRuntimeSeamUse: PromptEnhancementSectionV1['contentTemplateRuntimeSeamUse'];
   handoffCapabilityFlags: readonly string[];
@@ -828,6 +837,13 @@ export interface PromptEnhancementSectionV1 {
    * boundary resolved WAS supplied; it just had no carrier until now.
    */
   groundedFactValues?: readonly string[];
+  /**
+   * The names this section's KEPT project words state ("Next.js" in "in the Next.js app"), for the no-invention
+   * check: the words passed every check before they were kept, so the name they carry was supplied, not invented.
+   * Only on a section that kept project words, and kept apart from `groundedFactValues` on purpose — that field also
+   * drives the popup's emphasis marks, which must not change because a section gained a few words.
+   */
+  projectWordValues?: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   requiredSurvivor: boolean;

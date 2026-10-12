@@ -16,6 +16,12 @@ import type {
   PromptEnhancementRouteResult,
 } from '../routing-taxonomy.js';
 import { getPromptEnhancementTemplateByIntent } from './registry.js';
+import {
+  promptEnhancementProjectWordForFactV1,
+  promptEnhancementProjectWordHostKindsV1,
+  promptEnhancementProjectWordsLanguageAllowedV1,
+  type PromptEnhancementProjectWordV1,
+} from '../project-words.js';
 
 export type PromptEnhancementGuidanceSourceType =
   | 'stage_transition'
@@ -451,6 +457,12 @@ export interface PromptEnhancementSectionPlanningInput {
    * Absent means today's behaviour, so no existing caller changes.
    */
   requiresExecutionConfirmation?: boolean;
+  /**
+   * The language the developer writes in, as the request carries it. The project words a section may be offered
+   * (`project-words.ts`) are judged as English words, so a body in another language is offered none — its sections
+   * are planned exactly as before. Absent or unknown is offered them; the writer's own language report decides then.
+   */
+  projectWordLanguage?: string;
 }
 
 export interface PromptEnhancementSectionPlanningResult {
@@ -712,6 +724,38 @@ export function promptEnhancementGuidanceFactRefIdV1(factId: string): string {
   return `guidance_fact:${factId}`;
 }
 
+/**
+ * The project words a section was offered (`project-words.ts`), resolved from the fact its `sharedProjectFactRefs`
+ * names. One lookup for the composer prompt and the compose step, so the words a section is asked for and the words
+ * it may keep cannot drift apart. Undefined for every section that was offered none.
+ */
+export function promptEnhancementSectionProjectWordV1(
+  section: { readonly sharedProjectFactRefs?: readonly string[] },
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
+): PromptEnhancementProjectWordV1 | undefined {
+  const ref = section.sharedProjectFactRefs?.[0];
+  if (ref === undefined) return undefined;
+  const fact = renderedFacts.find((candidate) => promptEnhancementGuidanceFactRefIdV1(candidate.factId) === ref);
+  return fact === undefined ? undefined : promptEnhancementProjectWordForFactV1(fact);
+}
+
+/**
+ * What a section may CITE: its own refs, then the project fact it was offered. One builder for every
+ * reader that has to agree — the composer prompt's allowed list and the draft checks — so a section is
+ * never shown an id that its draft is then refused for citing. With nothing offered this IS
+ * `structuredContentPartRefs`, the same array.
+ */
+export function promptEnhancementSectionCitableRefsV1(section: {
+  readonly structuredContentPartRefs: readonly string[];
+  readonly sharedProjectFactRefs?: readonly string[];
+}): readonly string[] {
+  const shared = (section.sharedProjectFactRefs ?? [])
+    .filter((ref) => !section.structuredContentPartRefs.includes(ref));
+  return shared.length === 0
+    ? section.structuredContentPartRefs
+    : [...section.structuredContentPartRefs, ...shared];
+}
+
 export function planPromptEnhancementSections(
   input: PromptEnhancementSectionPlanningInput,
 ): PromptEnhancementSectionPlanningResult {
@@ -776,17 +820,21 @@ export function planPromptEnhancementSections(
     };
   }
 
-  const sectionPlans = candidateSectionKinds.map((sectionKind, index) =>
-    buildSectionPlan({
-      route,
-      templateId: template.id,
-      sectionKind,
-      order: index + 1,
-      sourceRefs: input.sourceRefs,
-      sourceA,
-      facts,
-      required: template.requiredSections.includes(sectionKind) || sectionKind === 'original_request_or_goal',
-    }),
+  const sectionPlans = withProjectWordHostsV1(
+    candidateSectionKinds.map((sectionKind, index) =>
+      buildSectionPlan({
+        route,
+        templateId: template.id,
+        sectionKind,
+        order: index + 1,
+        sourceRefs: input.sourceRefs,
+        sourceA,
+        facts,
+        required: template.requiredSections.includes(sectionKind) || sectionKind === 'original_request_or_goal',
+      }),
+    ),
+    facts,
+    input.projectWordLanguage,
   );
   const bodyPlan: PromptEnhancementBodyPlanV1 = {
     bodyPlanId: `${route.contractDecision.routeDecisionId}:body-plan`,
@@ -822,6 +870,54 @@ export function planPromptEnhancementSections(
     usesOldDecisionSessionTemplateRecord: false,
     usesPeOnlyClassifier: false,
   };
+}
+
+/**
+ * A project fact another section may name: an env-probe fact (`hard_fact`, the type a probe MOVEMENT is filed under
+ * too) that the applicability gate let through for this prompt and that carries a value.
+ *
+ * ⚠️ Only this lane. Every one of its facts was judged against the prompt by the model before it got here;
+ * prompt-mined facts never are, so they stay in the project-facts section alone. A probe that could not tell
+ * (`stale_or_unknown`) is not offered either — its value is no fact to name.
+ */
+export function isPromptEnhancementSharedProjectFactV1(fact: PromptEnhancementGuidanceFact): boolean {
+  return fact.sourceType === 'hard_fact'
+    && isRenderableFact(fact)
+    && fact.priority !== 'suppressed'
+    && sectionKindForFact(fact) === 'project_grounding_facts'
+    && fact.sourceEvidenceState !== 'stale_or_unknown'
+    && (fact.evidence?.value ?? '').trim().length > 0;
+}
+
+/**
+ * Offers each such fact that has project words (`project-words.ts`) to ONE section: the first planned section whose
+ * kind the fact serves, best kind first, one fact per section. That section's `sharedProjectFactRefs` names the fact;
+ * every other section is exactly what it was, and so is the whole plan when nothing qualifies.
+ *
+ * Never every section: offered to every section, the writer bolted a sentence about the fact onto almost all of them
+ * (measured 2026-10-10). The section is chosen here, from a static list, so the writer is never asked where a fact
+ * might fit — only whether the sentence it is already writing has room for it.
+ */
+function withProjectWordHostsV1(
+  sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  facts: readonly PromptEnhancementGuidanceFact[],
+  language: string | undefined,
+): PromptEnhancementSectionPlanItemV1[] {
+  if (!promptEnhancementProjectWordsLanguageAllowedV1(language)) return [...sectionPlans];
+  const hostRefBySectionId = new Map<string, string>();
+  for (const fact of facts.filter(isPromptEnhancementSharedProjectFactV1)) {
+    const word = promptEnhancementProjectWordForFactV1(fact);
+    if (word === undefined) continue;
+    const host = promptEnhancementProjectWordHostKindsV1(word.kind)
+      .map((kind) => sectionPlans.find((sectionPlan) => sectionPlan.sectionKind === kind && !hostRefBySectionId.has(sectionPlan.sectionId)))
+      .find((sectionPlan) => sectionPlan !== undefined);
+    if (host !== undefined) hostRefBySectionId.set(host.sectionId, promptEnhancementGuidanceFactRefIdV1(fact.factId));
+  }
+  if (hostRefBySectionId.size === 0) return [...sectionPlans];
+  return sectionPlans.map((sectionPlan) => {
+    const ref = hostRefBySectionId.get(sectionPlan.sectionId);
+    return ref === undefined ? sectionPlan : { ...sectionPlan, sharedProjectFactRefs: [ref] };
+  });
 }
 
 function buildSectionPlan(input: {

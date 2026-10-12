@@ -384,11 +384,13 @@ export function validatePromptEnhancementSafety(
         sectionText: section.bodyText.replace(expectedConfirmation, ''),
         // GR-1: a value the BOUNDARY resolved was supplied — by a local probe or
         // the store rather than by the prompt — so it is grounding, not invention.
+        // So is the name a section's kept project words state; only that section carries it.
         allowedTexts: [
           input.currentBody.originalPromptText,
           ...section.sourceFactIds,
           ...section.sourceIds,
           ...(section.groundedFactValues ?? []),
+          ...(section.projectWordValues ?? []),
         ],
       });
       for (const invention of inventions) {
@@ -468,11 +470,15 @@ export function validatePromptEnhancementSafety(
     for (const finding of findPromptEnhancementNounPurposeFindingsV1({
       nounPurposes: input.nounPurposes,
       originalPromptText: input.currentBody.originalPromptText,
-      // The same allowance inputs every other layer uses: what the body was allowed to ground in.
+      // The same allowance inputs every other layer uses: what the body was allowed to ground in —
+      // the names kept project words state included, exactly as the invention gate above counts
+      // them, so a section that kept "in the Next.js app" is not judged unsourced when the
+      // project-facts section itself did not survive.
       groundedTexts: input.currentBody.sections.flatMap((section) => [
         ...section.sourceFactIds,
         ...section.sourceIds,
         ...(section.groundedFactValues ?? []),
+        ...(section.projectWordValues ?? []),
       ]),
     })) {
       failures.push(failure({

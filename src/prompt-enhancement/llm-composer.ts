@@ -1,5 +1,10 @@
 import OpenAI from 'openai';
 import { promptEnhancementSectionModelFactsV1 } from './fact-value-render.js';
+import { promptEnhancementProjectWordDirectiveV1 } from './project-words.js';
+import {
+  promptEnhancementSectionCitableRefsV1,
+  promptEnhancementSectionProjectWordV1,
+} from './templates/section-plan.js';
 import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import type { PromptEnhancementSectionPlanningResult } from './templates/section-plan.js';
 import type { PromptEnhancementStructuredComposerOutputV1 } from './compose-enhancement.js';
@@ -347,6 +352,7 @@ function buildUserPrompt(
     sectionId: string;
     sectionKind: string;
     structuredContentPartRefs: readonly string[];
+    sharedProjectFactRefs?: readonly string[];
     slotObligations?: readonly string[];
   }[],
   // GR-2 step 1: group A3's RESOLVED payload arriving at its consumer. The model
@@ -366,9 +372,16 @@ function buildUserPrompt(
       // real bodies that way). Each obligation has exactly one directive in the composer's
       // second person; the validator still enforces the typed contract behind it unchanged.
       const obligations = section.slotObligations ?? [];
-      const directiveLines = obligations
-        .map((obligation) => promptEnhancementObligationDirectiveV1(obligation))
-        .filter((directive): directive is string => directive !== undefined)
+      // The project words this section was offered (`project-words.ts`) end its list: one line, LAST, so the
+      // section's own purpose and obligations are read first and the writer is asked for nothing but the words.
+      // Every section that was offered none gets exactly the lines it always got.
+      const projectWord = promptEnhancementSectionProjectWordV1(section, renderedFacts);
+      const directiveLines = [
+        ...obligations
+          .map((obligation) => promptEnhancementObligationDirectiveV1(obligation))
+          .filter((directive): directive is string => directive !== undefined),
+        ...(projectWord === undefined ? [] : [promptEnhancementProjectWordDirectiveV1(projectWord)]),
+      ]
         .map((directive) => `\n  - ${directive}`)
         .join('');
       const directiveBlock = directiveLines.length > 0 ? `\n  this section must:${directiveLines}` : '';
@@ -399,7 +412,9 @@ function buildUserPrompt(
       // The purpose is the SAME sentence the relevance vocabulary carries — one map, one meaning
       // — never the raw kind. A kind with no sentence falls back to its words, never its id.
       const purpose = promptEnhancementSectionPurposeV1(section.sectionKind) ?? section.sectionKind.replace(/_/g, ' ');
-      return `- sectionId: ${section.sectionId}\n  purpose: ${purpose}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}${evidenceBlock}${directiveBlock}`;
+      // The section offered a project fact may also cite it; with nothing offered this IS `structuredContentPartRefs`.
+      const allowedSourceFactIds = promptEnhancementSectionCitableRefsV1(section);
+      return `- sectionId: ${section.sectionId}\n  purpose: ${purpose}\n  allowedSourceFactIds: ${JSON.stringify(allowedSourceFactIds)}${evidenceBlock}${directiveBlock}`;
     })
     .join('\n');
   return [

@@ -14,6 +14,7 @@ import { SIGNAL_MAP } from '../../classifier/signals.js';
 import { promptEnhancementSignalMeaningByRefV1 } from '../../prompt-enhancement/source-signal-meaning.js';
 import { ACTIVE_AGENT_ID } from '../../env/agent-capabilities.js';
 import { recordEnvTrajectory, recentEnvChangesV1 } from '../../env/env-trajectory.js';
+import { probeProject } from '../../env/env-probe.js';
 import { recordTranscriptCorroboration } from '../../telemetry/transcript-corroboration.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
@@ -93,7 +94,7 @@ import {
 } from '../../env/env-tier-promotion.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents, type ParamEvent } from '../../telemetry/param-events.js';
-import { getProjectEnvFacts } from '../../store/env-facts.js';
+import { getProjectEnvFacts, isEnvProbeEnabled, setProjectEnvFacts } from '../../store/env-facts.js';
 import { cachedPromptDerivedFactsV1, refreshPromptDerivedFactsIfDueV1 } from '../../prompt-enhancement/prompt-derived-facts-refresh.js';
 import {
   promptHistoryAcceptanceExpectationsV1,
@@ -1226,6 +1227,18 @@ export async function runAuto(
         stageConfidence: mgr.current.stageConfidence,
       });
     } catch { /* trajectory recording is non-fatal */ }
+    // The probe's facts reach prompt enhancement WITHOUT a manual `nexpath env`. That command was the
+    // only writer of the store the enhancement reads, so a project nobody had run it for carried none
+    // of its framework / version control / lockfile / test-runner facts into any popup, although this
+    // very block already probes the project once per session. Same consent, same probe, same store
+    // as the command — under the key the enhancement reads it by — and only when nothing is stored
+    // yet, so facts a user stored themselves are never overwritten.
+    try {
+      if (isEnvProbeEnabled(store.db) && getProjectEnvFacts(store, input.projectRoot) === null) {
+        const probedAt = Date.now();
+        setProjectEnvFacts(store, input.projectRoot, probeProject(input.projectRoot, probedAt).facts, probedAt);
+      }
+    } catch { /* the store is best-effort here, like the trajectory above */ }
   }
   const prevStage: Stage = mgr.current.currentStage;
   logger.debug('session_loaded', { promptCount: mgr.current.promptCount, stage: prevStage, project: input.projectRoot });
