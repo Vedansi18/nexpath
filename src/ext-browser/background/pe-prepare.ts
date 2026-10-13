@@ -29,6 +29,8 @@ import type {
   PromptEnhancementPrepareResultV1,
   PromptEnhancementSourceRefV1,
 } from '../../prompt-enhancement/contracts.js';
+import { promptEnhancementSignalMeaningByRefV1 } from '../../prompt-enhancement/source-signal-meaning.js';
+import { SIGNAL_MAP } from '../../core/classifier/signals.js';
 import type { LogPort } from '../../core/ports/log.port.js';
 import type { UserProfile } from '../../core/classifier/types.js';
 import type { Stage } from '../../core/classifier/types.js';
@@ -193,6 +195,13 @@ export function buildBrowserPeRequest(ctx: BrowserPeContext): PromptEnhancementP
       sourceRefs: [originalPromptRef, triggerRef, ...(contentRef ? [contentRef] : [])],
       triggerSignalEligibilityState: ctx.triggerEligibility,
       normalizedStageAbsenceSignalRefs: absenceSignal ? [absenceSignal] : [],
+      // Same call as the CLI builder: what an absent practice means, for the approved signals only.
+      signalMeaningByRef: promptEnhancementSignalMeaningByRefV1({
+        absenceKey: absenceSignal,
+        absenceDescription: absenceSignal ? SIGNAL_MAP.get(absenceSignal)?.description : undefined,
+        prevStage: ctx.triggerKind === 'stage_transition' ? ctx.prevStage : undefined,
+        currentStage: ctx.triggerKind === 'stage_transition' ? ctx.currentStage : undefined,
+      }),
       contentTemplateRecordFactRefs: content.resolvedRecordIdentity ? [content.resolvedRecordIdentity] : [],
       popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
       whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],

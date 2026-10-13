@@ -26,8 +26,11 @@ vi.mock('./pe-engine.js', async (importOriginal) => {
 });
 
 import type { LogPort } from '../../core/ports/log.port.js';
+import { SIGNAL_MAP } from '../../core/classifier/signals.js';
 import {
+  applyPromptEnhancementAction,
   isPromptEnhancementSequenceShapedTextV1,
+  refreshEngineKeyEnv,
   validatePromptEnhancementPrepareRequestV1,
 } from './pe-engine.js';
 import {
@@ -218,5 +221,109 @@ describe('sequence-shape gate seam (drives the SW blocked-exit fallback)', () =>
   it('a multi-step sequence prompt is sequence-shaped; a one-liner is not', () => {
     expect(isPromptEnhancementSequenceShapedTextV1(SEQUENCE_PROMPT)).toBe(true);
     expect(isPromptEnhancementSequenceShapedTextV1('fix the typo in the readme')).toBe(false);
+  });
+});
+
+describe('signalMeaningByRef — what an absent practice means (same call as the CLI builder)', () => {
+  const APPROVED = ['feature_scope_before_build', 'idea_scoping', 'implementation_checkpoint', 'incremental_build', 'spec_before_code', 'user_feedback_review'];
+  const absenceCtx = (signal: string) => fireCtx({
+    effectiveFlagType: `absence:${signal}`,
+    firedKey: `absence:${signal}@implementation`,
+  });
+
+  it('an approved signal carries its description on the request, which the validator accepts', () => {
+    for (const signal of APPROVED) {
+      const req = buildBrowserPeRequest(absenceCtx(signal));
+      expect(req.sourceSignals.signalMeaningByRef?.[`absence:${signal}`], signal).toBe(SIGNAL_MAP.get(signal)?.description);
+      const v = validatePromptEnhancementPrepareRequestV1(req);
+      expect(v.ok, `${signal}: ${v.ok ? '' : v.reasonCodes.join(', ')}`).toBe(true);
+    }
+  });
+
+  it('a body no model worded is byte-identical with or without the field — for every signal, approved or not', async () => {
+    const strip = (r: ReturnType<typeof buildBrowserPeRequest>) => {
+      const { signalMeaningByRef: _drop, ...rest } = r.sourceSignals;
+      return { ...r, sourceSignals: rest } as typeof r;
+    };
+    for (const signal of [...SIGNAL_MAP.keys()]) {
+      const withField = await prepareBrowserPe(buildBrowserPeRequest(absenceCtx(signal)));
+      const without = await prepareBrowserPe(strip(buildBrowserPeRequest(absenceCtx(signal))));
+      expect(withField.safeFallback, signal).toBe(without.safeFallback);
+      if (withField.safeFallback || without.safeFallback) continue;
+      expect(withField.result.uiView.body.text, signal).toBe(without.result.uiView.body.text);
+    }
+  });
+
+  it('a popup action re-composes without the description, so Shorter / More project-grounded read as they always did', async () => {
+    for (const signal of APPROVED) {
+      const req = buildBrowserPeRequest(absenceCtx(signal));
+      const { signalMeaningByRef: _drop, ...rest } = req.sourceSignals;
+      const bare = { ...req, sourceSignals: rest } as typeof req;
+      const base = await prepareBrowserPe(req);
+      expect(base.safeFallback, signal).toBe(false);
+      if (base.safeFallback) continue;
+      for (const actionType of ['shorter', 'more_thorough', 'more_project_grounded']) {
+        const entry = base.result.availableActions.find((a) => a.actionType === actionType);
+        if (!entry) continue;
+        const act = (r: typeof req) => applyPromptEnhancementAction({
+          ...r,
+          action: entry,
+          currentBodyBinding: {
+            currentBodyId: base.result.currentBody.currentBodyId,
+            bodyRevision: base.result.currentBody.bodyRevision,
+            validationDecisionId: base.result.validationDecisionId,
+            editedBodyText: base.result.currentBody.text,
+            actionSubmittedAtMs: 2,
+            realUserInitiated: true,
+            sectionSpanEditEvents: [],
+          },
+        } as never);
+        const withField = await act(req);
+        const without = await act(bare);
+        expect(withField.currentBody.text, `${signal}/${actionType}`).toBe(without.currentBody.text);
+        expect(withField.currentBody.text, `${signal}/${actionType}`).not.toContain('means:');
+      }
+    }
+  });
+
+  it('the writer IS still sent the description for an approved signal, and nothing extra for any other', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      sent.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({
+        id: 'x', object: 'chat.completion', created: 0, model: 'm',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '' } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    refreshEngineKeyEnv(`sk-${'x'.repeat(40)}`);
+    try {
+      await prepareBrowserPe(buildBrowserPeRequest(absenceCtx('spec_before_code')));
+      expect(sent.some((body) => body.includes('spec before code means: Writing the behavior spec'))).toBe(true);
+      sent.length = 0;
+      await prepareBrowserPe(buildBrowserPeRequest(absenceCtx('tests_before_merge')));
+      expect(sent.some((body) => body.includes('means:'))).toBe(false);
+    } finally {
+      refreshEngineKeyEnv(null);
+    }
+  });
+
+  it('a stage-change popup comes out byte-identical with or without the field (no stage line is approved)', async () => {
+    const stages = ['idea', 'prd', 'architecture', 'task_breakdown', 'implementation', 'review_testing', 'release', 'feedback_loop'] as const;
+    for (const to of stages) {
+      const ctx = fireCtx({
+        triggerKind: 'stage_transition',
+        effectiveFlagType: 'stage_transition',
+        firedKey: `stage_transition:idea→${to}`,
+        currentStage: to,
+        prevStage: 'idea',
+      });
+      const req = buildBrowserPeRequest(ctx);
+      const { signalMeaningByRef: _drop, ...rest } = req.sourceSignals;
+      const withField = await prepareBrowserPe(req);
+      const without = await prepareBrowserPe({ ...req, sourceSignals: rest } as typeof req);
+      expect(withField.safeFallback, to).toBe(without.safeFallback);
+      if (withField.safeFallback || without.safeFallback) continue;
+      expect(withField.result.uiView.body.text, to).toBe(without.result.uiView.body.text);
+    }
   });
 });

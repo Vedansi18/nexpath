@@ -11,6 +11,7 @@ import {
   PROMPT_ENHANCEMENT_STAGE_ADVICE_V1,
   promptEnhancementAbsenceEvidenceValueV1,
   promptEnhancementMeaningKeepsAuthorityV1,
+  promptEnhancementPlanningWithoutSignalMeaningV1,
   promptEnhancementSignalMeaningByRefV1,
   promptEnhancementStageEvidenceValueV1,
 } from './source-signal-meaning.js';
@@ -184,6 +185,18 @@ describe('4. the map a caller puts on the request', () => {
   });
 });
 
+describe('5a. no_backup_safety stays off the list', () => {
+  it('keeps the wording it has today: its description produced a reversed and an invented draft in a measured run', () => {
+    expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.has('no_backup_safety')).toBe(false);
+    const map = promptEnhancementSignalMeaningByRefV1({
+      absenceKey: 'no_backup_safety',
+      absenceDescription: 'The project has no backup / safety net — stand up a backup and prove recovery.',
+    });
+    expect(evidenceOf(request(absenceTrigger('no_backup_safety'), { signalMeaningByRef: map }), 'absence_signal'))
+      .toEqual({ key: 'no_backup_safety', value: ORIGINAL_ABSENCE });
+  });
+});
+
 describe('5. through the fact builder', () => {
   it('carries an approved meaning when the field is present, and never touches the key', () => {
     const map = promptEnhancementSignalMeaningByRefV1({ absenceKey: APPROVED, absenceDescription: 'Recapping session context' });
@@ -193,7 +206,7 @@ describe('5. through the fact builder', () => {
 
   it('keeps context_loss off the list: its own description was applied to a product flow on staging', () => {
     expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.has('context_loss')).toBe(false);
-    expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.size).toBe(7);
+    expect(PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1.size).toBe(6);
     const map = promptEnhancementSignalMeaningByRefV1({ absenceKey: 'context_loss', absenceDescription: 'Recapping or re-anchoring session context in a long session' });
     expect(evidenceOf(request(absenceTrigger('context_loss'), { signalMeaningByRef: map }), 'absence_signal'))
       .toEqual({ key: 'context_loss', value: ORIGINAL_ABSENCE });
@@ -231,5 +244,42 @@ describe('5. through the fact builder', () => {
     const map = { [promptEnhancementAbsenceSignalKeyV1('spec_before_code')]: 'x' };
     expect(evidenceOf(request(absenceTrigger(APPROVED), { signalMeaningByRef: map }), 'absence_signal')?.value)
       .toBe(ORIGINAL_ABSENCE);
+  });
+});
+
+describe('4. for the writer only — a body no model worded is built without the description', () => {
+  const MEANING = 'User has not articulated what they are building clearly.';
+  const factsOf = (req: Request) => ({ renderedFacts: buildPromptEnhancementGuidanceFactsV1(req) });
+  const map = { [promptEnhancementAbsenceSignalKeyV1(APPROVED)]: MEANING };
+
+  it('takes the description back out and leaves exactly the value the fact had without it', () => {
+    const withMeaning = factsOf(request(absenceTrigger(APPROVED), { signalMeaningByRef: map }));
+    const without = factsOf(request(absenceTrigger(APPROVED)));
+    expect(JSON.stringify(withMeaning)).toContain('means:');
+    expect(promptEnhancementPlanningWithoutSignalMeaningV1(withMeaning)).toEqual(without);
+  });
+
+  it('returns the SAME object when no fact carries a description', () => {
+    const plain = factsOf(request(absenceTrigger(APPROVED)));
+    expect(promptEnhancementPlanningWithoutSignalMeaningV1(plain)).toBe(plain);
+    const none = { renderedFacts: undefined };
+    expect(promptEnhancementPlanningWithoutSignalMeaningV1(none)).toBe(none);
+  });
+
+  it('leaves every other fact, and every other field of the plan, as it was', () => {
+    const withMeaning = { ...factsOf(request(absenceTrigger(APPROVED), { signalMeaningByRef: map })), marker: 'kept' };
+    const stripped = promptEnhancementPlanningWithoutSignalMeaningV1(withMeaning);
+    expect(stripped.marker).toBe('kept');
+    expect(stripped.renderedFacts.length).toBe(withMeaning.renderedFacts.length);
+    const changed = stripped.renderedFacts.filter((fact, i) => fact !== withMeaning.renderedFacts[i]);
+    expect(changed.length).toBe(1);
+    expect(changed[0]?.sourceType).toBe('absence_signal');
+  });
+
+  it('does not mutate what it was given', () => {
+    const withMeaning = factsOf(request(absenceTrigger(APPROVED), { signalMeaningByRef: map }));
+    const before = JSON.stringify(withMeaning);
+    promptEnhancementPlanningWithoutSignalMeaningV1(withMeaning);
+    expect(JSON.stringify(withMeaning)).toBe(before);
   });
 });

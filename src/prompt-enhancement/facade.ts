@@ -45,6 +45,7 @@ import {
 } from './safety-sendability.js';
 import { isPromptEnhancementTypedSensitiveActionVerdictV1 } from './sensitive-action-clearance.js';
 import { promptHistorySensitiveActionFactPresentV1 } from './prompt-history-signals.js';
+import { promptEnhancementPlanningWithoutSignalMeaningV1 } from './source-signal-meaning.js';
 import {
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
@@ -408,6 +409,10 @@ async function prepare(
     prunedSectionIds: pruned.droppedSectionIds,
     floorSectionCount: pruned.floorSectionCount,
   };
+  // A signal's description is wording FOR the model. A body no model worded is built from the same facts
+  // without it — the deterministic sentence would print it as a finding about the user's project. The same
+  // object comes back when no fact carries a description, so every other prepare is untouched.
+  const planningWithoutMeaning = promptEnhancementPlanningWithoutSignalMeaningV1(planning);
   // A drafted section that the cap still dropped must take its CLAIM with it — the claims union is
   // validated output-wide, so leaving it behind would reject every surviving draft too.
   structuredComposerOutput = promptEnhancementComposerOutputForSurvivingSectionsV1(
@@ -437,6 +442,8 @@ async function prepare(
   };
   let composed = composePromptEnhancementBody({
     ...composeInput,
+    // No composer output = no model wording (no key, a popup action, a failed call): build it without the description.
+    sectionPlanningResult: structuredComposerOutput === undefined ? planningWithoutMeaning : planning,
     composerRuntimeState,
     structuredComposerOutput,
   });
@@ -492,6 +499,7 @@ async function prepare(
   ) {
     const recomposed = composePromptEnhancementBody({
       ...composeInput,
+      sectionPlanningResult: planningWithoutMeaning,
       composerRuntimeState: 'accepted_structured_output',
       structuredComposerOutput: { ...structuredComposerOutput, sectionDrafts: [] },
     });

@@ -11,14 +11,20 @@
  * The signal's KEY is never changed here: the naming check, its single retry and the discard rule all
  * key on it. The spaced name is carried inside the value, which is the form that check looks for.
  *
- * FAIL-CLOSED ON AUTHORITY. A meaning is evidence for the writer and, on the no-key path, a body
- * sentence of its own. A practice described as an instruction ("apply the migration pattern") can make
- * that sentence read as an execute request or as an authority escalation that the bare signal name
- * never did — and an escalation makes the body non-sendable. So every meaning is checked with the
- * product's own scanners against the strictest request shape (a plan/review prompt), and one that
- * introduces either verdict is dropped: the value then stays exactly what it is today.
+ * FAIL-CLOSED ON AUTHORITY. A meaning is evidence for the writer. A practice described as an
+ * instruction ("apply the migration pattern") can make the sentence that carries it read as an execute
+ * request or as an authority escalation that the bare signal name never did — and an escalation makes
+ * the body non-sendable. So every meaning is checked with the product's own scanners against the
+ * strictest request shape (a plan/review prompt), and one that introduces either verdict is dropped:
+ * the value then stays exactly what it is today.
+ *
+ * FOR THE WRITER ONLY. Some descriptions are written as findings ("The project has no backup / safety
+ * net"). A model words that as advice; the deterministic renderer would print it as a fact about the
+ * user's project. So a body that no model worded — no key, a popup action, a failed or refused draft —
+ * is built from the facts without the description (`promptEnhancementPlanningWithoutSignalMeaningV1`).
  */
 
+import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import {
   promptEnhancementAuthorityModeForTextV1,
   promptEnhancementGeneratedEscalatesAuthorityV1,
@@ -34,9 +40,15 @@ import {
  * second person). Their descriptions are the cause, and their weakness is NOT mechanically detectable — a length or
  * polarity rule passes all three. So the gate is an explicit list, and it is fail-closed.
  *
- * HOW A KEY GETS ON IT. Only by being read and judged fit, and — for these seven — by having produced no wrong draft
+ * HOW A KEY GETS ON IT. Only by being read and judged fit, and — for these six — by having produced no wrong draft
  * in a measured run. The list is content, so extending it is a product decision; this seed is what the evidence
  * supports today.
+ *
+ * WHY `no_backup_safety` IS NOT ON IT (measured in a browser-shaped run, 17 drafts shown). One draft reversed the
+ * practice — "ensure my dashboard is deployed without safety nets" — and one invented a constraint — "even though the
+ * current project doesn't allow for it". Its description reads as a finding about the project ("The project has no
+ * backup / safety net") followed by an instruction, which is the shape that invites both. It keeps today's wording
+ * until the description is rewritten and re-measured.
  *
  * WHY `context_loss` IS NOT ON IT (measured in a simulation run). On a session about a cancellation policy
  * the writer took its description ("recapping or re-anchoring session context") and applied it to the product — "the
@@ -48,7 +60,6 @@ export const PROMPT_ENHANCEMENT_APPROVED_MEANING_SIGNALS_V1: ReadonlySet<string>
   'idea_scoping',
   'implementation_checkpoint',
   'incremental_build',
-  'no_backup_safety',
   'spec_before_code',
   'user_feedback_review',
 ]);
@@ -169,4 +180,33 @@ export function promptEnhancementSignalMeaningByRefV1(input: {
   const advice = input.currentStage ? PROMPT_ENHANCEMENT_STAGE_ADVICE_V1[input.currentStage] : undefined;
   if (input.currentStage && advice) out[`stage:${input.prevStage ?? 'unknown'}-to-${input.currentStage}`] = advice;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** The marker that sits between a fact's bare value and the description appended to it. */
+const meaningMarker = (evidenceKey: string): string =>
+  evidenceKey === 'stage' ? '; at this stage: ' : `; ${plainName(evidenceKey)} means: `;
+
+/**
+ * A plan's facts with every signal description taken back out. Pure. Returns the SAME object when no fact
+ * carries one, so a caller with nothing to strip is untouched.
+ *
+ * The description is wording for the model (see the header). The text it leaves behind is exactly the value
+ * the fact had before the description was added, because the description is only ever appended after a fixed
+ * marker.
+ */
+export function promptEnhancementPlanningWithoutSignalMeaningV1<
+  P extends { readonly renderedFacts?: readonly PromptEnhancementGuidanceFact[] },
+>(planning: P): P {
+  const facts = planning.renderedFacts;
+  if (facts === undefined) return planning;
+  let changed = false;
+  const next = facts.map((fact) => {
+    const evidence = fact.evidence;
+    if (evidence === undefined) return fact;
+    const at = evidence.value.indexOf(meaningMarker(evidence.key));
+    if (at < 0) return fact;
+    changed = true;
+    return { ...fact, evidence: { ...evidence, value: evidence.value.slice(0, at) } };
+  });
+  return changed ? { ...planning, renderedFacts: next } : planning;
 }
