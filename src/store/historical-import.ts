@@ -51,14 +51,19 @@ const CLAUDE_AGENT_ID = 'claude-code';
 /** One prompt about to be imported, from any source. */
 type CollectedEntry = { text: string; capturedAt?: number; fileMtime: number; agent: string };
 
+/** The user's answer, per editor, to "may NexPath read your AI chat history?". */
+export type OtherAgentConsent = { cursor?: boolean; devin?: boolean };
+
 export interface HistoryImportOptions {
   /** The prompt being processed right now. It is stored live, so it is never also imported. */
   livePrompt?: string;
   /**
    * Whether the user allowed NexPath to read each editor's AI chat history. Absent or false
    * means not allowed: that editor's history is not read. Claude Code history is unaffected.
+   * Given as a function, it is called only when an import actually runs (a project's first
+   * prompt), never on the prompts that follow; if it throws, no editor history is read.
    */
-  otherAgentConsent?: { cursor?: boolean; devin?: boolean };
+  otherAgentConsent?: OtherAgentConsent | (() => OtherAgentConsent);
   /** Injectable readers and clock, for tests. */
   readCursor?: (projectRoot: string) => HistorySourceResult;
   readDevin?: (projectRoot: string) => Promise<HistorySourceResult>;
@@ -70,9 +75,29 @@ export interface HistoryImportSummary {
   imported: number;
   /** Of those, rows from editors other than Claude Code (Cursor, Devin Local). */
   fromOtherAgents: number;
+  /**
+   * True when this import created the project's session, and from Cursor or Devin Local history
+   * alone. Without that history no import would have run, so the session would have started
+   * empty on this prompt; `runAuto` uses this to keep what an empty session's first prompt does.
+   */
+  seededFromOtherAgentsOnly: boolean;
 }
 
-const NOTHING_IMPORTED: HistoryImportSummary = Object.freeze({ imported: 0, fromOtherAgents: 0 });
+const NOTHING_IMPORTED: HistoryImportSummary = Object.freeze({ imported: 0, fromOtherAgents: 0, seededFromOtherAgentsOnly: false });
+
+/**
+ * Whether a session is already persisted for the project: the same test
+ * `SessionStateManager.bootstrapFromHistory` makes before it seeds one.
+ */
+function hasPersistedSession(store: Store, projectRoot: string): boolean {
+  const row = store.db.exec('SELECT state_json FROM session_states WHERE project_root = ?', [projectRoot])[0]?.values[0];
+  if (!row) return false;
+  try {
+    return Boolean(JSON.parse(row[0] as string));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Claude Code's transcripts for the project: up to IMPORT_CAP user prompts, newest session
@@ -158,9 +183,19 @@ async function readSource(
   }
 }
 
+/** The consent answer, read now; an answer that cannot be read means not allowed. */
+function resolveConsent(given: HistoryImportOptions['otherAgentConsent']): OtherAgentConsent {
+  if (typeof given !== 'function') return given ?? {};
+  try {
+    return given();
+  } catch {
+    return {};
+  }
+}
+
 /** Cursor's and Devin Local's history for the project — only for the editors the user allowed. */
 async function collectOtherAgentHistory(projectRoot: string, options: HistoryImportOptions): Promise<HistoryEntry[]> {
-  const consent = options.otherAgentConsent ?? {};
+  const consent = resolveConsent(options.otherAgentConsent);
   const found: HistoryEntry[] = [];
   if (consent.cursor === true) {
     found.push(...(await readSource(CURSOR_AGENT_ID, () => (options.readCursor ?? readCursorHistory)(projectRoot))));
@@ -264,10 +299,13 @@ export async function importHistoricalPrompts(
     classifiedStage: null,
     confidence:      null,
   }));
+  const seedsSession = !hasPersistedSession(store, projectRoot);
   SessionStateManager.bootstrapFromHistory(store, projectRoot, promptRecords, collected.length);
 
+  const fromOtherAgents = chronological.filter((entry) => entry.agent !== CLAUDE_AGENT_ID).length;
   return {
     imported: chronological.length,
-    fromOtherAgents: chronological.filter((entry) => entry.agent !== CLAUDE_AGENT_ID).length,
+    fromOtherAgents,
+    seededFromOtherAgentsOnly: seedsSession && fromOtherAgents > 0 && fromOtherAgents === chronological.length,
   };
 }

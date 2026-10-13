@@ -1189,12 +1189,13 @@ export async function runAuto(
   // their very first prompt — losing old history is bad, losing the current one is
   // worse. Failure is logged and the pipeline continues.
   // Cursor's and Devin Local's history is read only for editors whose user allowed NexPath to
-  // read their AI chat history; the live prompt is passed so it is never imported twice.
+  // read their AI chat history (asked only when the import runs); the live prompt is passed so
+  // it is never imported twice.
   let historyImport: HistoryImportSummary | undefined;
   try {
     historyImport = await importHistoricalPrompts(store, input.projectRoot, {
       livePrompt: input.promptText,
-      otherAgentConsent: readChatHistoryConsent(),
+      otherAgentConsent: readChatHistoryConsent,
     });
   } catch (err) {
     logger.warn('historical_import_failed', {
@@ -1216,14 +1217,14 @@ export async function runAuto(
   // Once per session (first prompt): record the dev-environment trajectory — probe the project's
   // env facts, and emit a flap-damped change event if a fact moved since the last confirmed probe
   // (e.g. version control added). Consent-gated + best-effort; never blocks the pipeline.
-  // A prompt that just imported Cursor or Devin Local history starts its session already
-  // counted, so the probe runs on that prompt too — otherwise those projects would go without
-  // their environment facts for the whole first session.
-  if (mgr.current.promptCount === 0 || (historyImport?.fromOtherAgents ?? 0) > 0) {
+  // A session the import just created from Cursor or Devin Local history alone would have started
+  // empty here without that history, so the probe runs as it did then, at an empty session's index.
+  const seededFromOtherAgentsOnly = historyImport?.seededFromOtherAgentsOnly === true;
+  if (mgr.current.promptCount === 0 || seededFromOtherAgentsOnly) {
     try {
       recordEnvTrajectory(store, input.projectRoot, {
         sessionId:       mgr.current.sessionId,
-        promptIndex:     mgr.current.promptCount,
+        promptIndex:     seededFromOtherAgentsOnly ? 0 : mgr.current.promptCount,
         stage:           mgr.current.currentStage,
         stageConfidence: mgr.current.stageConfidence,
       });
