@@ -31,7 +31,8 @@ import { getConfig } from '../../store/config.js';
 import { buildPromptEnhancementSettingsControlV1 } from '../shared/pe-settings-control.js';
 import { getProject, upsertProject } from '../../store/projects.js';
 import { getRecentPrompts } from '../../store/prompts.js';
-import { importHistoricalPrompts } from '../../store/historical-import.js';
+import { importHistoricalPrompts, type HistoryImportSummary } from '../../store/historical-import.js';
+import { readChatHistoryConsent } from './chat-history-consent.js';
 import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
 import { isUsableLlmCredential } from '../../config/credential-shape.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
@@ -1187,8 +1188,15 @@ export async function runAuto(
   // uncaught throw here would cost the user their live prompt AND fail the hook on
   // their very first prompt — losing old history is bad, losing the current one is
   // worse. Failure is logged and the pipeline continues.
+  // Cursor's and Devin Local's history is read only for editors whose user allowed NexPath to
+  // read their AI chat history (asked only when the import runs); the live prompt is passed so
+  // it is never imported twice.
+  let historyImport: HistoryImportSummary | undefined;
   try {
-    await importHistoricalPrompts(store, input.projectRoot);
+    historyImport = await importHistoricalPrompts(store, input.projectRoot, {
+      livePrompt: input.promptText,
+      otherAgentConsent: readChatHistoryConsent,
+    });
   } catch (err) {
     logger.warn('historical_import_failed', {
       project: input.projectRoot,
@@ -1209,11 +1217,14 @@ export async function runAuto(
   // Once per session (first prompt): record the dev-environment trajectory — probe the project's
   // env facts, and emit a flap-damped change event if a fact moved since the last confirmed probe
   // (e.g. version control added). Consent-gated + best-effort; never blocks the pipeline.
-  if (mgr.current.promptCount === 0) {
+  // A session the import just created from Cursor or Devin Local history alone would have started
+  // empty here without that history, so the probe runs as it did then, at an empty session's index.
+  const seededFromOtherAgentsOnly = historyImport?.seededFromOtherAgentsOnly === true;
+  if (mgr.current.promptCount === 0 || seededFromOtherAgentsOnly) {
     try {
       recordEnvTrajectory(store, input.projectRoot, {
         sessionId:       mgr.current.sessionId,
-        promptIndex:     mgr.current.promptCount,
+        promptIndex:     seededFromOtherAgentsOnly ? 0 : mgr.current.promptCount,
         stage:           mgr.current.currentStage,
         stageConfidence: mgr.current.stageConfidence,
       });
